@@ -1,0 +1,40 @@
+package event
+
+import (
+	"fmt"
+	"time"
+)
+
+type EventType string
+
+const (
+	EventLoopStart     EventType = "loop_start"
+	EventLoopEnd       EventType = "loop_end"
+	EventModelStart    EventType = "model_start"
+	EventModelChunk    EventType = "model_chunk"
+	EventModelEnd      EventType = "model_end"
+	EventToolStart     EventType = "tool_start"
+	EventToolEnd       EventType = "tool_end"
+	EventIterationEnd  EventType = "iteration_end"
+	EventError         EventType = "error"
+)
+
+// Event 只做观察（含流式 chunk），不用于修改状态——修改状态是 Hook 的职责。
+type Event struct {
+	Type      EventType
+	Timestamp time.Time
+	Iteration int
+	Data      any
+}
+
+func (e Event) String() string {
+	if e.Data == nil {
+		return fmt.Sprintf("[%s] iter=%d", e.Type, e.Iteration)
+	}
+	return fmt.Sprintf("[%s] iter=%d data=%v", e.Type, e.Iteration, e.Data)
+}
+
+type OnEvent func(Event)
+
+// Noop 供无事件消费时使用。
+func Noop(Event) {}
