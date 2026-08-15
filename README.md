@@ -123,6 +123,7 @@ endHook（无论成败都执行，连接清理等）
 - **工具错误不终止 loop**：错误结果回传模型供其自纠；只有 hook 报错或 `ActionAbort` 才终止
 - **Hook 标准防护**：panic 恢复为带 hook 名与阶段的 error，单个扩展崩溃不会炸掉 loop
 - **Event 与 Hook 分离**：`OnEvent` 回调实时观察（含流式 chunk），只读不写；改状态是 Hook 的职责
+- **自定义事件**：任何 hook 都能通过 `state.EmitEvent("ns.type", data)` 向 OnEvent 推送自己的事件（类型建议加命名空间前缀，如 `approve.denied`），时间戳与迭代号自动补全
 
 ## 三维扩展体系
 

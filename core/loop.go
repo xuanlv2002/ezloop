@@ -22,6 +22,7 @@ func (a *Agent) Run(ctx context.Context, input string, runOpts ...RunOption) (st
 		MaxIterations: a.maxIterations,
 		Metadata:      make(map[string]any),
 		StartedAt:     time.Now(),
+		Emitter:       a.onEvent,
 	}
 	// 先挂 tool warp，再注册静态工具，保证两者都会被包装。
 	if len(a.toolWarps) > 0 {
