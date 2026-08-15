@@ -1,10 +1,11 @@
 // 一个真实的最小 agent：OpenAI 兼容接口 + 多轮对话 + 一个时间工具 + 流式输出。
 //
 // 配置（环境变量，均可选，有默认值）：
-//   OPENAI_BASE_URL  默认 https://api.openai.com/v1（可指向 DeepSeek/Ollama 等）
-//   OPENAI_API_KEY   必填
-//     Windows:   set OPENAI_API_KEY=sk-xxx
-//   EZLOOP_MODEL     默认 gpt-4o-mini
+//
+//	OPENAI_BASE_URL  默认 https://api.openai.com/v1（可指向 DeepSeek/Ollama 等）
+//	OPENAI_API_KEY   必填
+//	  Windows:   set OPENAI_API_KEY=sk-xxx
+//	EZLOOP_MODEL     默认 gpt-4o-mini
 //
 // 运行：go run ./examples/chat
 package main
@@ -46,15 +47,16 @@ func env(key, def string) string {
 
 func main() {
 	apiKey := os.Getenv("OPENAI_API_KEY")
+
 	if apiKey == "" {
 		fmt.Println("请先设置 OPENAI_API_KEY（或修改代码里的 BaseURL 指向本地 Ollama 等）")
 		os.Exit(1)
 	}
 
 	p := openai.New(openai.Options{
-		BaseURL: env("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+		BaseURL: env("OPENAI_BASE_URL", "https://api.siliconflow.cn/v1"),
 		APIKey:  apiKey,
-		Model:   env("EZLOOP_MODEL", "gpt-4o-mini"),
+		Model:   env("EZLOOP_MODEL", "deepseek-ai/DeepSeek-V3.2"),
 	})
 
 	agent := core.NewAgent(p,
