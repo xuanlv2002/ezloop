@@ -27,6 +27,7 @@ type Agent struct {
 	toolWarps     []types.ToolWarpHandler
 	maxIterations int
 	onEvent       event.OnEvent
+	systemPrompt  string
 }
 
 type Option func(*Agent)
@@ -78,6 +79,23 @@ func WithMaxIterations(n int) Option {
 
 func WithOnEvent(fn event.OnEvent) Option {
 	return func(a *Agent) { a.onEvent = fn }
+}
+
+// WithSystemPrompt 设置 agent 级系统提示词（人格、规则等），
+// 位于消息序列最前。会话级动态注入用 skill hook 或 WithHistory。
+func WithSystemPrompt(prompt string) Option {
+	return func(a *Agent) { a.systemPrompt = prompt }
+}
+
+// RunOption 是单次 Run 的定制项。
+type RunOption func(*types.LoopState)
+
+// WithHistory 携带历史对话消息（多轮会话延续），
+// 历史位于本次 input 之前、system 提示词之后。
+func WithHistory(messages ...types.Message) RunOption {
+	return func(state *types.LoopState) {
+		state.Messages = append(state.Messages, messages...)
+	}
 }
 
 // WithStreaming 启用后，Provider 若实现 StreamProvider 则走流式，

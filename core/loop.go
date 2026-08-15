@@ -13,7 +13,9 @@ import (
 
 // Run 驱动整个 loop：model ↔ tool 循环，直到模型不再发起 tool call、
 // 达到 MaxIterations、hook 置 Stop 或出错。EndHook 无论成败都会执行。
-func (a *Agent) Run(ctx context.Context, input string) (state *types.LoopState, err error) {
+// 消息序列构造顺序：system 提示词 → WithHistory 历史 → 本次 input，
+// 随后 startHook 可继续注入（如 skill）。
+func (a *Agent) Run(ctx context.Context, input string, runOpts ...RunOption) (state *types.LoopState, err error) {
 	state = &types.LoopState{
 		Input:         input,
 		Tools:         types.NewToolRegistry(),
@@ -29,6 +31,15 @@ func (a *Agent) Run(ctx context.Context, input string) (state *types.LoopState, 
 	}
 	for _, t := range a.tools {
 		state.Tools.Register(t)
+	}
+	if a.systemPrompt != "" {
+		state.Messages = append([]types.Message{{
+			Role:    types.RoleSystem,
+			Content: a.systemPrompt,
+		}}, state.Messages...)
+	}
+	for _, opt := range runOpts {
+		opt(state)
 	}
 	a.emit(state, event.EventLoopStart, input)
 
@@ -48,7 +59,7 @@ func (a *Agent) Run(ctx context.Context, input string) (state *types.LoopState, 
 	state.AppendMessage(types.Message{Role: types.RoleUser, Content: input})
 
 	for _, h := range a.startHooks {
-		if err = h.OnStart(ctx, state); err != nil {
+		if err = a.runHook(h, "OnStart", func() error { return h.OnStart(ctx, state) }); err != nil {
 			return state, a.fail(state, err)
 		}
 	}
@@ -57,7 +68,7 @@ func (a *Agent) Run(ctx context.Context, input string) (state *types.LoopState, 
 		state.Iteration++
 
 		for _, h := range a.modelStartHooks {
-			if err = h.OnModelStart(ctx, state); err != nil {
+			if err = a.runHook(h, "OnModelStart", func() error { return h.OnModelStart(ctx, state) }); err != nil {
 				return state, a.fail(state, err)
 			}
 		}
@@ -79,7 +90,7 @@ func (a *Agent) Run(ctx context.Context, input string) (state *types.LoopState, 
 		a.emit(state, event.EventModelEnd, resp)
 
 		for _, h := range a.modelEndHooks {
-			if err = h.OnModelEnd(ctx, state); err != nil {
+			if err = a.runHook(h, "OnModelEnd", func() error { return h.OnModelEnd(ctx, state) }); err != nil {
 				return state, a.fail(state, err)
 			}
 		}
@@ -109,7 +120,7 @@ func (a *Agent) Run(ctx context.Context, input string) (state *types.LoopState, 
 		}
 
 		for _, h := range a.loopHooks {
-			if err = h.OnLoop(ctx, state); err != nil {
+			if err = a.runHook(h, "OnLoop", func() error { return h.OnLoop(ctx, state) }); err != nil {
 				return state, a.fail(state, err)
 			}
 		}
@@ -134,7 +145,7 @@ func (a *Agent) execToolCall(ctx context.Context, state *types.LoopState, call *
 
 	skipped := false
 	for _, h := range a.toolStartHooks {
-		action, herr := h.OnToolStart(ctx, state, call)
+		action, herr := a.runToolStartHook(h, ctx, state, call)
 		if herr != nil {
 			return false, herr
 		}
@@ -149,7 +160,8 @@ func (a *Agent) execToolCall(ctx context.Context, state *types.LoopState, call *
 	result := &types.ToolResult{CallID: call.ID, Name: call.Name}
 	switch {
 	case skipped:
-		result.Content = "skipped by tool-start hook"
+		// 携带调用信息，模型在下一轮次可准确重发同样的调用（轮次式审批场景）。
+		result.Content = fmt.Sprintf("skipped by tool-start hook: %s(%s)", call.Name, string(call.Args))
 	default:
 		tool, lerr := state.Tools.Lookup(call.Name)
 		if lerr != nil {
@@ -176,7 +188,7 @@ func (a *Agent) execToolCall(ctx context.Context, state *types.LoopState, call *
 	})
 
 	for _, h := range a.toolEndHooks {
-		if herr := h.OnToolEnd(ctx, state, result); herr != nil {
+		if herr := a.runHook(h, "OnToolEnd", func() error { return h.OnToolEnd(ctx, state, result) }); herr != nil {
 			return false, herr
 		}
 	}
@@ -201,12 +213,39 @@ func (a *Agent) callModel(ctx context.Context, state *types.LoopState) (*types.M
 
 func (a *Agent) runEndHooks(ctx context.Context, state *types.LoopState) error {
 	for _, h := range a.endHooks {
-		if err := h.OnEnd(ctx, state); err != nil {
-			a.emit(state, event.EventError, fmt.Errorf("end hook %s: %w", h.Name(), err))
+		if err := a.runHook(h, "OnEnd", func() error { return h.OnEnd(ctx, state) }); err != nil {
+			a.emit(state, event.EventError, err)
 			return err
 		}
 	}
 	return nil
+}
+
+// runHook 是引擎对每次 hook 调用的标准包裹：
+// panic 恢复为 error，error 附带 hook 名，单个扩展的崩溃不会炸掉 loop。
+func (a *Agent) runHook(h hook.Hook, phase string, fn func() error) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("hook %q panicked in %s: %v", h.Name(), phase, r)
+		}
+	}()
+	if err := fn(); err != nil {
+		return fmt.Errorf("hook %q: %w", h.Name(), err)
+	}
+	return nil
+}
+
+func (a *Agent) runToolStartHook(h hook.ToolStartHook, ctx context.Context, state *types.LoopState, call *types.ToolCall) (action hook.Action, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			action, err = hook.ActionProceed, fmt.Errorf("hook %q panicked in OnToolStart: %v", h.Name(), r)
+		}
+	}()
+	action, err = h.OnToolStart(ctx, state, call)
+	if err != nil {
+		err = fmt.Errorf("hook %q: %w", h.Name(), err)
+	}
+	return action, err
 }
 
 func (a *Agent) fail(state *types.LoopState, err error) error {

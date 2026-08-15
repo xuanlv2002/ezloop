@@ -3,6 +3,7 @@ package approve
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/xuanlv2002/ezloop/core"
@@ -59,25 +60,20 @@ func TestApproveSkipsDeniedTool(t *testing.T) {
 	if state.StopReason != types.StopCompleted {
 		t.Fatalf("stop: %s", state.StopReason)
 	}
-	// rm 被跳过、echo 被执行。
+	// rm 被跳过（消息携带调用信息）、echo 被执行。
 	rmMsg, echoMsg := "", ""
 	for _, m := range state.Messages {
 		if m.Role != types.RoleTool {
 			continue
 		}
-		if m.Content == "" && m.Err == "" {
-			continue
-		}
-		if m.Err != "" || m.Content != "" {
-			if m.Content == "skipped by tool-start hook" || m.Err != "" {
-				rmMsg = m.Content
-			} else {
-				echoMsg = m.Content
-			}
+		if strings.Contains(m.Content, "skipped") {
+			rmMsg = m.Content
+		} else if m.Content != "" {
+			echoMsg = m.Content
 		}
 	}
-	if rmMsg != "skipped by tool-start hook" {
-		t.Fatalf("rm should be skipped, got %q", rmMsg)
+	if !strings.HasPrefix(rmMsg, "skipped by tool-start hook: rm(") {
+		t.Fatalf("rm should be skipped with call info, got %q", rmMsg)
 	}
 	if echoMsg != `ran {"a":1}` {
 		t.Fatalf("echo should run, got %q", echoMsg)
@@ -99,7 +95,7 @@ func TestApproverErrorPropagates(t *testing.T) {
 		return false, assertErr("ui closed")
 	})))
 	_, err := a.Run(context.Background(), "hi")
-	if err == nil || err.Error() != "ui closed" {
+	if err == nil || !strings.Contains(err.Error(), "ui closed") {
 		t.Fatalf("want approver error, got %v", err)
 	}
 }
