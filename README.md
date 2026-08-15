@@ -86,16 +86,25 @@ func main() {
         core.WithModelWarp(modelretry.Warp()),       // model 节点：重试
         core.WithToolWarp(safetool.Warp()),          // tool 节点：panic 防护
         core.WithHooks(mcp.NewHook(mcpCfg)),         // 流：MCP 工具接入
-        core.WithMaxIterations(16),
+        core.WithHyperParams(core.HyperParams{      // 超参数
+            MaxIterations:  16,
+            MaxConcurrency: 4,   // 单轮工具并发上限（消息与事件仍保序）
+        }),
         core.WithStreaming(true),                    // 流式输出
         core.WithOnEvent(func(e event.Event) { fmt.Println(e) }),
     )
 
-    // 单轮
+    // 同步：单轮
     state, err := agent.Run(ctx, "帮我读一下 hello.txt")
 
     // 多轮：上一轮的 state.Messages 直接作为历史
     state, err = agent.Run(ctx, "再总结一下", core.WithHistory(state.Messages...))
+
+    // 异步：事件通道 + 取消（服务端场景，与 WithOnEvent 二选一）
+    h := agent.RunAsync(ctx, "长任务")
+    defer h.Cancel()
+    for e := range h.Events() { render(e) }   // loop 结束自动 close
+    state, err = h.Wait()
 }
 ```
 

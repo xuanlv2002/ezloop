@@ -11,6 +11,24 @@ import (
 
 const DefaultMaxIterations = 16
 
+// HyperParams 是 Agent 的运行超参数。
+type HyperParams struct {
+	// MaxIterations 最大迭代次数，0 取默认 16。
+	MaxIterations int
+	// MaxConcurrency 单轮工具并发执行上限，1 为串行（默认）。
+	MaxConcurrency int
+}
+
+func (hp HyperParams) withDefaults() HyperParams {
+	if hp.MaxIterations <= 0 {
+		hp.MaxIterations = DefaultMaxIterations
+	}
+	if hp.MaxConcurrency <= 0 {
+		hp.MaxConcurrency = 1
+	}
+	return hp
+}
+
 type Agent struct {
 	provider  provider.ModelProvider
 	streaming bool
@@ -23,11 +41,11 @@ type Agent struct {
 	loopHooks       []hook.LoopHook
 	endHooks        []hook.EndHook
 
-	tools         []types.Tool
-	toolWarps     []types.ToolWarpHandler
-	maxIterations int
-	onEvent       event.OnEvent
-	systemPrompt  string
+	tools      []types.Tool
+	toolWarps  []types.ToolWarpHandler
+	hyper      HyperParams
+	onEvent    event.OnEvent
+	systemPrompt string
 }
 
 type Option func(*Agent)
@@ -70,11 +88,12 @@ func WithTools(tools ...types.Tool) Option {
 }
 
 func WithMaxIterations(n int) Option {
-	return func(a *Agent) {
-		if n > 0 {
-			a.maxIterations = n
-		}
-	}
+	return func(a *Agent) { a.hyper.MaxIterations = n }
+}
+
+// WithHyperParams 设置运行超参数（迭代上限、工具并发量等）。
+func WithHyperParams(hp HyperParams) Option {
+	return func(a *Agent) { a.hyper = hp }
 }
 
 func WithOnEvent(fn event.OnEvent) Option {
@@ -123,12 +142,12 @@ func WithToolWarp(warps ...types.ToolWarpHandler) Option {
 
 func NewAgent(p provider.ModelProvider, opts ...Option) *Agent {
 	a := &Agent{
-		provider:      p,
-		maxIterations: DefaultMaxIterations,
-		onEvent:       event.Noop,
+		provider: p,
+		onEvent:  event.Noop,
 	}
 	for _, opt := range opts {
 		opt(a)
 	}
+	a.hyper = a.hyper.withDefaults()
 	return a
 }

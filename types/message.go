@@ -45,8 +45,9 @@ func (u *Usage) Add(other Usage) {
 type StopReason string
 
 const (
-	StopCompleted    StopReason = "completed"
-	StopMaxIteration StopReason = "max_iterations"
-	StopAborted      StopReason = "aborted"
-	StopError        StopReason = "error"
+	StopCompleted     StopReason = "completed"
+	StopMaxIteration  StopReason = "max_iterations"
+	StopAborted       StopReason = "aborted"
+	StopError         StopReason = "error"
+	StopCancelled     StopReason = "cancelled"
 )
