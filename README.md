@@ -202,13 +202,16 @@ agent := core.NewAgent(p, core.WithHooks(mcp.NewHook(cfg)))
 
 | 扩展 | 类型 | 说明 |
 |---|---|---|
+| `ext/fs` | 底座 | FileSystem 核心（Read/Write/List）+ 可选能力 Modifier（Edit/ApplyPatch）、Searcher（Grep/Find）；Local 实现全部能力（root 沙箱、补丁预检+回滚） |
 | `ext/provider/openai` | model | OpenAI 兼容 Provider（Invoke + SSE 流式） |
 | `ext/warp/model/modelretry` | warp | 模型重试：指数退避，流式仅在未发出 chunk 时重试 |
 | `ext/warp/tool/safetool` | warp | 工具防护：panic 恢复 + error 附加上下文 |
+| `ext/warp/tool/offload` | warp | 大结果卸载：超阈值写入 FS，上下文只留摘要+路径，写失败降级透传 |
 | `ext/hook/mcp` | hook | mcpRouter 单工具封装，内置官方 go-sdk |
-| `ext/hook/skill` | hook | 技能指令按关键词注入 system prompt |
+| `ext/hook/skill` | hook | 技能注入：代码定义或从 FS 目录加载 *.md（可选 .keywords） |
 | `ext/hook/summary` | hook | loop 结束自动生成摘要写入 Metadata |
 | `ext/hook/approve` | hook | 工具审批：同步阻塞式 Approver + 轮次式审批 Store（见 examples/approval） |
+| `ext/hook/filetools` | hook | 文件工具集：read_file（行分页/50KB 上限）、write、list、edit、apply_patch、grep、find、run_command；按 FS 能力注册，修改走 per-path 队列 |
 
 ## 包结构
 
