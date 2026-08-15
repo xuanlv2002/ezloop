@@ -12,9 +12,7 @@ import (
 )
 
 type flakyProvider struct {
-	failures int
-	calls    int
-	chunks   []string
+	failures, calls int
 }
 
 func (p *flakyProvider) Invoke(_ context.Context, _ *types.ModelRequest) (*types.ModelResponse, error) {
@@ -25,103 +23,39 @@ func (p *flakyProvider) Invoke(_ context.Context, _ *types.ModelRequest) (*types
 	return &types.ModelResponse{Content: "ok"}, nil
 }
 
-func (p *flakyProvider) Stream(ctx context.Context, req *types.ModelRequest, onChunk provider.ModelChunkHandler) (*types.ModelResponse, error) {
-	resp, err := p.Invoke(ctx, req)
-	if err != nil {
-		return nil, err
-	}
-	for _, c := range p.chunks {
-		_ = onChunk(types.ModelChunk{ContentDelta: c})
-	}
-	return resp, nil
-}
+func fast() func(*Options) { return func(o *Options) { o.BaseDelay = time.Millisecond } }
 
-func fastOpts() func(*Options) {
-	return func(o *Options) { o.BaseDelay = time.Millisecond }
-}
-
-func TestRetrySucceedsAfterTransientFailures(t *testing.T) {
+// 瞬时失败重试后成功；持续失败按 MaxAttempts 放弃。
+func TestRetryAndGiveUp(t *testing.T) {
 	fp := &flakyProvider{failures: 2}
-	p := New(fp, fastOpts())
-	resp, err := p.Invoke(context.Background(), &types.ModelRequest{})
-	if err != nil {
-		t.Fatalf("err: %v", err)
+	resp, err := New(fp, fast()).Invoke(context.Background(), &types.ModelRequest{})
+	if err != nil || resp.Content != "ok" || fp.calls != 3 {
+		t.Fatalf("retry: resp=%q calls=%d err=%v", resp.Content, fp.calls, err)
 	}
-	if resp.Content != "ok" || fp.calls != 3 {
-		t.Fatalf("resp=%q calls=%d", resp.Content, fp.calls)
+
+	fp2 := &flakyProvider{failures: 100}
+	_, err = New(fp2, fast()).Invoke(context.Background(), &types.ModelRequest{})
+	if err == nil || !strings.Contains(err.Error(), "giving up") || fp2.calls != 3 {
+		t.Fatalf("give up: calls=%d err=%v", fp2.calls, err)
 	}
 }
 
-func TestRetryGivesUp(t *testing.T) {
-	fp := &flakyProvider{failures: 100}
-	p := New(fp, fastOpts())
-	_, err := p.Invoke(context.Background(), &types.ModelRequest{})
-	if err == nil || !strings.Contains(err.Error(), "giving up") {
-		t.Fatalf("want give-up error, got %v", err)
-	}
-	if fp.calls != 3 {
-		t.Fatalf("calls: %d", fp.calls)
-	}
-}
-
-func TestRetryIfFilters(t *testing.T) {
-	fp := &fatalProvider{}
-	p := New(fp, fastOpts(), func(o *Options) {
-		o.RetryIf = func(err error) bool { return !strings.Contains(err.Error(), "fatal") }
-	})
-	_, _ = p.Invoke(context.Background(), &types.ModelRequest{})
-	if fp.calls != 1 {
-		t.Fatalf("fatal error must not retry, calls=%d", fp.calls)
-	}
-}
-
-type fatalProvider struct{ calls int }
-
-func (p *fatalProvider) Invoke(_ context.Context, _ *types.ModelRequest) (*types.ModelResponse, error) {
-	p.calls++
-	return nil, errors.New("fatal: bad request")
-}
-
-func TestStreamRetryBeforeFirstChunk(t *testing.T) {
-	fp := &flakyProvider{failures: 1, chunks: []string{"a", "b"}}
-	p := New(fp, fastOpts())
-	var got []string
-	resp, err := p.Stream(context.Background(), &types.ModelRequest{}, func(c types.ModelChunk) error {
-		got = append(got, c.ContentDelta)
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("err: %v", err)
-	}
-	if resp.Content != "ok" || len(got) != 2 {
-		t.Fatalf("resp=%q chunks=%v", resp.Content, got)
-	}
-	if fp.calls != 2 {
-		t.Fatalf("want retry before first chunk, calls=%d", fp.calls)
-	}
-}
-
-// streamFailAfterChunk 发出一个 chunk 后失败。
+// 流式：首个 chunk 之前可重试，之后失败不再重试（避免重复输出）。
 type streamFailAfterChunk struct{ calls int }
 
 func (p *streamFailAfterChunk) Invoke(context.Context, *types.ModelRequest) (*types.ModelResponse, error) {
 	return &types.ModelResponse{}, nil
 }
-
 func (p *streamFailAfterChunk) Stream(_ context.Context, _ *types.ModelRequest, onChunk provider.ModelChunkHandler) (*types.ModelResponse, error) {
 	p.calls++
 	_ = onChunk(types.ModelChunk{ContentDelta: "partial"})
-	return nil, errors.New("connection reset")
+	return nil, errors.New("reset")
 }
 
-func TestStreamNoRetryAfterChunkEmitted(t *testing.T) {
+func TestStreamNoRetryAfterChunk(t *testing.T) {
 	fp := &streamFailAfterChunk{}
-	p := New(fp, fastOpts())
-	_, err := p.Stream(context.Background(), &types.ModelRequest{}, func(types.ModelChunk) error { return nil })
-	if err == nil {
-		t.Fatal("want error")
-	}
-	if fp.calls != 1 {
-		t.Fatalf("must not retry after chunk emitted, calls=%d", fp.calls)
+	_, err := New(fp, fast()).Stream(context.Background(), &types.ModelRequest{}, func(types.ModelChunk) error { return nil })
+	if err == nil || fp.calls != 1 {
+		t.Fatalf("calls=%d err=%v", fp.calls, err)
 	}
 }

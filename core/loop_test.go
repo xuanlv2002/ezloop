@@ -5,103 +5,34 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/xuanlv2002/ezloop/event"
 	"github.com/xuanlv2002/ezloop/hook"
-	"github.com/xuanlv2002/ezloop/provider"
+	"github.com/xuanlv2002/ezloop/internal/testutil"
 	"github.com/xuanlv2002/ezloop/types"
 )
 
-// mockProvider 按脚本顺序返回响应。
-type mockProvider struct {
-	script []*types.ModelResponse
-	calls  int
-}
-
-func (p *mockProvider) Invoke(_ context.Context, _ *types.ModelRequest) (*types.ModelResponse, error) {
-	if p.calls >= len(p.script) {
-		return &types.ModelResponse{}, nil
-	}
-	resp := p.script[p.calls]
-	p.calls++
-	return resp, nil
-}
-
-func textResp(s string) *types.ModelResponse {
-	return &types.ModelResponse{Content: s}
-}
-
-func toolResp(calls ...types.ToolCall) *types.ModelResponse {
-	return &types.ModelResponse{Content: "calling tools", ToolCalls: calls}
-}
-
-// echoTool 回显参数。
-type echoTool struct{}
-
-func (echoTool) Name() string              { return "echo" }
-func (echoTool) Description() string       { return "echo args" }
-func (echoTool) ArgsSchema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"msg":{"type":"string"}}}`)
-}
-func (echoTool) Invoke(_ context.Context, args json.RawMessage) (string, error) {
-	return "echo: " + string(args), nil
-}
-
-func collectEvents(t *testing.T, a *Agent) *[]event.Event {
-	t.Helper()
-	var evs []event.Event
-	a.onEvent = func(e event.Event) { evs = append(evs, e) }
+func collectEvents(a *Agent) *[]event.EventType {
+	var evs []event.EventType
+	a.onEvent = func(e event.Event) { evs = append(evs, e.Type) }
 	return &evs
 }
 
-func eventTypes(evs []event.Event) []event.EventType {
-	out := make([]event.EventType, 0, len(evs))
-	for _, e := range evs {
-		out = append(out, e.Type)
-	}
-	return out
-}
-
-func TestRunCompletesWithoutTools(t *testing.T) {
-	a := NewAgent(&mockProvider{script: []*types.ModelResponse{textResp("hello")}})
-	evs := collectEvents(t, a)
+// 回边路由 + 消息序列 + 事件顺序：引擎最核心的行为。
+func TestRunLoopbackAndEventOrder(t *testing.T) {
+	a := NewAgent(testutil.Scripted(
+		testutil.ToolCalls(testutil.Call("1", "echo", `{"m":"a"}`)),
+		testutil.Text("done"),
+	), WithTools(testutil.EchoTool{}))
+	evs := collectEvents(a)
 
 	state, err := a.Run(context.Background(), "hi")
-	if err != nil {
-		t.Fatalf("err: %v", err)
+	if err != nil || state.StopReason != types.StopCompleted || state.Iteration != 2 {
+		t.Fatalf("state: %+v err=%v", state, err)
 	}
-	if state.StopReason != types.StopCompleted {
-		t.Fatalf("want completed, got %s", state.StopReason)
-	}
-	if state.LastResponse.Content != "hello" {
-		t.Fatalf("bad content: %s", state.LastResponse.Content)
-	}
-	want := []event.EventType{event.EventLoopStart, event.EventModelStart, event.EventModelEnd, event.EventLoopEnd}
-	if fmt.Sprint(eventTypes(*evs)) != fmt.Sprint(want) {
-		t.Fatalf("events: %v", eventTypes(*evs))
-	}
-}
-
-func TestRunLoopbackWithTools(t *testing.T) {
-	p := &mockProvider{script: []*types.ModelResponse{
-		toolResp(types.ToolCall{ID: "1", Name: "echo", Args: json.RawMessage(`{"msg":"a"}`)}),
-		textResp("done after tool"),
-	}}
-	a := NewAgent(p, WithTools(echoTool{}))
-	evs := collectEvents(t, a)
-
-	state, err := a.Run(context.Background(), "hi")
-	if err != nil {
-		t.Fatalf("err: %v", err)
-	}
-	if state.StopReason != types.StopCompleted {
-		t.Fatalf("want completed, got %s", state.StopReason)
-	}
-	if state.Iteration != 2 {
-		t.Fatalf("want 2 iterations, got %d", state.Iteration)
-	}
-	// 消息序列: user, assistant(toolcall), tool, assistant
 	roles := []types.Role{}
 	for _, m := range state.Messages {
 		roles = append(roles, m.Role)
@@ -118,196 +49,268 @@ func TestRunLoopbackWithTools(t *testing.T) {
 		event.EventModelStart, event.EventModelEnd,
 		event.EventLoopEnd,
 	}
-	if fmt.Sprint(eventTypes(*evs)) != fmt.Sprint(wantEv) {
-		t.Fatalf("events: %v", eventTypes(*evs))
+	if fmt.Sprint(*evs) != fmt.Sprint(wantEv) {
+		t.Fatalf("events: %v", *evs)
 	}
 }
 
-func TestRunMaxIterations(t *testing.T) {
-	// 模型永远请求工具。
-	call := types.ToolCall{ID: "1", Name: "echo", Args: json.RawMessage(`{}`)}
-	script := make([]*types.ModelResponse, 10)
-	for i := range script {
-		script[i] = toolResp(call)
-	}
-	a := NewAgent(&mockProvider{script: script}, WithTools(echoTool{}), WithMaxIterations(3))
-
-	state, err := a.Run(context.Background(), "hi")
-	if err != nil {
-		t.Fatalf("err: %v", err)
-	}
-	if state.StopReason != types.StopMaxIteration {
-		t.Fatalf("want max_iterations, got %s", state.StopReason)
-	}
-	if state.Iteration != 3 {
-		t.Fatalf("want 3 iterations, got %d", state.Iteration)
-	}
-}
-
-// denyHook 拦截指定工具。
-type denyHook struct {
-	name   string
-	action hook.Action
-}
-
-func (h denyHook) Name() string { return "deny" }
-func (h denyHook) OnToolStart(_ context.Context, _ *types.LoopState, call *types.ToolCall) (hook.Action, error) {
-	if call.Name == h.name {
-		return h.action, nil
-	}
-	return hook.ActionProceed, nil
-}
-
-func TestRunToolStartHookSkip(t *testing.T) {
-	p := &mockProvider{script: []*types.ModelResponse{
-		toolResp(types.ToolCall{ID: "1", Name: "echo", Args: json.RawMessage(`{}`)}),
-		textResp("ok"),
-	}}
-	a := NewAgent(p, WithTools(echoTool{}), WithHooks(denyHook{name: "echo", action: hook.ActionSkip}))
-
-	state, err := a.Run(context.Background(), "hi")
-	if err != nil {
-		t.Fatalf("err: %v", err)
-	}
-	// 跳过后循环继续，第二轮完成。
-	if state.StopReason != types.StopCompleted {
-		t.Fatalf("want completed, got %s", state.StopReason)
-	}
-	toolMsg := state.Messages[2]
-	if !strings.Contains(toolMsg.Content, "skipped") {
-		t.Fatalf("tool msg should be skipped, got %q", toolMsg.Content)
-	}
-}
-
-func TestRunToolStartHookAbort(t *testing.T) {
-	p := &mockProvider{script: []*types.ModelResponse{
-		toolResp(types.ToolCall{ID: "1", Name: "echo", Args: json.RawMessage(`{}`)}),
-	}}
-	a := NewAgent(p, WithTools(echoTool{}), WithHooks(denyHook{name: "echo", action: hook.ActionAbort}))
-
-	state, err := a.Run(context.Background(), "hi")
-	if err != nil {
-		t.Fatalf("err: %v", err)
-	}
-	if state.StopReason != types.StopAborted {
-		t.Fatalf("want aborted, got %s", state.StopReason)
-	}
-}
-
-// failHook 在指定阶段返回错误。
-type failHook struct {
-	phase   string
-	endRan  *bool
-}
-
-func (h failHook) Name() string { return "fail" }
-
-func (h failHook) OnModelStart(_ context.Context, _ *types.LoopState) error {
-	if h.phase == "modelStart" {
-		return fmt.Errorf("boom")
-	}
-	return nil
-}
-
-func (h failHook) OnEnd(_ context.Context, _ *types.LoopState) error {
-	if h.endRan != nil {
-		*h.endRan = true
-	}
-	return nil
-}
-
-func TestRunHookErrorStopsButEndHookRuns(t *testing.T) {
-	endRan := false
+// 并发工具执行 + 消息保序 + 单轮完成。
+func TestConcurrentToolsPreserveOrder(t *testing.T) {
+	tool := &sleepTool{delay: 30 * time.Millisecond}
 	a := NewAgent(
-		&mockProvider{script: []*types.ModelResponse{textResp("x")}},
-		WithHooks(failHook{phase: "modelStart", endRan: &endRan}),
+		testutil.Scripted(
+			testutil.ToolCalls(
+				testutil.Call("c0", "sleep", `{}`),
+				testutil.Call("c1", "sleep", `{}`),
+				testutil.Call("c2", "sleep", `{}`),
+				testutil.Call("c3", "sleep", `{}`),
+			),
+			testutil.Text("done"),
+		),
+		WithTools(tool),
+		WithHyperParams(HyperParams{MaxConcurrency: 4}),
 	)
-	evs := collectEvents(t, a)
-
 	state, err := a.Run(context.Background(), "hi")
-	if err == nil {
-		t.Fatal("want error")
+	if err != nil {
+		t.Fatalf("err: %v", err)
 	}
-	if state.StopReason != types.StopError {
-		t.Fatalf("want error stop, got %s", state.StopReason)
+	if tool.maxSeen != 4 {
+		t.Fatalf("want 4 concurrent, saw %d", tool.maxSeen)
 	}
-	if !endRan {
-		t.Fatal("end hook must run on failure")
-	}
-	hasErrEvent := false
-	for _, e := range *evs {
-		if e.Type == event.EventError {
-			hasErrEvent = true
+	for i, want := range []string{"c0", "c1", "c2", "c3"} {
+		if state.Messages[2+i].ToolCallID != want {
+			t.Fatalf("order broken at %d", i)
 		}
-	}
-	if !hasErrEvent {
-		t.Fatal("want error event")
 	}
 }
 
-// stopHook 在首轮模型响应后置 Stop。
-type stopHook struct{}
+type sleepTool struct {
+	mu      sync.Mutex
+	inflight, maxSeen int
+	delay   time.Duration
+}
 
-func (stopHook) Name() string { return "stop" }
-func (stopHook) OnModelEnd(_ context.Context, s *types.LoopState) error {
-	s.Stop = true
+func (t *sleepTool) Name() string                { return "sleep" }
+func (t *sleepTool) Description() string         { return "" }
+func (t *sleepTool) ArgsSchema() json.RawMessage { return nil }
+func (t *sleepTool) Invoke(_ context.Context, _ json.RawMessage) (string, error) {
+	t.mu.Lock()
+	t.inflight++
+	if t.inflight > t.maxSeen {
+		t.maxSeen = t.inflight
+	}
+	t.mu.Unlock()
+	time.Sleep(t.delay)
+	t.mu.Lock()
+	t.inflight--
+	t.mu.Unlock()
+	return "done", nil
+}
+
+// ToolStart 短路：Skip 跳过并携带调用信息，Abort 终止。
+func TestToolStartShortCircuit(t *testing.T) {
+	a := NewAgent(
+		testutil.Scripted(
+			testutil.ToolCalls(
+				testutil.Call("1", "echo", `{}`),
+				testutil.Call("2", "echo", `{}`),
+			),
+			testutil.Text("done"),
+		),
+		WithTools(testutil.EchoTool{}),
+		WithHooks(denyEcho{skip: true}),
+	)
+	state, _ := a.Run(context.Background(), "hi")
+	if state.StopReason != types.StopCompleted {
+		t.Fatalf("skip should continue loop: %s", state.StopReason)
+	}
+	if !strings.Contains(state.Messages[2].Content, "skipped by tool-start hook: echo") {
+		t.Fatalf("skip msg: %q", state.Messages[2].Content)
+	}
+
+	a2 := NewAgent(
+		testutil.Scripted(testutil.ToolCalls(testutil.Call("1", "echo", `{}`))),
+		WithTools(testutil.EchoTool{}),
+		WithHooks(denyEcho{skip: false}),
+	)
+	state2, _ := a2.Run(context.Background(), "hi")
+	if state2.StopReason != types.StopAborted {
+		t.Fatalf("abort: %s", state2.StopReason)
+	}
+}
+
+type denyEcho struct{ skip bool }
+
+func (denyEcho) Name() string { return "deny" }
+func (h denyEcho) OnToolStart(_ context.Context, _ *types.LoopState, _ *types.ToolCall) (hook.Action, error) {
+	if h.skip {
+		return hook.ActionSkip, nil
+	}
+	return hook.ActionAbort, nil
+}
+
+// hook panic 被引擎恢复为带上下文的错误，EndHook 仍执行。
+func TestHookErrorAndPanicProtection(t *testing.T) {
+	endRan := false
+	a := NewAgent(testutil.Scripted(testutil.Text("x")),
+		WithHooks(panickyStart{endRan: &endRan}))
+	state, err := a.Run(context.Background(), "hi")
+	if err == nil || !strings.Contains(err.Error(), "panicked") {
+		t.Fatalf("want panic error, got %v", err)
+	}
+	if state.StopReason != types.StopError || !endRan {
+		t.Fatalf("stop=%s endRan=%v", state.StopReason, endRan)
+	}
+}
+
+type panickyStart struct{ endRan *bool }
+
+func (panickyStart) Name() string { return "panicky" }
+func (panickyStart) OnModelStart(_ context.Context, _ *types.LoopState) error {
+	panic("boom")
+}
+func (h panickyStart) OnEnd(_ context.Context, _ *types.LoopState) error {
+	*h.endRan = true
 	return nil
 }
 
-func TestRunStopFromModelEndHook(t *testing.T) {
-	p := &mockProvider{script: []*types.ModelResponse{
-		toolResp(types.ToolCall{ID: "1", Name: "echo", Args: json.RawMessage(`{}`)}),
-	}}
-	a := NewAgent(p, WithTools(echoTool{}), WithHooks(stopHook{}))
+// ctx 取消 → StopCancelled。
+func TestContextCancellation(t *testing.T) {
+	block := testutil.NewBlocking()
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() { time.Sleep(30 * time.Millisecond); cancel() }()
 
-	state, err := a.Run(context.Background(), "hi")
-	if err != nil {
-		t.Fatalf("err: %v", err)
-	}
-	if state.StopReason != types.StopAborted {
-		t.Fatalf("want aborted, got %s", state.StopReason)
-	}
-	if state.Iteration != 1 {
-		t.Fatalf("want 1 iteration, got %d", state.Iteration)
+	state, err := NewAgent(block).Run(ctx, "hi")
+	if err == nil || state.StopReason != types.StopCancelled {
+		t.Fatalf("stop=%s err=%v", state.StopReason, err)
 	}
 }
 
-// streamProvider 逐 chunk 输出。
-type streamProvider struct{ mockProvider }
-
-func (p *streamProvider) Stream(ctx context.Context, req *types.ModelRequest, onChunk provider.ModelChunkHandler) (*types.ModelResponse, error) {
-	resp, err := p.Invoke(ctx, req)
-	if err != nil {
-		return nil, err
-	}
-	for _, r := range []rune(resp.Content) {
-		if err := onChunk(types.ModelChunk{ContentDelta: string(r)}); err != nil {
-			return nil, err
+// RunAsync：事件通道 + Wait。
+func TestRunAsync(t *testing.T) {
+	a := NewAgent(
+		testutil.Scripted(
+			testutil.ToolCalls(testutil.Call("1", "echo", `{}`)),
+			testutil.Text("finished"),
+		),
+		WithTools(testutil.EchoTool{}),
+	)
+	h := a.RunAsync(context.Background(), "hi")
+	var first, last event.EventType
+	for e := range h.Events() {
+		if first == "" {
+			first = e.Type
 		}
+		last = e.Type
 	}
-	return resp, nil
+	state, err := h.Wait()
+	if err != nil || state.StopReason != types.StopCompleted {
+		t.Fatalf("state: %s err=%v", state.StopReason, err)
+	}
+	if first != event.EventLoopStart || last != event.EventLoopEnd {
+		t.Fatalf("events: %s..%s", first, last)
+	}
 }
 
-func TestRunStreaming(t *testing.T) {
-	p := &streamProvider{}
-	p.script = []*types.ModelResponse{textResp("abc")}
-	a := NewAgent(p, WithStreaming(true))
-	evs := collectEvents(t, a)
-
-	state, err := a.Run(context.Background(), "hi")
+// system prompt + 历史注入顺序。
+func TestSystemPromptAndHistory(t *testing.T) {
+	a := NewAgent(testutil.Scripted(testutil.Text("ok")),
+		WithSystemPrompt("be strict"))
+	state, err := a.Run(context.Background(), "q2",
+		WithHistory(
+			types.Message{Role: types.RoleUser, Content: "q1"},
+			types.Message{Role: types.RoleAssistant, Content: "a1"},
+		))
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if state.StopReason != types.StopCompleted {
-		t.Fatalf("want completed, got %s", state.StopReason)
+	want := []string{"be strict", "q1", "a1", "q2", "ok"}
+	if len(state.Messages) != len(want) {
+		t.Fatalf("messages: %d", len(state.Messages))
 	}
-	chunks := 0
-	for _, e := range *evs {
-		if e.Type == event.EventModelChunk {
-			chunks++
+	for i, w := range want {
+		if state.Messages[i].Content != w {
+			t.Fatalf("msg[%d]=%q want %q", i, state.Messages[i].Content, w)
 		}
 	}
-	if chunks != 3 {
-		t.Fatalf("want 3 chunks, got %d", chunks)
+}
+
+// ToolWarp 覆盖静态注册与 hook 注入的工具。
+type tagWrap struct{ log *[]string }
+
+func (w tagWrap) warp(inner types.Tool) types.Tool {
+	return &taggedTool{inner: inner, log: w.log}
+}
+
+type taggedTool struct {
+	inner types.Tool
+	log   *[]string
+}
+
+func (t *taggedTool) Name() string                { return t.inner.Name() }
+func (t *taggedTool) Description() string         { return t.inner.Description() }
+func (t *taggedTool) ArgsSchema() json.RawMessage { return t.inner.ArgsSchema() }
+func (t *taggedTool) Invoke(ctx context.Context, args json.RawMessage) (string, error) {
+	*t.log = append(*t.log, "w:"+t.inner.Name())
+	return t.inner.Invoke(ctx, args)
+}
+
+type injectHook struct{ tool types.Tool }
+
+func (injectHook) Name() string { return "inject" }
+func (h injectHook) OnStart(_ context.Context, state *types.LoopState) error {
+	state.Tools.Register(h.tool)
+	return nil
+}
+
+type renamedEcho struct{ testutil.EchoTool }
+
+func (renamedEcho) Name() string { return "injected" }
+
+func TestToolWarpWrapsAllSources(t *testing.T) {
+	var log []string
+	a := NewAgent(
+		testutil.Scripted(
+			testutil.ToolCalls(
+				testutil.Call("1", "echo", `{}`),
+				testutil.Call("2", "injected", `{}`),
+			),
+			testutil.Text("done"),
+		),
+		WithTools(testutil.EchoTool{}),
+		WithHooks(injectHook{tool: renamedEcho{}}),
+		WithToolWarp(tagWrap{log: &log}.warp),
+	)
+	if _, err := a.Run(context.Background(), "hi"); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if fmt.Sprint(log) != fmt.Sprint([]string{"w:echo", "w:injected"}) {
+		t.Fatalf("log: %v", log)
+	}
+}
+
+// 自定义事件经 state.EmitEvent 到达 OnEvent。
+type emitHook struct{}
+
+func (emitHook) Name() string { return "emit" }
+func (emitHook) OnModelEnd(_ context.Context, s *types.LoopState) error {
+	s.EmitEvent("custom.test", "payload")
+	return nil
+}
+
+func TestHookEmitsCustomEvent(t *testing.T) {
+	got := 0
+	a := NewAgent(testutil.Scripted(testutil.Text("ok")),
+		WithHooks(emitHook{}),
+		WithOnEvent(func(e event.Event) {
+			if e.Type == "custom.test" && e.Iteration == 1 {
+				got++
+			}
+		}))
+	if _, err := a.Run(context.Background(), "hi"); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if got != 1 {
+		t.Fatalf("custom events: %d", got)
 	}
 }

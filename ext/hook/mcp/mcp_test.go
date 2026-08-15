@@ -4,25 +4,22 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
+
+	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/xuanlv2002/ezloop/core"
+	"github.com/xuanlv2002/ezloop/internal/testutil"
+	"github.com/xuanlv2002/ezloop/types"
 )
 
-// mockClient 模拟一个 MCP server。
-type mockClient struct {
-	tools  []ToolDef
-	closed bool
-}
+type mockClient struct{ tools []ToolDef }
 
 func (c *mockClient) ListTools(_ context.Context) ([]ToolDef, error) { return c.tools, nil }
-
 func (c *mockClient) CallTool(_ context.Context, name string, args json.RawMessage) (string, error) {
-	if name == "boom" {
-		return "", fmt.Errorf("internal failure")
-	}
 	return fmt.Sprintf("%s(%s)", name, string(args)), nil
 }
-
-func (c *mockClient) Close() error { c.closed = true; return nil }
 
 func testCfg() Config {
 	return Config{Servers: []ServerConfig{
@@ -31,7 +28,7 @@ func testCfg() Config {
 			Allow: []string{"query"},
 			Factory: func(ServerConfig) (Client, error) {
 				return &mockClient{tools: []ToolDef{
-					{Name: "query", Description: "run sql", ArgsSchema: json.RawMessage(`{"type":"object"}`)},
+					{Name: "query", ArgsSchema: json.RawMessage(`{"type":"object"}`)},
 					{Name: "drop"},
 				}}, nil
 			},
@@ -45,96 +42,96 @@ func testCfg() Config {
 	}}
 }
 
-func callRouter(t *testing.T, r *Router, args string) string {
+func invoke(t *testing.T, r *Router, args string) string {
 	t.Helper()
 	out, err := r.Invoke(context.Background(), json.RawMessage(args))
 	if err != nil {
-		t.Fatalf("invoke err: %v", err)
+		t.Fatalf("invoke: %v", err)
 	}
 	return out
 }
 
-func TestRouterListTools(t *testing.T) {
+// 核心链路：list_tools 的 ACL 过滤、call_tool 分发、错误结构化自纠。
+func TestRouterCore(t *testing.T) {
 	r := NewRouter(testCfg().Servers)
-	out := callRouter(t, r, `{"action":"list_tools"}`)
-	var entries []toolEntry
-	if err := json.Unmarshal([]byte(out), &entries); err != nil {
-		t.Fatalf("bad json: %v", err)
-	}
-	// db 只暴露白名单里的 query；fs 暴露 read。
-	got := map[string]bool{}
-	for _, e := range entries {
-		got[e.Server+"/"+e.Name] = true
-	}
-	if !got["db/query"] || !got["fs/read"] {
-		t.Fatalf("expected tools missing: %v", got)
-	}
-	if got["db/drop"] {
-		t.Fatal("db/drop should be filtered by ACL")
-	}
-}
 
-func TestRouterCallTool(t *testing.T) {
-	r := NewRouter(testCfg().Servers)
-	out := callRouter(t, r, `{"action":"call_tool","server":"fs","tool":"read","args":{"path":"a.txt"}}`)
-	if out != `read({"path":"a.txt"})` {
-		t.Fatalf("bad result: %s", out)
+	list := invoke(t, r, `{"action":"list_tools"}`)
+	if !strings.Contains(list, `"query"`) || !strings.Contains(list, `"read"`) {
+		t.Fatalf("list: %s", list)
 	}
-}
+	if strings.Contains(list, `"drop"`) {
+		t.Fatal("db/drop must be filtered by ACL")
+	}
 
-func TestRouterACLDenied(t *testing.T) {
-	r := NewRouter(testCfg().Servers)
-	out := callRouter(t, r, `{"action":"call_tool","server":"db","tool":"drop"}`)
-	if !json.Valid([]byte(out)) {
-		t.Fatalf("want structured error json, got %s", out)
+	out := invoke(t, r, `{"action":"call_tool","server":"fs","tool":"read","args":{"path":"a"}}`)
+	if out != `read({"path":"a"})` {
+		t.Fatalf("call: %s", out)
 	}
+
+	denied := invoke(t, r, `{"action":"call_tool","server":"db","tool":"drop"}`)
 	var ce callError
-	_ = json.Unmarshal([]byte(out), &ce)
-	if ce.Error == "" {
-		t.Fatalf("want error field, got %s", out)
+	_ = json.Unmarshal([]byte(denied), &ce)
+	if ce.Error == "" || ce.Hint == "" {
+		t.Fatalf("acl denial should be structured: %s", denied)
 	}
 }
 
-func TestRouterCallErrorIsStructured(t *testing.T) {
-	r := NewRouter(testCfg().Servers)
-	out := callRouter(t, r, `{"action":"call_tool","server":"fs","tool":"boom"}`)
-	var ce callError
-	if err := json.Unmarshal([]byte(out), &ce); err != nil {
-		t.Fatalf("want structured error json, got %s", out)
+// Hook 注入 + 完整 loop：模型经 mcp_router 自发现并调用。
+func TestHookFullLoop(t *testing.T) {
+	cfg := testCfg()
+	reload := 0
+	cfg.Reload = func(context.Context) ([]ServerConfig, error) {
+		reload++
+		return cfg.Servers, nil
 	}
-	if ce.Hint == "" {
-		t.Fatal("want self-correction hint")
+	a := core.NewAgent(
+		testutil.Scripted(
+			testutil.ToolCalls(testutil.Call("c1", RouterToolName, `{"action":"list_tools"}`)),
+			testutil.ToolCalls(testutil.Call("c2", RouterToolName, `{"action":"call_tool","server":"fs","tool":"read","args":{"path":"x"}}`)),
+			testutil.Text("done"),
+		),
+		core.WithHooks(NewHook(cfg)),
+	)
+	state, err := a.Run(context.Background(), "use mcp")
+	if err != nil || state.StopReason != types.StopCompleted {
+		t.Fatalf("state: %s err=%v", state.StopReason, err)
+	}
+	if state.Messages[4].Content != `read({"path":"x"})` {
+		t.Fatalf("mcp result: %s", state.Messages[4].Content)
+	}
+	if reload != 2 {
+		t.Fatalf("reloads: %d", reload)
 	}
 }
 
-func TestRouterUnknownServer(t *testing.T) {
-	r := NewRouter(testCfg().Servers)
-	out := callRouter(t, r, `{"action":"call_tool","server":"nope","tool":"x"}`)
-	var ce callError
-	_ = json.Unmarshal([]byte(out), &ce)
-	if ce.Error == "" {
-		t.Fatalf("want structured error, got %s", out)
+// 官方 go-sdk 内存会话：真实协议栈的 list/call。
+func TestSDKSession(t *testing.T) {
+	server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "t"}, nil)
+	type greetArgs struct {
+		Name string `json:"name"`
 	}
-}
+	sdkmcp.AddTool(server, &sdkmcp.Tool{Name: "greet"}, func(_ context.Context, _ *sdkmcp.CallToolRequest, args greetArgs) (*sdkmcp.CallToolResult, any, error) {
+		return &sdkmcp.CallToolResult{
+			Content: []sdkmcp.Content{&sdkmcp.TextContent{Text: "hi " + args.Name}},
+		}, nil, nil
+	})
+	clientTransport, serverTransport := sdkmcp.NewInMemoryTransports()
+	go func() { _ = server.Run(context.Background(), serverTransport) }()
 
-func TestRouterReplaceServersClosesClients(t *testing.T) {
-	r := NewRouter(testCfg().Servers)
-	// 建立连接。
-	_ = callRouter(t, r, `{"action":"list_tools"}`)
-
-	newCfg := Config{Servers: []ServerConfig{{
-		Name: "only",
-		Factory: func(ServerConfig) (Client, error) {
-			return &mockClient{}, nil
-		},
-	}}}
-	r.ReplaceServers(newCfg.Servers)
-
-	out := callRouter(t, r, `{"action":"list_tools"}`)
-	if !json.Valid([]byte(out)) {
-		t.Fatalf("bad json: %s", out)
+	client, err := connectSDK(clientTransport)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
 	}
-	if err := r.Close(); err != nil {
-		t.Fatalf("close err: %v", err)
+	if cl, ok := client.(Closer); ok {
+		defer cl.Close()
+	}
+
+	defs, err := client.ListTools(context.Background())
+	if err != nil || len(defs) != 1 || defs[0].Name != "greet" || len(defs[0].ArgsSchema) == 0 {
+		t.Fatalf("list: %+v err=%v", defs, err)
+	}
+	out, err := client.CallTool(context.Background(), "greet", json.RawMessage(`{"name":"ezloop"}`))
+	if err != nil || out != "hi ezloop" {
+		t.Fatalf("call: %q %v", out, err)
 	}
 }

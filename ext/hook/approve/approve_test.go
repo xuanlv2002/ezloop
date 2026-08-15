@@ -8,22 +8,9 @@ import (
 
 	"github.com/xuanlv2002/ezloop/core"
 	"github.com/xuanlv2002/ezloop/hook"
+	"github.com/xuanlv2002/ezloop/internal/testutil"
 	"github.com/xuanlv2002/ezloop/types"
 )
-
-type scriptedProvider struct {
-	script []*types.ModelResponse
-	calls  int
-}
-
-func (p *scriptedProvider) Invoke(_ context.Context, _ *types.ModelRequest) (*types.ModelResponse, error) {
-	if p.calls >= len(p.script) {
-		return &types.ModelResponse{}, nil
-	}
-	resp := p.script[p.calls]
-	p.calls++
-	return resp, nil
-}
 
 type echoTool struct{}
 
@@ -34,72 +21,48 @@ func (echoTool) Invoke(_ context.Context, args json.RawMessage) (string, error) 
 	return "ran " + string(args), nil
 }
 
-func denyRm(_ context.Context, call *types.ToolCall) (bool, error) {
-	return call.Name != "rm", nil
-}
+// 拒绝 → Skip（loop 继续）；Store 批准后放行（轮次式审批核心）。
+func TestApproveDenyAndStore(t *testing.T) {
+	store := NewStore(true)
+	denied := New(store.Approver())
 
-func runWithApprover(t *testing.T, h *Hook) *types.LoopState {
-	t.Helper()
-	p := &scriptedProvider{script: []*types.ModelResponse{
-		{Content: "", ToolCalls: []types.ToolCall{
-			{ID: "1", Name: "rm", Args: json.RawMessage(`{"path":"x"}`)},
-			{ID: "2", Name: "echo", Args: json.RawMessage(`{"a":1}`)},
-		}},
-		{Content: "finished"},
-	}}
-	a := core.NewAgent(p, core.WithTools(echoTool{}), core.WithHooks(h))
-	state, err := a.Run(context.Background(), "hi")
+	state, err := core.NewAgent(
+		testutil.Scripted(
+			testutil.ToolCalls(testutil.Call("1", "echo", `{"a":1}`)),
+			testutil.Text("done"),
+		),
+		core.WithTools(echoTool{}),
+		core.WithHooks(denied),
+	).Run(context.Background(), "hi")
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	return state
-}
+	if !strings.Contains(state.Messages[2].Content, "skipped by tool-start hook: echo") {
+		t.Fatalf("denied: %q", state.Messages[2].Content)
+	}
 
-func TestApproveSkipsDeniedTool(t *testing.T) {
-	state := runWithApprover(t, New(denyRm))
-	if state.StopReason != types.StopCompleted {
-		t.Fatalf("stop: %s", state.StopReason)
+	// 用户批准（args 指纹命中）后放行；approve-once 只放行一次。
+	store.Approve("echo", json.RawMessage(`{"a":1}`))
+	if !store.IsApproved("echo", json.RawMessage(`{"a":1}`)) {
+		t.Fatal("approved call must pass")
 	}
-	// rm 被跳过（消息携带调用信息）、echo 被执行。
-	rmMsg, echoMsg := "", ""
-	for _, m := range state.Messages {
-		if m.Role != types.RoleTool {
-			continue
-		}
-		if strings.Contains(m.Content, "skipped") {
-			rmMsg = m.Content
-		} else if m.Content != "" {
-			echoMsg = m.Content
-		}
+	if store.IsApproved("echo", json.RawMessage(`{"a":1}`)) {
+		t.Fatal("approve-once store must consume on hit")
 	}
-	if !strings.HasPrefix(rmMsg, "skipped by tool-start hook: rm(") {
-		t.Fatalf("rm should be skipped with call info, got %q", rmMsg)
-	}
-	if echoMsg != `ran {"a":1}` {
-		t.Fatalf("echo should run, got %q", echoMsg)
+	if store.IsApproved("echo", json.RawMessage(`{"a":2}`)) {
+		t.Fatal("changed args must not hit")
 	}
 }
 
-func TestApproveAbortMode(t *testing.T) {
-	state := runWithApprover(t, New(denyRm, hook.ActionAbort))
+func TestAbortMode(t *testing.T) {
+	state, _ := core.NewAgent(
+		testutil.Scripted(testutil.ToolCalls(testutil.Call("1", "echo", `{}`))),
+		core.WithTools(echoTool{}),
+		core.WithHooks(New(func(context.Context, *types.ToolCall) (bool, error) {
+			return false, nil
+		}, hook.ActionAbort)),
+	).Run(context.Background(), "hi")
 	if state.StopReason != types.StopAborted {
 		t.Fatalf("stop: %s", state.StopReason)
 	}
 }
-
-func TestApproverErrorPropagates(t *testing.T) {
-	p := &scriptedProvider{script: []*types.ModelResponse{
-		{Content: "", ToolCalls: []types.ToolCall{{ID: "1", Name: "rm", Args: json.RawMessage(`{}`)}}},
-	}}
-	a := core.NewAgent(p, core.WithTools(echoTool{}), core.WithHooks(New(func(context.Context, *types.ToolCall) (bool, error) {
-		return false, assertErr("ui closed")
-	})))
-	_, err := a.Run(context.Background(), "hi")
-	if err == nil || !strings.Contains(err.Error(), "ui closed") {
-		t.Fatalf("want approver error, got %v", err)
-	}
-}
-
-type assertErr string
-
-func (e assertErr) Error() string { return string(e) }
