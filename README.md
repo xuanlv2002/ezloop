@@ -22,20 +22,29 @@
 大多数 Agent 框架把重试、MCP、审批、日志焊死在引擎里。ezloop 只保留一个
 **model ↔ tool 循环引擎**，其余一切都是可插拔的：
 
-```
-                    ┌──────────────────────────────────────────┐
-                    │                Agent Loop                │
-                    │                                          │
-   WithSystemPrompt │   ┌─────────┐   tool calls   ┌────────┐  │
-   WithHistory ───► │   │  model  │ ─────────────► │  tool  │  │
-                    │   └────┬────┘ ◄───────────── └────┬───┘  │
-                    │        │        tool results      │      │
-                    │        ▼                          │      │
-                    │   最终回答 ◄──────────────────────┘      │
-                    │      （无 tool call 即结束）              │
-                    └──────────────────────────────────────────┘
-                     ▲ modelWarp  ▲ toolWarp  ▲ 7 × hooks
-                     │  重试/降级  │ 超时/防护  │ 拦截/注入/清理
+```mermaid
+flowchart LR
+    subgraph 组装层
+        A["NewAgent()"]
+        W1["ModelWarp<br/>重试 / 降级 / 路由"]
+        W2["ToolWarp<br/>卸载 / 防护 / 缓存"]
+        H["Hooks ×7<br/>拦截 / 注入 / 清理"]
+        A --> W1 & W2 & H
+    end
+
+    subgraph LOOP ["Loop 引擎（只负责流转）"]
+        direction LR
+        M["🧠 model"] -- "tool calls" --> T["🔧 tool"]
+        T -- "tool results" --> M
+        M -- "无 tool call" --> OUT["最终回答"]
+    end
+
+    W1 -. 包装 .-> M
+    W2 -. 包装 .-> T
+    H -. 插入 .-> LOOP
+
+    LOOP --> E["Event 流<br/>OnEvent / RunAsync"]
+    LOOP --> S["State<br/>可序列化 · 可恢复"]
 ```
 
 | 能力 | 传统框架 | ezloop |
@@ -110,23 +119,34 @@ func main() {
 
 ## Loop 全景
 
-```
-startHook
-└─ 循环体（引擎根据"模型输出是否含 tool call"自动路由回边）
-   │
-   │  modelStartHook ──► [model] ──► modelEndHook
-   │       (预算守卫)      ▲  ▲        (响应改写)
-   │                      │  │
-   │         ┌────────────┘  └── tool calls
-   │         ▼
-   │  toolStartHook ──► [tool] ──► toolEndHook
-   │  (Skip/Abort 短路)              (审计日志)
-   │         │
-   │         ▼
-   │  loopHook（回边前：max-iteration 守卫 / 上下文压缩 / 配置热加载）
-   │
-   └─ 无 tool call → 退出
-endHook（无论成败都执行，连接清理等）
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as 调用方
+    participant E as Loop 引擎
+    participant H as Hooks
+    participant M as Model节点
+    participant T as Tool节点
+
+    U->>E: Run(ctx, input, WithHistory...)
+    E->>H: startHook（注入工具/技能指令）
+    loop 每次迭代（≤ MaxIterations）
+        E->>H: modelStartHook（预算守卫）
+        E->>M: Invoke / Stream
+        M-->>E: 响应（文本 或 tool calls）
+        E->>H: modelEndHook（响应改写）
+        alt 响应含 tool calls
+            E->>H: toolStartHook（可 Skip / Abort 短路）
+            E->>T: 并发执行（≤ MaxConcurrency，消息保序）
+            T-->>E: 工具结果（错误回传模型自纠）
+            E->>H: toolEndHook（审计）
+            E->>H: loopHook（回边前：压缩 / 热加载）
+        else 无 tool calls
+            E-->>U: 最终回答（completed）
+        end
+    end
+    E->>H: endHook（无论成败都执行）
+    E-->>U: LoopState（Messages 可序列化恢复）
 ```
 
 - **工具错误不终止 loop**：错误结果回传模型供其自纠；只有 hook 报错或 `ActionAbort` 才终止
@@ -135,6 +155,35 @@ endHook（无论成败都执行，连接清理等）
 - **自定义事件**：任何 hook 都能通过 `state.EmitEvent("ns.type", data)` 向 OnEvent 推送自己的事件（类型建议加命名空间前缀，如 `approve.denied`），时间戳与迭代号自动补全
 
 ## 三维扩展体系
+
+```mermaid
+flowchart TB
+    subgraph F ["框架层（零依赖）"]
+        direction LR
+        CORE["core 引擎"]
+        ITF["types / hook / provider / event<br/>纯接口"]
+        CORE --- ITF
+    end
+
+    subgraph X ["扩展层（ext，能力实现）"]
+        direction LR
+        subgraph 节点维度 ["① 节点：怎么执行"]
+            PW["provider 实现与 Warp<br/>openai · modelretry"]
+            TW["tool 实现与 Warp<br/>safetool · offload"]
+        end
+        subgraph 流维度 ["② 流：什么时候插入逻辑"]
+            HK["Hook 插件<br/>mcp · skill · approve · summary · filetools"]
+        end
+        subgraph 底座 ["③ 共享底座"]
+            FS["fs.FileSystem"]
+        end
+        HK --> FS
+        TW --> FS
+    end
+
+    PW & TW & HK -->|"组装"| CORE
+    CORE -->|"Event / State"| USE["你的应用"]
+```
 
 ### Warp：节点的扩展点（引擎标准能力）
 
@@ -242,6 +291,6 @@ go run ./examples/echo
 
 <div align="center">
 
-**ezloop** — 极简不是功能少，是每个能力都长在该长的地方。
+**ezloop** — 简单,但不简陋。
 
 </div>
