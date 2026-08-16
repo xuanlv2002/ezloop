@@ -235,6 +235,35 @@ func TestSystemPromptAndHistory(t *testing.T) {
 	}
 }
 
+// 历史快照中的 system 消息（agent prompt / skill 注入）不重复带入：
+// 多轮对话每轮恰好一条 system。
+func TestHistorySystemNotDuplicated(t *testing.T) {
+	snapshot := []types.Message{
+		{Role: types.RoleSystem, Content: "be strict"},
+		{Role: types.RoleSystem, Content: "# skill: sql"},
+		{Role: types.RoleUser, Content: "q1"},
+		{Role: types.RoleAssistant, Content: "a1"},
+	}
+	state, err := NewAgent(testutil.Scripted(testutil.Text("ok")),
+		WithSystemPrompt("be strict")).Run(context.Background(), "q2",
+		WithHistory(snapshot...))
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	sysCount := 0
+	for _, m := range state.Messages {
+		if m.Role == types.RoleSystem {
+			sysCount++
+		}
+	}
+	if sysCount != 1 || state.Messages[0].Content != "be strict" {
+		t.Fatalf("system messages: %d", sysCount)
+	}
+	if len(state.Messages) != 5 { // system + q1 + a1 + q2 + ok
+		t.Fatalf("messages: %d", len(state.Messages))
+	}
+}
+
 // ToolWarp 覆盖静态注册与 hook 注入的工具。
 type tagWrap struct{ log *[]string }
 

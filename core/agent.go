@@ -111,9 +111,16 @@ type RunOption func(*types.LoopState)
 
 // WithHistory 携带历史对话消息（多轮会话延续），
 // 历史位于本次 input 之前、system 提示词之后。
+// system 消息会被过滤：它们是 agent 的属性（WithSystemPrompt、skill hook），
+// 每轮由引擎重新注入，历史快照中的 system 不应重复带入。
 func WithHistory(messages ...types.Message) RunOption {
 	return func(state *types.LoopState) {
-		state.Messages = append(state.Messages, messages...)
+		for _, m := range messages {
+			if m.Role == types.RoleSystem {
+				continue
+			}
+			state.Messages = append(state.Messages, m)
+		}
 	}
 }
 
