@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ezloop · 快速开始</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --bg-soft: #f6f8fa;
+    --sidebar: #0f172a;
+    --sidebar-hover: #1e293b;
+    --text: #1f2937;
+    --muted: #64748b;
+    --accent: #00add8;
+    --accent-soft: #e0f7fd;
+    --border: #e5e7eb;
+    --code-bg: #0f172a;
+    --code-text: #e2e8f0;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: var(--text); background: var(--bg); line-height: 1.75;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  /* ─── 左侧导航 ─── */
+  nav {
+    position: fixed; top: 0; left: 0; bottom: 0; width: 264px;
+    background: var(--sidebar); color: #cbd5e1;
+    padding: 28px 0; overflow-y: auto;
+  }
+  .brand {
+    padding: 0 24px 20px; border-bottom: 1px solid #1e293b;
+  }
+  .brand h1 { color: #fff; font-size: 26px; letter-spacing: 1px; }
+  .brand p { font-size: 12.5px; color: #64748b; margin-top: 4px; }
+  .nav-group { margin-top: 18px; }
+  .nav-group .label {
+    font-size: 11.5px; letter-spacing: 2px; color: #475569;
+    padding: 8px 24px 4px; text-transform: uppercase;
+  }
+  nav a.item {
+    display: block; padding: 7px 24px; color: #94a3b8; font-size: 14px;
+    border-left: 3px solid transparent; transition: all .15s;
+  }
+  nav a.item:hover { background: var(--sidebar-hover); color: #fff; text-decoration: none; }
+  nav a.item.active {
+    background: var(--sidebar-hover); color: var(--accent);
+    border-left-color: var(--accent);
+  }
+
+  /* ─── 右侧内容 ─── */
+  main { margin-left: 264px; max-width: 860px; padding: 48px 56px 96px; }
+  section { margin-bottom: 72px; scroll-margin-top: 24px; }
+  h2 {
+    font-size: 26px; padding-bottom: 12px; border-bottom: 1px solid var(--border);
+    margin-bottom: 20px;
+  }
+  h2 .num { color: var(--accent); margin-right: 10px; font-family: Consolas, monospace; }
+  h3 { font-size: 18px; margin: 28px 0 12px; }
+  p { margin: 10px 0; }
+  ul, ol { padding-left: 24px; margin: 10px 0; }
+  li { margin: 5px 0; }
+  code.inline {
+    background: var(--accent-soft); color: #0369a1; border-radius: 4px;
+    padding: 2px 7px; font-size: 88%;
+    font-family: Consolas, "JetBrains Mono", monospace;
+  }
+  .tip {
+    background: #fffbeb; border-left: 4px solid #f59e0b; border-radius: 4px;
+    padding: 12px 18px; margin: 18px 0; font-size: 14.5px;
+  }
+  .tip.blue { background: #eff6ff; border-left-color: #3b82f6; }
+
+  pre {
+    background: var(--code-bg); color: var(--code-text); border-radius: 10px;
+    padding: 20px 24px; overflow-x: auto; margin: 16px 0;
+    font-size: 13.5px; line-height: 1.7;
+    font-family: Consolas, "JetBrains Mono", monospace;
+  }
+  pre .cm { color: #64748b; }          /* 注释 */
+  pre .kw { color: #7dd3fc; }          /* 关键字 */
+  pre .str { color: #86efac; }         /* 字符串 */
+  pre .fn { color: #fbbf24; }          /* 函数/类型 */
+  pre .tag { color: #f0abfc; }         /* 包名/点号前缀 */
+
+  table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 14.5px; }
+  th, td { border: 1px solid var(--border); padding: 9px 14px; text-align: left; }
+  th { background: var(--bg-soft); }
+
+  footer { border-top: 1px solid var(--border); padding-top: 20px; color: var(--muted); font-size: 13.5px; }
+
+  @media (max-width: 900px) {
+    nav { position: static; width: 100%; bottom: auto; }
+    main { margin-left: 0; padding: 32px 22px; }
+  }
+</style>
+</head>
+<body>
+
+<nav id="nav">
+  <div class="brand">
+    <h1>ezloop</h1>
+    <p>一个 Loop · 两个节点 · 七个钩子</p>
+  </div>
+  <div class="nav-group">
+    <div class="label">开始</div>
+    <a class="item" href="#intro">简介</a>
+    <a class="item" href="#install">安装</a>
+    <a class="item" href="#first-agent">第一个 Agent</a>
+  </div>
+  <div class="nav-group">
+    <div class="label">核心用法</div>
+    <a class="item" href="#streaming">流式输出</a>
+    <a class="item" href="#tools">自定义工具</a>
+    <a class="item" href="#multiturn">多轮对话</a>
+    <a class="item" href="#async">异步与取消</a>
+  </div>
+  <div class="nav-group">
+    <div class="label">扩展体系</div>
+    <a class="item" href="#hooks">Hook 插件</a>
+    <a class="item" href="#warp">Warp 中间件</a>
+    <a class="item" href="#mcp">MCP 接入</a>
+  </div>
+  <div class="nav-group">
+    <div class="label">更多</div>
+    <a class="item" href="#next">下一步</a>
+  </div>
+</nav>
+
+<main>
+
+<section id="intro">
+  <h2><span class="num">00</span>简介</h2>
+  <p>ezloop 是一个极简风格的 Golang Agent 框架：核心只有一个 <b>model ↔ tool 循环引擎</b>，其余一切（重试、MCP、审批、技能、文件工具…）都是可插拔的扩展。</p>
+  <table>
+    <tr><th>概念</th><th>关注点</th><th>扩展方式</th></tr>
+    <tr><td><b>model</b></td><td>节点本身：模型调用</td><td>实现 <code class="inline">provider.ModelProvider</code> + <code class="inline">WithModelWarp</code></td></tr>
+    <tr><td><b>tool</b></td><td>节点本身：工具执行</td><td>实现 <code class="inline">types.Tool</code> + <code class="inline">WithToolWarp</code></td></tr>
+    <tr><td><b>hook</b></td><td>流的前后：生命周期与控制流</td><td>实现 hook 小接口 + <code class="inline">WithHooks</code></td></tr>
+  </table>
+  <p>一句话：<b>model 和 tool 管节点怎么执行，hook 管流程什么时候插入逻辑。</b></p>
+</section>
+
+<section id="install">
+  <h2><span class="num">01</span>安装</h2>
+  <p>要求 Go 1.25+：</p>
+<pre>go get github.com/xuanlv2002/ezloop</pre>
+  <p>框架层零第三方依赖；接入 MCP 等能力时才会引入对应官方 SDK（都在 <code class="inline">ext/</code> 下，不用不引入）。</p>
+</section>
+
+<section id="first-agent">
+  <h2><span class="num">02</span>第一个 Agent</h2>
+  <p>三步：创建 Provider → 组装 Agent → Run。</p>
+<pre><span class="kw">package</span> main
+
+<span class="kw">import</span> (
+    <span class="str">"context"</span>
+
+    <span class="tag">core</span>   <span class="str">"github.com/xuanlv2002/ezloop/core"</span>
+    <span class="tag">openai</span> <span class="str">"github.com/xuanlv2002/ezloop/ext/provider/openai"</span>
+)
+
+<span class="kw">func</span> <span class="fn">main</span>() {
+    p := openai.<span class="fn">New</span>(openai.Options{
+        BaseURL: <span class="str">"https://api.openai.com/v1"</span>, <span class="cm">// 可换 DeepSeek / Ollama 等兼容端点</span>
+        APIKey:  <span class="str">"sk-xxx"</span>,
+        Model:   <span class="str">"gpt-4o-mini"</span>,
+    })
+
+    agent := core.<span class="fn">NewAgent</span>(p,
+        core.<span class="fn">WithSystemPrompt</span>(<span class="str">"你是一个严谨的助手"</span>),
+    )
+
+    state, err := agent.<span class="fn">Run</span>(context.Background(), <span class="str">"你好，介绍一下你自己"</span>)
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        <span class="fn">panic</span>(err)
+    }
+    <span class="fn">println</span>(state.LastResponse.Content) <span class="cm">// 最终回答</span>
+    <span class="fn">println</span>(state.StopReason)               <span class="cm">// completed</span>
+}</pre>
+  <p>Run 内部发生了什么：模型响应若包含 tool calls，引擎自动执行工具并把结果回传模型，循环往复，直到模型给出最终回答、达到 <code class="inline">MaxIterations</code>、被 hook 终止或 ctx 取消。</p>
+</section>
+
+<section id="streaming">
+  <h2><span class="num">03</span>流式输出</h2>
+  <p>开启 <code class="inline">WithStreaming</code> 后，chunk 通过事件实时到达：</p>
+<pre>agent := core.<span class="fn">NewAgent</span>(p,
+    core.<span class="fn">WithStreaming</span>(<span class="kw">true</span>),
+    core.<span class="fn">WithOnEvent</span>(<span class="kw">func</span>(e event.Event) {
+        <span class="kw">switch</span> e.Type {
+        <span class="kw">case</span> event.EventModelChunk:
+            <span class="fn">print</span>(e.Data.(<span class="kw">string</span>))      <span class="cm">// 增量文本</span>
+        <span class="kw">case</span> event.EventToolStart:
+            <span class="cm">// e.Data.(*types.ToolCall)</span>
+        }
+    }),
+)</pre>
+  <div class="tip blue">Event 只做观察（只读），Hook 才能修改状态——两者严格分离。任何 hook 也可以用 <code class="inline">state.EmitEvent("my.type", data)</code> 发送自定义事件。</div>
+</section>
+
+<section id="tools">
+  <h2><span class="num">04</span>自定义工具</h2>
+  <p>实现 <code class="inline">types.Tool</code> 四个方法即可：</p>
+<pre><span class="kw">type</span> <span class="fn">TimeTool</span> <span class="kw">struct</span>{}
+
+<span class="kw">func</span> (TimeTool) <span class="fn">Name</span>() <span class="kw">string</span>        { <span class="kw">return</span> <span class="str">"now"</span> }
+<span class="kw">func</span> (TimeTool) <span class="fn">Description</span>() <span class="kw">string</span> { <span class="kw">return</span> <span class="str">"获取当前本地时间"</span> }
+<span class="kw">func</span> (TimeTool) <span class="fn">ArgsSchema</span>() json.RawMessage {
+    <span class="kw">return</span> json.<span class="fn">RawMessage</span>(<span class="str">`{"type":"object","properties":{}}`</span>)
+}
+<span class="kw">func</span> (TimeTool) <span class="fn">Invoke</span>(_ context.Context, _ json.RawMessage) (<span class="kw">string</span>, <span class="kw">error</span>) {
+    <span class="kw">return</span> time.Now().<span class="fn">Format</span>(<span class="str">"2006-01-02 15:04:05"</span>), <span class="kw">nil</span>
+}
+
+agent := core.<span class="fn">NewAgent</span>(p,
+    core.<span class="fn">WithTools</span>(TimeTool{}),
+    core.<span class="fn">WithHyperParams</span>(core.HyperParams{
+        MaxIterations:  8,
+        MaxConcurrency: 4, <span class="cm">// 单轮工具并发上限，消息与事件仍保序</span>
+    }),
+)</pre>
+  <div class="tip">工具执行失败或工具不存在<b>不会终止 loop</b>——错误作为结果回传模型供其自纠。同路径并发写冲突可参考 filetools 内置的 per-path 修改队列。</div>
+</section>
+
+<section id="multiturn">
+  <h2><span class="num">05</span>多轮对话</h2>
+  <p>可恢复状态就是 <code class="inline">state.Messages</code>（纯数据，可存库）。下一轮直接作为历史传入：</p>
+<pre>state1, _ := agent.<span class="fn">Run</span>(ctx, <span class="str">"读取 hello.txt"</span>)
+
+<span class="cm">// 存库 / 传给 UI / 跨进程 …</span>
+
+state2, _ := agent.<span class="fn">Run</span>(ctx, <span class="str">"再总结一下</span>",
+    core.<span class="fn">WithHistory</span>(state1.Messages...))</pre>
+  <p>人机审批也走同一模式：第 1 轮拦截 → 用户批准写入 <code class="inline">approve.Store</code> → 第 2 轮携带历史放行，见 <code class="inline">examples/approval</code>。</p>
+</section>
+
+<section id="async">
+  <h2><span class="num">06</span>异步与取消</h2>
+  <p>服务端场景用 <code class="inline">RunAsync</code>：事件通道 + 取消 + Wait：</p>
+<pre>h := agent.<span class="fn">RunAsync</span>(ctx, <span class="str">"长任务"</span>)
+<span class="kw">defer</span> h.<span class="fn">Cancel</span>()  <span class="cm">// 幂等；loop 以 cancelled 停止</span>
+
+<span class="kw">for</span> e := <span class="kw">range</span> h.<span class="fn">Events</span>() { <span class="cm">// loop 结束自动 close</span>
+    render(e)
+}
+state, err := h.<span class="fn">Wait</span>()</pre>
+  <p>同步模式同样支持取消：<code class="inline">Run(ctx, ...)</code> 的 ctx 取消后，引擎在当前节点收尾并以 <code class="inline">cancelled</code> 停止，EndHook 保证执行。</p>
+</section>
+
+<section id="hooks">
+  <h2><span class="num">07</span>Hook 插件</h2>
+  <p>七个时机的小接口，只实现关心的：</p>
+  <table>
+    <tr><th>接口</th><th>时机</th><th>典型用途</th></tr>
+    <tr><td><code class="inline">StartHook</code></td><td>loop 开始</td><td>注入工具（mcp router / 文件工具）</td></tr>
+    <tr><td><code class="inline">ModelStartHook</code></td><td>调用模型前</td><td>预算守卫、提前终止</td></tr>
+    <tr><td><code class="inline">ModelEndHook</code></td><td>模型响应后</td><td>响应改写</td></tr>
+    <tr><td><code class="inline">ToolStartHook</code></td><td>工具调用前</td><td>审批拦截（Skip / Abort 短路）</td></tr>
+    <tr><td><code class="inline">ToolEndHook</code></td><td>工具调用后</td><td>审计日志</td></tr>
+    <tr><td><code class="inline">LoopHook</code></td><td>迭代回边前</td><td>上下文压缩、配置热加载</td></tr>
+    <tr><td><code class="inline">EndHook</code></td><td>loop 结束</td><td>连接清理、结果摘要</td></tr>
+  </table>
+  <p>手写一个预算守卫只需几行，健壮性（panic 恢复、error 上下文）由引擎兜底：</p>
+<pre><span class="kw">type</span> <span class="fn">BudgetHook</span> <span class="kw">struct</span>{ Max <span class="kw">int</span> }
+
+<span class="kw">func</span> (h BudgetHook) <span class="fn">Name</span>() <span class="kw">string</span> { <span class="kw">return</span> <span class="str">"budget"</span> }
+<span class="kw">func</span> (h BudgetHook) <span class="fn">OnModelStart</span>(_ context.Context, s *types.LoopState) <span class="kw">error</span> {
+    <span class="kw">if</span> s.Iteration > h.Max {
+        s.Stop = <span class="kw">true</span> <span class="cm">// 提前终止</span>
+    }
+    <span class="kw">return</span> <span class="kw">nil</span>
+}</pre>
+  <p>官方插件一行接入：</p>
+<pre>core.<span class="fn">WithHooks</span>(
+    skill.<span class="fn">New</span>(skill.Skill{Name: <span class="str">"sql"</span>, Instructions: <span class="str">"..."</span>, Keywords: []<span class="kw">string</span>{<span class="str">"db"</span>}}),
+    approve.<span class="fn">New</span>(approver),                       <span class="cm">// 工具审批</span>
+    summary.<span class="fn">New</span>(smallModel, <span class="str">""</span>),                  <span class="cm">// 结束自动摘要 → Metadata</span>
+    filetools.<span class="fn">New</span>(fs.<span class="fn">NewLocal</span>(<span class="str">"./workspace"</span>)),     <span class="cm">// 文件工具集（root 沙箱）</span>
+)</pre>
+</section>
+
+<section id="warp">
+  <h2><span class="num">08</span>Warp 中间件</h2>
+  <p>节点维度的装饰器，与 Hook 正交：</p>
+<pre>core.<span class="fn">NewAgent</span>(p,
+    core.<span class="fn">WithModelWarp</span>(modelretry.<span class="fn">Warp</span>()),      <span class="cm">// model 节点：指数退避重试</span>
+    core.<span class="fn">WithToolWarp</span>(
+        safetool.<span class="fn">Warp</span>(),                        <span class="cm">// panic 恢复 + error 上下文</span>
+        offload.<span class="fn">Warp</span>(fsys),                      <span class="cm">// 大结果卸载到文件系统</span>
+    ),
+)</pre>
+  <p><code class="inline">WithToolWarp</code> 挂载在 ToolRegistry 上：<code class="inline">WithTools</code> 静态注册与 hook 运行时注入的工具（如 mcp router）都会被包装。自定义中间件就是一个函数：</p>
+<pre><span class="kw">func</span> <span class="fn">auditWarp</span>(p provider.ModelProvider) provider.ModelProvider { <span class="cm">/* 包装 Invoke/Stream */</span> }</pre>
+</section>
+
+<section id="mcp">
+  <h2><span class="num">09</span>MCP 接入</h2>
+  <p>模型只看到一个 schema 恒定的 <code class="inline">mcp_router</code> 工具（KV cache 友好），server 配置热加载、工具自发现、ACL 收敛在 router 内部：</p>
+<pre>cfg := mcp.Config{
+    Servers: []mcp.ServerConfig{{
+        Name:    <span class="str">"fs"</span>,
+        Allow:   []<span class="kw">string</span>{<span class="str">"read"</span>},                <span class="cm">// ACL 白名单（可选）</span>
+        Factory: mcp.<span class="fn">StreamableHTTP</span>(<span class="str">"https://mcp.example.com"</span>, <span class="kw">nil</span>),
+        <span class="cm">// 或本地进程:  mcp.Stdio("myserver", "--mode=stdio")</span>
+    }},
+}
+
+agent := core.<span class="fn">NewAgent</span>(p, core.<span class="fn">WithHooks</span>(mcp.<span class="fn">NewHook</span>(cfg)))</pre>
+  <p>模型通过 <code class="inline">action=list_tools</code> 自发现工具，再以 <code class="inline">action=call_tool</code> 调用；失败返回带 schema 提示的结构化错误供模型自纠。</p>
+</section>
+
+<section id="next">
+  <h2><span class="num">10</span>下一步</h2>
+  <ul>
+    <li>完整架构与扩展清单：<a href="https://github.com/xuanlv2002/ezloop#readme">GitHub README</a></li>
+    <li>可运行示例：<code class="inline">examples/chat</code>（真实 CLI 对话）、<code class="inline">examples/echo</code>（mcp 全链路）、<code class="inline">examples/approval</code>（轮次式审批）</li>
+    <li>跑测试：<code class="inline">go test ./...</code></li>
+  </ul>
+  <footer>ezloop — 极简不是功能少，是每个能力都长在该长的地方。</footer>
+</section>
+
+</main>
+
+<script>
+  // scrollspy：高亮当前章节
+  const items = [...document.querySelectorAll('nav a.item')];
+  const sections = items.map(a => document.querySelector(a.getAttribute('href'))).filter(Boolean);
+  function highlight() {
+    let idx = 0;
+    sections.forEach((s, i) => { if (s.getBoundingClientRect().top < 120) idx = i; });
+    items.forEach((a, i) => a.classList.toggle('active', i === idx));
+  }
+  document.addEventListener('scroll', highlight, { passive: true });
+  highlight();
+</script>
+</body>
+</html>

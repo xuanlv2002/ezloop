@@ -67,6 +67,8 @@ flowchart LR
 
 ## 快速上手
 
+📖 **[在线快速开始文档](docs/index.html)**（左侧导航 + 分步示例，覆盖安装 → 第一个 Agent → 流式 → 工具 → 多轮 → 异步 → Hook/Warp → MCP）
+
 ```bash
 go get github.com/xuanlv2002/ezloop
 ```
