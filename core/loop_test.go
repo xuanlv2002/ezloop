@@ -85,9 +85,9 @@ func TestConcurrentToolsPreserveOrder(t *testing.T) {
 }
 
 type sleepTool struct {
-	mu      sync.Mutex
+	mu                sync.Mutex
 	inflight, maxSeen int
-	delay   time.Duration
+	delay             time.Duration
 }
 
 func (t *sleepTool) Name() string                { return "sleep" }
@@ -144,9 +144,85 @@ type denyEcho struct{ skip bool }
 func (denyEcho) Name() string { return "deny" }
 func (h denyEcho) OnToolStart(_ context.Context, _ *types.LoopState, _ *types.ToolCall) (hook.Action, error) {
 	if h.skip {
-		return hook.ActionSkip, nil
+		return hook.Skip(""), nil
 	}
-	return hook.ActionAbort, nil
+	return hook.Abort, nil
+}
+
+// Skip 携带结果文案 → 结果消息使用该文案（拒绝理由、用户回答等）。
+type prefillDeny struct{}
+
+func (prefillDeny) Name() string { return "prefill" }
+func (prefillDeny) OnToolStart(_ context.Context, _ *types.LoopState, _ *types.ToolCall) (hook.Action, error) {
+	return hook.Skip("user says no: protected dir"), nil
+}
+
+func TestSkipPrefilledResult(t *testing.T) {
+	a := NewAgent(
+		testutil.Scripted(
+			testutil.ToolCalls(testutil.Call("1", "echo", `{}`)),
+			testutil.Text("done"),
+		),
+		WithTools(testutil.EchoTool{}),
+		WithHooks(prefillDeny{}),
+	)
+	state, err := a.Run(context.Background(), "hi")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if state.Messages[2].Content != "user says no: protected dir" {
+		t.Fatalf("prefilled msg: %q", state.Messages[2].Content)
+	}
+}
+
+// abort / hook 报错后未执行的调用也补齐结果消息：历史无悬空 tool_call，
+// 协议完整（持久化恢复安全）。
+func TestExitPathsKeepHistoryComplete(t *testing.T) {
+	script := func() *testutil.ScriptedProvider {
+		return testutil.Scripted(
+			testutil.ToolCalls(
+				testutil.Call("1", "echo", `{}`),
+				testutil.Call("2", "echo", `{}`),
+				testutil.Call("3", "echo", `{}`),
+			),
+			testutil.Text("done"),
+		)
+	}
+
+	state, _ := NewAgent(script(), WithTools(testutil.EchoTool{}),
+		WithHooks(denyEcho{skip: false})).Run(context.Background(), "hi")
+	if state.StopReason != types.StopAborted {
+		t.Fatalf("abort stop: %s", state.StopReason)
+	}
+	if len(state.Messages) != 5 { // user + assistant + 3 tool
+		t.Fatalf("abort history: %d messages", len(state.Messages))
+	}
+	for i, m := range state.Messages[2:] {
+		if m.Role != types.RoleTool || m.Content != "not executed: echo" {
+			t.Fatalf("abort msg[%d]: %+v", i, m)
+		}
+	}
+
+	state2, err := NewAgent(script(), WithTools(testutil.EchoTool{}),
+		WithHooks(errToolStart{})).Run(context.Background(), "hi")
+	if err == nil {
+		t.Fatal("want hook error")
+	}
+	if len(state2.Messages) != 5 {
+		t.Fatalf("hook-err history: %d messages", len(state2.Messages))
+	}
+	for i, m := range state2.Messages[2:] {
+		if m.Role != types.RoleTool || m.Content != "not executed: echo" {
+			t.Fatalf("hook-err msg[%d]: %+v", i, m)
+		}
+	}
+}
+
+type errToolStart struct{}
+
+func (errToolStart) Name() string { return "errts" }
+func (errToolStart) OnToolStart(_ context.Context, _ *types.LoopState, _ *types.ToolCall) (hook.Action, error) {
+	return hook.Proceed, fmt.Errorf("boom")
 }
 
 // hook panic 被引擎恢复为带上下文的错误，EndHook 仍执行。

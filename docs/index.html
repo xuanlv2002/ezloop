@@ -515,7 +515,7 @@
       <tr><td>1</td><td><code>StartHook</code></td><td>loop 开始</td><td>注入工具、技能指令</td></tr>
       <tr><td>2</td><td><code>ModelStartHook</code></td><td>调用模型前</td><td>预算守卫（置 <code>Stop</code> 提前终止）</td></tr>
       <tr><td>3</td><td><code>ModelEndHook</code></td><td>模型响应后</td><td>响应改写、审计</td></tr>
-      <tr><td>4</td><td><code>ToolStartHook</code></td><td>工具调用前</td><td>审批 / 权限拦截（<code>Skip</code> / <code>Abort</code> 短路）</td></tr>
+      <tr><td>4</td><td><code>ToolStartHook</code></td><td>工具调用前</td><td>审批 / 人机中断（<code>Skip(result)</code> / <code>Abort</code> 短路，可阻塞等决策）</td></tr>
       <tr><td>5</td><td><code>ToolEndHook</code></td><td>工具调用后</td><td>审计日志</td></tr>
       <tr><td>6</td><td><code>LoopHook</code></td><td>迭代回边前</td><td>上下文压缩、配置热加载</td></tr>
       <tr><td>7</td><td><code>EndHook</code></td><td>loop 结束</td><td>摘要、资源清理、会话保存</td></tr>
@@ -539,8 +539,9 @@ agent := <span class="f">core.NewAgent</span>(p, core.<span class="f">WithHooks<
     <h3>工具执行：三阶段模型</h3>
     <ul>
       <li><strong>判定</strong> —— <code class="inline">toolStartHook</code> 顺序执行；
-        返回 <code class="inline">ActionSkip</code> 跳过该调用（结果消息注明被谁拦截），
-        <code class="inline">ActionAbort</code> 终止整个 loop。</li>
+        返回 <code class="inline">hook.Skip(result)</code> 跳过该调用（result 作为工具结果写入历史），
+        <code class="inline">hook.Abort</code> 终止整个 loop。hook 可以阻塞等待人工决策
+        （审批、ask_user、规划确认都建立在这上面），引擎对「等待」零感知。</li>
       <li><strong>执行</strong> —— 并发执行（≤ <code>MaxConcurrency</code>），每个调用独立 panic 恢复，
         工具错误不终止 loop。</li>
       <li><strong>收尾</strong> —— 结果消息、<code class="inline">toolEndHook</code>、事件严格按调用顺序发出，并发但不乱序。</li>
@@ -548,7 +549,10 @@ agent := <span class="f">core.NewAgent</span>(p, core.<span class="f">WithHooks<
 
     <h3>健壮性语义（引擎内置）</h3>
     <ul>
-      <li><strong>工具错误回传模型自纠</strong> —— 只有 hook 报错或 <code>ActionAbort</code> 才终止 loop；</li>
+      <li><strong>工具错误回传模型自纠</strong> —— 只有 hook 报错或 <code>hook.Abort</code> 才终止 loop；</li>
+      <li><strong>历史永不断裂</strong> —— 无论完成、Skip、Abort、hook 报错还是取消，
+        每个 tool_call 都有对应结果消息：发给模型的序列永远协议完整，持久化恢复无需理解断点
+        （进入引擎前的历史由 <code>contextfix</code> 兜底）；</li>
       <li><strong>Hook 标准防护</strong> —— 任意 hook panic 被恢复为带 hook 名与阶段的 error，单个扩展崩溃不会炸掉 loop；</li>
       <li><strong>ctx 取消</strong> —— 循环顶部与模型调用检查 <code class="inline">ctx.Err()</code>，归类为 <code class="inline">cancelled</code> 而非 <code class="inline">error</code>；</li>
       <li><strong>EndHook 保证执行</strong> —— defer 语义，成败皆跑。</li>
@@ -824,19 +828,76 @@ agent := core.<span class="f">NewAgent</span>(p, core.<span class="f">WithHooks<
 
     <div class="ext">
       <h3>ext/hook/approve <span class="badge hook">hook</span></h3>
-      <p>工具审批：两种玩法 —— 同步阻塞式 Approver（CLI 里 y/n 确认），
-      或轮次式 Store（预先授权指纹，命中即放行，默认消费一次）。拒绝默认 Skip（可传 <code class="inline">ActionAbort</code>）。</p>
+      <p>工具审批：OnToolStart 发出 <code class="inline">approve.request</code> 事件后阻塞，
+      直到使用方经 Decisions channel 送回决策 —— 中断 = goroutine 阻塞，恢复 = channel 来数据。
+      拒绝理由经 <code class="inline">hook.Skip("denied: ...")</code> 成为工具结果进入历史，模型看得见为什么被拒。</p>
       <div class="codeblock">
         <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">approve.go</span></div>
-<pre><span class="c">// 同步阻塞：人工确认</span>
-h := approve.<span class="f">New</span>(<span class="k">func</span>(_ context.Context, c *types.ToolCall) (<span class="t">bool</span>, <span class="t">error</span>) {
-    <span class="k">return</span> <span class="f">askHuman</span>(c.Name, c.Args), <span class="k">nil</span>
+<pre>h, decisions := approve.<span class="f">New</span>(<span class="k">func</span>(c *types.ToolCall) <span class="t">bool</span> {
+    <span class="k">return</span> c.Name != <span class="s">"read_file"</span>   <span class="c">// false = 免审放行；nil = 全部审批</span>
 })
+agent := core.<span class="f">NewAgent</span>(p, core.<span class="f">WithHooks</span>(h))
 
-<span class="c">// 轮次式：预授权（tool + args 指纹粒度，命中即消费）</span>
-store := approve.<span class="f">NewStore</span>(<span class="k">true</span>)
-store.<span class="f">Approve</span>(<span class="s">"write_file"</span>, args)
-h2 := approve.<span class="f">New</span>(store.<span class="f">Approver</span>())</pre>
+<span class="c">// 决策端：OnEvent 呈现请求，独立 goroutine 送回（同步送回会死锁）</span>
+core.<span class="f">WithOnEvent</span>(<span class="k">func</span>(e event.Event) {
+    <span class="k">if</span> e.Type != approve.EventRequest { <span class="k">return</span> }
+    call := e.Data.(*types.ToolCall)
+    <span class="k">go func</span>() {
+        decisions &lt;- approve.Decision{CallID: call.ID, Approve: <span class="f">askHuman</span>(call)}
+    }()
+})</pre>
+      </div>
+      <div class="tip">
+        <b>多租户：</b>每会话一套 hook 实例（即一套 channel），事件推给前端，前端按钮回包即送回 channel ——
+        同一时刻至多一个请求在等（判定段串行），CallID 不匹配的过期决策自动忽略。
+      </div>
+    </div>
+
+    <div class="ext">
+      <h3>ext/hook/askuser <span class="badge hook">hook</span></h3>
+      <p>ask_user 工具：模型向用户提问，循环中断等待回答，回答原样作为工具结果进入历史。
+      与 approve 完全同构（事件 + channel），壳工具仅提供 schema 供模型发现。</p>
+      <div class="codeblock">
+        <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">askuser.go</span></div>
+<pre>h, answers := askuser.<span class="f">New</span>()
+agent := core.<span class="f">NewAgent</span>(p,
+    core.<span class="f">WithHooks</span>(h),
+    core.<span class="f">WithTools</span>(askuser.<span class="f">Tool</span>()),  <span class="c">// 注册壳工具供模型发现</span>
+)
+<span class="c">// OnEvent 收到 askuser.request（Args.question）→</span>
+<span class="c">// answers &lt;- askuser.Answer{CallID: call.ID, Input: 用户的回答}</span></pre>
+      </div>
+    </div>
+
+    <div class="ext">
+      <h3>ext/hook/taskplan <span class="badge hook">hook</span></h3>
+      <p>task_plan 工具：模型提交任务规划后中断等待用户处置 ——
+      <code class="inline">Execute</code>（按规划执行）/ <code class="inline">Reject</code>（否决）/
+      <code class="inline">Revise</code>（按修改意见调整后重新提交）。处置意见作为工具结果返回，
+      模型据此继续或修订，修订后重新提交会再次进入等待 —— 天然闭环。</p>
+      <div class="codeblock">
+        <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">taskplan.go</span></div>
+<pre>h, decisions := taskplan.<span class="f">New</span>()
+agent := core.<span class="f">NewAgent</span>(p,
+    core.<span class="f">WithHooks</span>(h),
+    core.<span class="f">WithTools</span>(taskplan.<span class="f">Tool</span>()),  <span class="c">// 模型提交 Args.plan</span>
+)
+<span class="c">// 用户反馈 →</span>
+decisions &lt;- taskplan.Decision{Kind: taskplan.Revise, Input: <span class="s">"加一步压测"</span>}</pre>
+      </div>
+    </div>
+
+    <div class="ext">
+      <h3>ext/hook/contextfix <span class="badge hook">hook</span></h3>
+      <p>历史修理：Run 开始时（OnStart）给缺失 tool 结果的调用补占位消息 ——
+      引擎保证本轮产生的历史完整，本 hook 保证历史进入引擎前完整
+      （外部注入的残缺历史、旧版本存档）。完整历史原样返回，零分配。</p>
+      <div class="codeblock">
+        <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">contextfix.go</span></div>
+<pre>core.<span class="f">WithHooks</span>(
+    contextfix.<span class="f">New</span>(),  <span class="c">// 建议挂 hooks 首位：历史先修理，后续 hook 再消费</span>
+    <span class="c">// ...</span>
+)</pre>
       </div>
     </div>
 
@@ -882,7 +943,7 @@ state, _ := agent.<span class="f">Run</span>(ctx, <span class="s">"继续刚才�
   <!-- ═══════════════ 06 构建本地 Agent ═══════════════ -->
   <section id="local-agent">
     <h2><span class="no">06</span>构建本地 Agent</h2>
-    <p class="sub">CLI 交互 · 文件沙箱 · 工具审批 · 技能 · 会话持久化 · 流式输出 —— 完整代码见 examples/chat。</p>
+    <p class="sub">CLI 交互 · 文件沙箱 · 审批 / 提问 / 规划确认 · 技能 · 会话持久化 · 流式输出 —— 完整代码见 examples/chat。</p>
 
     <div class="codeblock">
       <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">chat.go — 组装（完整版运行：go run ./examples/chat）</span></div>
@@ -891,31 +952,41 @@ session := localsession.<span class="f">New</span>(fsys, <span class="s">""</spa
 skillHook, err := skill.<span class="f">NewFromFS</span>(ctx, fsys, <span class="s">"skills"</span>)  <span class="c">// ③ 技能目录</span>
 <span class="k">if</span> err != <span class="k">nil</span> { skillHook = skill.<span class="f">New</span>() }              <span class="c">//   目录不存在则空集</span>
 
-<span class="c">// ④ CLI 审批：只读放行，写操作 y/n 确认</span>
+<span class="c">// ④ 人机交互三件套：审批 / 提问 / 规划，同一套事件 + channel 模式</span>
 scanner := bufio.<span class="f">NewScanner</span>(os.Stdin)
-approver := approve.<span class="f">New</span>(<span class="k">func</span>(_ context.Context, c *types.ToolCall) (<span class="t">bool</span>, <span class="t">error</span>) {
+approver, approveCh := approve.<span class="f">New</span>(<span class="k">func</span>(c *types.ToolCall) <span class="t">bool</span> {
     <span class="k">switch</span> c.Name {
     <span class="k">case</span> <span class="s">"read_file"</span>, <span class="s">"list_dir"</span>, <span class="s">"grep"</span>, <span class="s">"find"</span>:
-        <span class="k">return</span> <span class="k">true</span>, <span class="k">nil</span>
+        <span class="k">return</span> <span class="k">false</span>                          <span class="c">// 只读免审；ask_user / task_plan 也免审</span>
     }
-    fmt.<span class="f">Printf</span>(<span class="s">"\n⚠️  放行 %s? [y/N] "</span>, c.Name)
-    scanner.<span class="f">Scan</span>()
-    <span class="k">return</span> strings.<span class="f">EqualFold</span>(strings.<span class="f">TrimSpace</span>(scanner.Text()), <span class="s">"y"</span>), <span class="k">nil</span>
+    <span class="k">return</span> <span class="k">true</span>
 })
+asker, answerCh := askuser.<span class="f">New</span>()
+planner, planCh := taskplan.<span class="f">New</span>()
 
 agent := core.<span class="f">NewAgent</span>(p,
     core.<span class="f">WithSystemPrompt</span>(<span class="s">"你是命令行助手，能用工具就用工具"</span>),
     core.<span class="f">WithModelWarp</span>(modelretry.<span class="f">Warp</span>()),               <span class="c">// ⑤ 重试</span>
     core.<span class="f">WithToolWarp</span>(safetool.<span class="f">Warp</span>(), offload.<span class="f">Warp</span>(fsys)),  <span class="c">// ⑥ 防护 + 卸载</span>
     core.<span class="f">WithHooks</span>(
+        contextfix.<span class="f">New</span>(),   <span class="c">// ⑦ 历史修理：/resume 旧存档防悬空 tool_call</span>
         filetools.<span class="f">New</span>(fsys, <span class="k">func</span>(o *filetools.Options) { o.EnableExec = <span class="k">true</span> }),
-        skillHook, approver, summary.<span class="f">New</span>(p, <span class="s">""</span>), session,
+        skillHook, approver, asker, planner, summary.<span class="f">New</span>(p, <span class="s">""</span>), session,
     ),
+    core.<span class="f">WithTools</span>(askuser.<span class="f">Tool</span>(), taskplan.<span class="f">Tool</span>()),  <span class="c">// ⑧ 壳工具供模型发现</span>
     core.<span class="f">WithStreaming</span>(<span class="k">true</span>),
-    core.<span class="f">WithOnEvent</span>(<span class="k">func</span>(e event.Event) {              <span class="c">// ⑦ 流式渲染</span>
+    core.<span class="f">WithOnEvent</span>(<span class="k">func</span>(e event.Event) {              <span class="c">// ⑨ 流式渲染 + CLI 决策桥</span>
         <span class="k">switch</span> e.Type {
         <span class="k">case</span> event.EventModelChunk: fmt.<span class="f">Print</span>(e.Data.(<span class="t">string</span>))
         <span class="k">case</span> event.EventToolStart:  fmt.<span class="f">Printf</span>(<span class="s">"\n🔧 %s "</span>, e.Data.(*types.ToolCall).Name)
+        <span class="k">case</span> approve.EventRequest:  <span class="c">// 其余两个桥同构，见 examples/chat</span>
+            call := e.Data.(*types.ToolCall)
+            <span class="k">go func</span>() {
+                fmt.<span class="f">Printf</span>(<span class="s">"\n⚠️  放行 %s? [y/N] "</span>, call.Name)
+                scanner.<span class="f">Scan</span>()
+                approveCh &lt;- approve.Decision{CallID: call.ID,
+                    Approve: strings.<span class="f">EqualFold</span>(strings.<span class="f">TrimSpace</span>(scanner.Text()), <span class="s">"y"</span>)}
+            }()
         }
     }),
 )</pre>
@@ -997,8 +1068,9 @@ http.<span class="f">ListenAndServe</span>(<span class="s">":8080"</span>, <span
 
     <div class="tip">
       <b>事件即协议：</b>前端按 <code>event.Type</code> 渲染 —— model_chunk 打字机、tool_start 显示工具卡片、
-      iteration_end 划轮次线、loop_end 收尾。自定义 hook 的 <code class="inline">approve.denied</code>
-      等事件同样会流经这里。
+      iteration_end 划轮次线、loop_end 收尾。人机交互 hook 的 <code class="inline">approve.request</code> /
+      <code class="inline">askuser.request</code> 等事件同样会流经这里 —— 前端弹卡片，用户操作回包即送回 channel，
+      阻塞中的 loop 自然恢复。
     </div>
 
     <div class="tip warn">

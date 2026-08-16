@@ -109,7 +109,10 @@ state, err = h.Wait()
 | `ext/hook/mcp` | hook | mcpRouter 单工具封装（schema 恒定、KV cache 友好、配置热加载），内置官方 go-sdk |
 | `ext/hook/skill` | hook | 技能注入：代码定义或从 FS 目录加载 *.md（可选 .keywords） |
 | `ext/hook/summary` | hook | loop 结束自动生成摘要写入 Metadata |
-| `ext/hook/approve` | hook | 工具审批：同步阻塞式 Approver + 轮次式审批 Store |
+| `ext/hook/approve` | hook | 工具审批：channel 决策中断（EventRequest + Decisions 回传） |
+| `ext/hook/askuser` | hook | ask_user 工具：模型提问中断等回答，回答作为工具结果入史 |
+| `ext/hook/taskplan` | hook | task_plan 工具：规划提交中断等处置（执行/否决/修订） |
+| `ext/hook/contextfix` | hook | Run 开始时修理历史：缺失的 tool 结果补占位，序列协议完整 |
 | `ext/hook/filetools` | hook | 文件工具集：read_file（行分页）、write、edit、apply_patch、grep、find、bash；按 FS 能力注册，修改走 per-path 队列 |
 | `ext/hook/localsession` | hook | 会话持久化：滚动快照到 sessions/<id>.json，Load/List 恢复续聊 |
 
@@ -126,7 +129,7 @@ state, err = h.Wait()
 扩展层（能力实现，官方 SDK 依赖放这里，不用不引入）
 ├── ext/provider/openai
 ├── ext/warp/{model/modelretry, tool/safetool, tool/offload}
-├── ext/hook/{mcp,skill,summary,approve,filetools,localsession}
+├── ext/hook/{mcp,skill,summary,approve,askuser,taskplan,filetools,localsession}
 └── examples/chat        # 完整 agent：集成全部能力
 ```
 

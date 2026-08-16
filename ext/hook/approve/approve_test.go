@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/xuanlv2002/ezloop/core"
-	"github.com/xuanlv2002/ezloop/hook"
 	"github.com/xuanlv2002/ezloop/internal/testutil"
 	"github.com/xuanlv2002/ezloop/types"
 )
@@ -21,10 +21,10 @@ func (echoTool) Invoke(_ context.Context, args json.RawMessage) (string, error) 
 	return "ran " + string(args), nil
 }
 
-// 拒绝 → Skip（loop 继续）；Store 批准后放行（轮次式审批核心）。
-func TestApproveDenyAndStore(t *testing.T) {
-	store := NewStore(true)
-	denied := New(store.Approver())
+// 拒绝（带理由）→ 理由作为工具结果进入历史，loop 继续；批准 → 工具真执行。
+func TestApproveDecisions(t *testing.T) {
+	denied, denyCh := New(nil)
+	go func() { denyCh <- Decision{CallID: "1", Reason: "readonly env"} }()
 
 	state, err := core.NewAgent(
 		testutil.Scripted(
@@ -37,32 +37,85 @@ func TestApproveDenyAndStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if !strings.Contains(state.Messages[2].Content, "skipped by tool-start hook: echo") {
-		t.Fatalf("denied: %q", state.Messages[2].Content)
+	if state.StopReason != types.StopCompleted {
+		t.Fatalf("deny must continue loop: %s", state.StopReason)
+	}
+	if !strings.Contains(state.Messages[2].Content, "denied by user: readonly env") {
+		t.Fatalf("denied msg: %q", state.Messages[2].Content)
 	}
 
-	// 用户批准（args 指纹命中）后放行；approve-once 只放行一次。
-	store.Approve("echo", json.RawMessage(`{"a":1}`))
-	if !store.IsApproved("echo", json.RawMessage(`{"a":1}`)) {
-		t.Fatal("approved call must pass")
+	approved, okCh := New(nil)
+	go func() { okCh <- Decision{Approve: true} }()
+
+	state2, err := core.NewAgent(
+		testutil.Scripted(
+			testutil.ToolCalls(testutil.Call("1", "echo", `{"a":1}`)),
+			testutil.Text("done"),
+		),
+		core.WithTools(echoTool{}),
+		core.WithHooks(approved),
+	).Run(context.Background(), "hi")
+	if err != nil {
+		t.Fatalf("err: %v", err)
 	}
-	if store.IsApproved("echo", json.RawMessage(`{"a":1}`)) {
-		t.Fatal("approve-once store must consume on hit")
-	}
-	if store.IsApproved("echo", json.RawMessage(`{"a":2}`)) {
-		t.Fatal("changed args must not hit")
+	if state2.Messages[2].Content != `ran {"a":1}` {
+		t.Fatalf("approved msg: %q", state2.Messages[2].Content)
 	}
 }
 
-func TestAbortMode(t *testing.T) {
-	state, _ := core.NewAgent(
+// needs 过滤：返回 false 的调用不经审批直接放行。
+func TestApproveNeedsFilter(t *testing.T) {
+	h, ch := New(func(c *types.ToolCall) bool { return c.Name != "safe" })
+	go func() {
+		ch <- Decision{CallID: "2"} // 只有 call 2 走审批
+	}()
+
+	state, err := core.NewAgent(
+		testutil.Scripted(
+			testutil.ToolCalls(
+				testutil.Call("1", "safe", `{}`), // 免审直接执行
+				testutil.Call("2", "echo", `{}`), // 审批拒绝（无理由→默认文案）
+			),
+			testutil.Text("done"),
+		),
+		core.WithTools(testutil.EchoTool{}, safeTool{}),
+		core.WithHooks(h),
+	).Run(context.Background(), "hi")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if state.Messages[2].Content != "ran" {
+		t.Fatalf("safe msg: %q", state.Messages[2].Content)
+	}
+	if !strings.Contains(state.Messages[3].Content, "denied by user") {
+		t.Fatalf("denied msg: %q", state.Messages[3].Content)
+	}
+}
+
+type safeTool struct{}
+
+func (safeTool) Name() string                { return "safe" }
+func (safeTool) Description() string         { return "" }
+func (safeTool) ArgsSchema() json.RawMessage { return nil }
+func (safeTool) Invoke(_ context.Context, _ json.RawMessage) (string, error) {
+	return "ran", nil
+}
+
+// 无人决策 + ctx 取消 → StopCancelled，消息历史仍完整。
+func TestApproveCancel(t *testing.T) {
+	h, _ := New(nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() { time.Sleep(50 * time.Millisecond); cancel() }()
+
+	state, err := core.NewAgent(
 		testutil.Scripted(testutil.ToolCalls(testutil.Call("1", "echo", `{}`))),
 		core.WithTools(echoTool{}),
-		core.WithHooks(New(func(context.Context, *types.ToolCall) (bool, error) {
-			return false, nil
-		}, hook.ActionAbort)),
-	).Run(context.Background(), "hi")
-	if state.StopReason != types.StopAborted {
-		t.Fatalf("stop: %s", state.StopReason)
+		core.WithHooks(h),
+	).Run(ctx, "hi")
+	if err == nil || state.StopReason != types.StopCancelled {
+		t.Fatalf("stop=%s err=%v", state.StopReason, err)
+	}
+	if len(state.Messages) != 3 || state.Messages[2].ToolCallID != "1" {
+		t.Fatalf("history incomplete: %d messages", len(state.Messages))
 	}
 }

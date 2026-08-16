@@ -1,13 +1,16 @@
 // ezloop 完整 agent 示例：集成框架全部能力。
 //
 // 能力清单：
-//   Provider   openai（.env / 环境变量配置，SiliconFlow/DeepSeek/Ollama 兼容）
-//   Warp       modelretry（模型重试）· safetool（panic 防护）· offload（大结果卸载）
-//   Hook       filetools（read/write/edit/grep/find + bash，CLI 审批）
-//              skill（从 skills/*.md 按需注入）· summary（每轮结束自动摘要）
-//              localsession（会话持久化，/resume 恢复）
-//   交互       流式输出 · 工具执行前 y/n 确认（中断） · Ctrl+C 取消当轮
-//   命令       /new /sessions /resume <id> /exit
+//
+//	Provider   openai（.env / 环境变量配置，SiliconFlow/DeepSeek/Ollama 兼容）
+//	Warp       modelretry（模型重试）· safetool（panic 防护）· offload（大结果卸载）
+//	Hook       filetools（read/write/edit/grep/find + bash）
+//	           approve（工具审批）· askuser（模型提问）· taskplan（规划确认）
+//	           —— 三者同构：channel 决策中断，CLI 桥接 stdin
+//	           skill（从 skills/*.md 按需注入）· summary（每轮结束自动摘要）
+//	           localsession（会话持久化，/resume 恢复）
+//	交互       流式输出 · Ctrl+C 取消当轮
+//	命令       /new /sessions /resume <id> /exit
 //
 // 运行：cp .env.example .env && go run ./examples/chat
 package main
@@ -27,10 +30,13 @@ import (
 	"github.com/xuanlv2002/ezloop/event"
 	"github.com/xuanlv2002/ezloop/ext/fs"
 	"github.com/xuanlv2002/ezloop/ext/hook/approve"
+	"github.com/xuanlv2002/ezloop/ext/hook/askuser"
+	"github.com/xuanlv2002/ezloop/ext/hook/contextfix"
 	"github.com/xuanlv2002/ezloop/ext/hook/filetools"
 	"github.com/xuanlv2002/ezloop/ext/hook/localsession"
 	"github.com/xuanlv2002/ezloop/ext/hook/skill"
 	"github.com/xuanlv2002/ezloop/ext/hook/summary"
+	"github.com/xuanlv2002/ezloop/ext/hook/taskplan"
 	"github.com/xuanlv2002/ezloop/ext/provider/openai"
 	"github.com/xuanlv2002/ezloop/ext/warp/model/modelretry"
 	"github.com/xuanlv2002/ezloop/ext/warp/tool/offload"
@@ -91,19 +97,27 @@ func main() {
 		skillHook = skill.New()
 	}
 
-	// ── CLI 审批：写操作与命令执行需要 y/n 确认，只读操作放行 ──
+	// ── 人机交互 hook：审批 / 提问 / 规划（channel 决策模式）──
+	// hook 在工具调用前阻塞等决策；CLI 桥在 OnEvent 里呈现请求、
+	// 读 stdin 后从独立 goroutine 回传 channel（同步回传会死锁）。
 	scanner := bufio.NewScanner(os.Stdin)
-	approver := approve.New(func(_ context.Context, call *types.ToolCall) (bool, error) {
-		switch call.Name {
-		case "read_file", "list_dir", "grep", "find", "now":
-			return true, nil
+	approver, approveCh := approve.New(func(c *types.ToolCall) bool {
+		switch c.Name {
+		case "read_file", "list_dir", "grep", "find", "now", askuser.ToolName, taskplan.ToolName:
+			return false // 只读工具与人机交互工具免审
 		}
-		fmt.Printf("\n⚠️  工具 %s 请求执行: %s\n   放行? [y/N] ", call.Name, string(call.Args))
-		if !scanner.Scan() {
-			return false, nil
-		}
-		return strings.EqualFold(strings.TrimSpace(scanner.Text()), "y"), nil
+		return true
 	})
+	asker, answerCh := askuser.New()
+	planner, planCh := taskplan.New()
+
+	ask := func(prompt string) string {
+		fmt.Print(prompt)
+		if !scanner.Scan() {
+			return ""
+		}
+		return strings.TrimSpace(scanner.Text())
+	}
 
 	// ── 组装：全部 hook / warp / 超参 ──
 	p := openai.New(openai.Options{
@@ -116,13 +130,16 @@ func main() {
 		core.WithModelWarp(modelretry.Warp()),
 		core.WithToolWarp(safetool.Warp(), offload.Warp(fsys)),
 		core.WithHooks(
+			contextfix.New(), // 历史进入引擎前先修理（/resume 旧存档防悬空 tool_call）
 			filetools.New(fsys, func(o *filetools.Options) { o.EnableExec = true }),
 			skillHook,
 			approver,
+			asker,
+			planner,
 			summary.New(p, ""),
 			session,
 		),
-		core.WithTools(nowTool{}),
+		core.WithTools(nowTool{}, askuser.Tool(), taskplan.Tool()),
 		core.WithHyperParams(core.HyperParams{MaxIterations: 12, MaxConcurrency: 4}),
 		core.WithStreaming(true),
 		core.WithOnEvent(func(e event.Event) {
@@ -133,6 +150,38 @@ func main() {
 				fmt.Printf("\n🔧 %s ", e.Data.(*types.ToolCall).Name)
 			case event.EventIterationEnd:
 				fmt.Printf("\n── 迭代 %d ──\n", e.Iteration)
+			case approve.EventRequest:
+				call := e.Data.(*types.ToolCall)
+				go func() { // 判定段串行，同一时刻至多一个请求在等
+					in := ask(fmt.Sprintf("\n⚠️  工具 %s 请求执行: %s\n   放行? [y/N] ", call.Name, string(call.Args)))
+					send(ctx, approveCh, approve.Decision{CallID: call.ID, Approve: strings.EqualFold(in, "y")})
+				}()
+			case askuser.EventRequest:
+				call := e.Data.(*types.ToolCall)
+				var q struct {
+					Question string `json:"question"`
+				}
+				_ = json.Unmarshal(call.Args, &q)
+				go func() {
+					send(ctx, answerCh, askuser.Answer{CallID: call.ID, Input: ask("\n❓ " + q.Question + "\n你: ")})
+				}()
+			case taskplan.EventRequest:
+				call := e.Data.(*types.ToolCall)
+				var p struct {
+					Plan string `json:"plan"`
+				}
+				_ = json.Unmarshal(call.Args, &p)
+				go func() {
+					in := ask("\n📋 规划提交:\n" + p.Plan + "\n[e]执行 [n]否决, 其他输入=修改意见\n你: ")
+					d := taskplan.Decision{CallID: call.ID, Kind: taskplan.Revise, Input: in}
+					switch in {
+					case "e":
+						d = taskplan.Decision{CallID: call.ID, Kind: taskplan.Execute}
+					case "n":
+						d = taskplan.Decision{CallID: call.ID, Kind: taskplan.Reject}
+					}
+					send(ctx, planCh, d)
+				}()
 			}
 		}),
 	)
@@ -151,7 +200,7 @@ func main() {
 		}
 		input := strings.TrimSpace(scanner.Text())
 		switch {
-		case input == "" :
+		case input == "":
 			continue
 		case input == "/exit" || input == "/quit":
 			return
@@ -205,6 +254,14 @@ func main() {
 			fmt.Printf("\n[会话保存失败: %v]", e)
 		}
 		fmt.Println()
+	}
+}
+
+// send 向决策 channel 发送，程序退出时不悬挂。
+func send[T any](ctx context.Context, ch chan<- T, v T) {
+	select {
+	case ch <- v:
+	case <-ctx.Done():
 	}
 }
 

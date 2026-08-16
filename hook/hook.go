@@ -28,17 +28,29 @@ type ModelEndHook interface {
 	OnModelEnd(ctx context.Context, state *types.LoopState) error
 }
 
-// Action 是 ToolStartHook 的短路控制。
-type Action int
+// Action 是 ToolStartHook 的短路控制，内嵌短路时的工具结果：
+// 决定"放行/跳过/终止"与"跳过时模型看到什么"是同一个决策，不应分离两处。
+type Action struct {
+	Kind   ActionKind
+	Result string // Kind == KindSkip 时作为工具结果写入消息历史，空则用引擎默认文案
+}
+
+type ActionKind int
 
 const (
-	// ActionProceed 正常执行工具。
-	ActionProceed Action = iota
-	// ActionSkip 跳过本次调用（结果标记为 skipped，循环继续）。
-	ActionSkip
-	// ActionAbort 终止整个 loop（StopReason = aborted）。
-	ActionAbort
+	KindProceed ActionKind = iota
+	KindSkip
+	KindAbort
 )
+
+// Proceed 正常执行工具。
+var Proceed = Action{Kind: KindProceed}
+
+// Abort 终止整个 loop（StopReason = aborted）。
+var Abort = Action{Kind: KindAbort}
+
+// Skip 跳过本次调用：result 作为工具结果写入消息历史，循环继续。
+func Skip(result string) Action { return Action{Kind: KindSkip, Result: result} }
 
 type ToolStartHook interface {
 	Hook

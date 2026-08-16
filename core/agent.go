@@ -41,10 +41,10 @@ type Agent struct {
 	loopHooks       []hook.LoopHook
 	endHooks        []hook.EndHook
 
-	tools      []types.Tool
-	toolWarps  []types.ToolWarpHandler
-	hyper      HyperParams
-	onEvent    event.OnEvent
+	tools        []types.Tool
+	toolWarps    []types.ToolWarpHandler
+	hyper        HyperParams
+	onEvent      event.OnEvent
 	systemPrompt string
 }
 

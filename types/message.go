@@ -25,11 +25,11 @@ type ToolResult struct {
 }
 
 type Message struct {
-	Role      Role        `json:"role"`
-	Content   string      `json:"content"`
-	ToolCalls []ToolCall  `json:"tool_calls,omitempty"`
+	Role       Role       `json:"role"`
+	Content    string     `json:"content"`
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"` // RoleTool 消息关联的调用 ID
-	Err       string      `json:"err,omitempty"`          // 工具执行失败时的错误文本
+	Err        string     `json:"err,omitempty"`          // 工具执行失败时的错误文本
 }
 
 type Usage struct {
@@ -45,9 +45,9 @@ func (u *Usage) Add(other Usage) {
 type StopReason string
 
 const (
-	StopCompleted     StopReason = "completed"
-	StopMaxIteration  StopReason = "max_iterations"
-	StopAborted       StopReason = "aborted"
-	StopError         StopReason = "error"
-	StopCancelled     StopReason = "cancelled"
+	StopCompleted    StopReason = "completed"
+	StopMaxIteration StopReason = "max_iterations"
+	StopAborted      StopReason = "aborted"
+	StopError        StopReason = "error"
+	StopCancelled    StopReason = "cancelled"
 )
