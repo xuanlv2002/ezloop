@@ -66,7 +66,7 @@ flowchart LR
 3. **状态即消息** —— loop 的全部状态是 `LoopState`，其中 `Messages` 可序列化、
    可恢复、可直接作为下一轮历史。没有隐藏的内存中间态。
 
-📖 **[完整文档](docs/index.html)**：核心理念 · Loop 引擎 · 架构全景 · 官方扩展指南 ·
+📖 **[完整文档](https://xuanlv2002.github.io/ezloop/)**：核心理念 · Loop 引擎 · 架构全景 · 官方扩展指南 ·
 本地 Agent · Web Agent 内核
 
 ## 快速开始
