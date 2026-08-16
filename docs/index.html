@@ -263,6 +263,35 @@
   .node-tool .tag-warp { background: rgba(6,46,33,.3); color: #d3fae8; }
   .btag { font-size: 11.5px; color: #9fb0c8; font-weight: 600; width: 18px; text-align: center; flex: none; }
   .node-done { background: rgba(52,211,153,.1); border: 1px solid #34d399; color: #6ee7b7; font-size: 12px; padding: 6px 14px; }
+
+  /* ─── warp 壳：纵向包装的视觉表达（包住节点 = 在节点内部）─── */
+  .warp-shell {
+    border: 1.5px dashed #8b76d9;
+    background: rgba(167,139,250,.07);
+    border-radius: 12px;
+    padding: 8px 8px 9px;
+    flex: none;
+  }
+  .warp-shell-label {
+    font-size: 9.5px; color: #c4b5fd; font-weight: 600;
+    text-align: center; margin-bottom: 5px; white-space: nowrap;
+  }
+  .node.small { font-size: 12px; padding: 7px 10px; }
+
+  /* ─── 多 tool 并发泳道 ─── */
+  .tools-branch {
+    margin-top: 12px; border: 1px solid #263449; border-radius: 10px;
+    padding: 10px 10px 8px; background: rgba(255,255,255,.015);
+  }
+  .tools-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .tools-lane { display: flex; gap: 8px; margin-top: 8px; align-items: stretch; }
+  .tools-lane .warp-shell { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .tools-lane .node { width: 100%; }
+  .tools-note { text-align: center; font-size: 10.5px; color: var(--muted); margin-top: 7px; }
+  .tools-tail {
+    display: flex; align-items: center; gap: 8px; margin-top: 8px;
+    border-top: 1px dashed #263449; padding-top: 7px; flex-wrap: wrap;
+  }
   .flow-back { margin-top: 12px; border-top: 2px dashed var(--hook); padding-top: 8px; display: flex; align-items: center; gap: 10px; color: #fcd34d; font-size: 11.5px; font-weight: 600; flex-wrap: wrap; }
   .flow-back .icon { font-size: 15px; line-height: 1; }
   .flow-outs { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 4px; }
@@ -270,8 +299,10 @@
   .out-card .t { font-weight: 700; font-size: 13.5px; color: var(--text); }
   .out-card .d { font-size: 11px; color: var(--muted); margin-top: 3px; line-height: 1.55; }
   @media (max-width: 760px) {
-    .flow-row, .branch-row { flex-wrap: wrap; justify-content: center; }
+    .flow-row, .branch-row, .tools-head, .tools-tail { flex-wrap: wrap; justify-content: center; }
     .fa { min-width: 14px; }
+    .tools-lane { flex-wrap: wrap; }
+    .tools-lane .warp-shell { flex: 1 1 45%; }
     .flow-outs { grid-template-columns: 1fr; }
   }
   .diagram-cap { text-align: center; font-size: 13px; color: var(--muted); padding: 10px 0 12px; }
@@ -282,7 +313,7 @@
   .legend .l-hook { background: var(--hook); }
   .legend .l-model { background: var(--model); }
   .legend .l-tool { background: var(--tool); }
-  .legend .l-asm { background: var(--asm); }
+  .legend .l-warp { background: rgba(167,139,250,.12); border: 1.5px dashed #8b76d9; }
   .legend .l-back { background: transparent; border-top: 3px dashed var(--hook); height: 0; border-radius: 0; width: 20px; }
 
   /* ─── 扩展指南小节 ─── */
@@ -593,23 +624,24 @@ state, err = h.<span class="f">Wait</span>()</pre>
         <div class="flow-asm">
           <div class="flow-asm-title">core.NewAgent(p, opts...) — 组装层</div>
           <div class="flow-pills">
-            <div class="pill"><code>WithModelWarp(...)</code><span>包装 model 节点</span></div>
-            <div class="pill"><code>WithToolWarp(...)</code><span>包装 tool 节点</span></div>
-            <div class="pill"><code>WithHooks(...)</code><span>插入流程 ①—⑦</span></div>
+            <div class="pill"><code>WithModelWarp(...)</code><span>纵向：包装 model 节点</span></div>
+            <div class="pill"><code>WithToolWarp(...)</code><span>纵向：包装每个 tool</span></div>
+            <div class="pill"><code>WithHooks(...)</code><span>横向：插入流程 ①—⑦</span></div>
           </div>
+          <div class="flow-note">warp 链每次 Run 组装：工厂注入 event.Emitter（观察出口）后再包装节点，实例 per-Run 独立</div>
         </div>
 
         <div class="fa-v dashed"></div>
-        <div class="flow-note">选项在循环内落位（紫色徽章 = Warp 包装，橙色圆点 = Hook 作用点）</div>
+        <div class="flow-note">橙色圆点 = Hook（横向切面，节点前后）· 紫色虚线壳 = Warp（纵向封装，节点内部）</div>
         <div class="fa-v"></div>
 
         <!-- Loop 引擎 -->
         <div class="flow-engine">
-          <div class="flow-engine-title">Loop 引擎 — 只负责流转</div>
+          <div class="flow-engine-title">Loop 引擎 — input → model → tools → 回边</div>
 
           <div class="hpin">
             <span class="dot">1</span>
-            <span class="lbl">startHook<small>注入工具 / 技能</small></span>
+            <span class="lbl">startHook<small>注入工具 / 技能 · contextfix 修理历史</small></span>
           </div>
           <div class="fa-v"></div>
 
@@ -619,7 +651,10 @@ state, err = h.<span class="f">Wait</span>()</pre>
             <div class="flow-row">
               <div class="hpin"><span class="dot">2</span><span class="lbl">modelStart</span></div>
               <div class="fa"></div>
-              <div class="node node-model">model<small>Invoke / Stream</small><span class="tag-warp">ModelWarp 包装</span></div>
+              <div class="warp-shell">
+                <div class="warp-shell-label">ModelWarp(modelretry)</div>
+                <div class="node node-model">model<small>Invoke / Stream</small></div>
+              </div>
               <div class="fa"></div>
               <div class="hpin"><span class="dot">3</span><span class="lbl">modelEnd</span></div>
               <div class="fa"></div>
@@ -627,13 +662,33 @@ state, err = h.<span class="f">Wait</span>()</pre>
             </div>
 
             <div class="flow-branches">
-              <div class="branch-row">
-                <span class="btag">有</span>
-                <div class="hpin"><span class="dot">4</span><span class="lbl">toolStart<small>可 Skip / Abort</small></span></div>
-                <div class="fa"></div>
-                <div class="node node-tool">tool ×N<small>并发 ≤ MaxConcurrency · 保序</small><span class="tag-warp">ToolWarp 包装</span></div>
-                <div class="fa"></div>
-                <div class="hpin"><span class="dot">5</span><span class="lbl">toolEnd</span></div>
+              <div class="tools-branch">
+                <div class="tools-head">
+                  <span class="btag">有</span>
+                  <div class="hpin"><span class="dot">4</span><span class="lbl">toolStart<small>逐个串行判定 · Skip / Abort 短路</small></span></div>
+                  <div class="fa"></div>
+                  <span style="font-size:11px;color:#9fb0c8;">放行的调用进入并发泳道 ↓</span>
+                </div>
+                <div class="tools-lane">
+                  <div class="warp-shell">
+                    <div class="warp-shell-label">ToolWarp(safetool)</div>
+                    <div class="node node-tool small">bash<small>call_1</small></div>
+                  </div>
+                  <div class="warp-shell">
+                    <div class="warp-shell-label">ToolWarp(safetool)</div>
+                    <div class="node node-tool small">read_file<small>call_2</small></div>
+                  </div>
+                  <div class="warp-shell">
+                    <div class="warp-shell-label">ToolWarp(safetool)</div>
+                    <div class="node node-tool small">grep<small>call_3</small></div>
+                  </div>
+                </div>
+                <div class="tools-note">同一 ToolWarp 链应用到每个调用 · 并发 ≤ MaxConcurrency · panic 各自恢复</div>
+                <div class="tools-tail">
+                  <div class="hpin"><span class="dot">5</span><span class="lbl">toolEnd<small>按原序串行 · 结果入史前可改写（offload）</small></span></div>
+                  <div class="fa"></div>
+                  <span style="font-size:11px;color:#9fb0c8;">全部结果写入消息历史 → 回边</span>
+                </div>
               </div>
               <div class="branch-row">
                 <span class="btag">无</span>
@@ -660,7 +715,7 @@ state, err = h.<span class="f">Wait</span>()</pre>
           </div>
           <div class="out-card">
             <div class="t">Event 流</div>
-            <div class="d">OnEvent 回调 / RunAsync 通道<br>流式 chunk · 工具进度 · 自定义事件</div>
+            <div class="d">OnEvent 回调 / RunAsync 通道<br>hook 走 state.EmitEvent · warp 走注入的 Emitter</div>
           </div>
         </div>
 
@@ -668,10 +723,10 @@ state, err = h.<span class="f">Wait</span>()</pre>
     </div>
 
     <div class="legend">
-      <span><i class="l-asm"></i>组装层 Warp / Hooks</span>
+      <span><i class="l-hook"></i>Hook · 横向切面（节点前后）</span>
+      <span><i class="l-warp"></i>Warp · 纵向封装（节点内部）</span>
       <span><i class="l-model"></i>model 节点</span>
-      <span><i class="l-tool"></i>tool 节点</span>
-      <span><i class="l-hook"></i>Hook 作用点</span>
+      <span><i class="l-tool"></i>tool 节点（每调用一个）</span>
       <span><i class="l-back"></i>迭代回边</span>
     </div>
   </section>
