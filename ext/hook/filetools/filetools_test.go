@@ -81,13 +81,37 @@ func TestCapabilityDetection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	for _, name := range []string{"edit_file", "apply_patch", "grep", "find", "run_command"} {
+	for _, name := range []string{"edit_file", "apply_patch", "grep", "find", "bash"} {
 		if _, lerr := state.Tools.Lookup(name); lerr == nil {
 			t.Fatalf("%s must not register on bare FileSystem", name)
 		}
 	}
 	if _, lerr := state.Tools.Lookup("read_file"); lerr != nil {
 		t.Fatalf("read_file must register: %v", lerr)
+	}
+}
+
+// bash：shell 语义执行（Windows: cmd /c，Unix: sh -c），退出码非零报错。
+func TestBashTool(t *testing.T) {
+	fsys := fs.NewLocal(t.TempDir())
+	hook := New(fsys, func(o *Options) { o.EnableExec = true })
+
+	out := runTool(t, hook, "bash", `{"command":"echo ezloop-bash"}`)
+	if !strings.Contains(out, "ezloop-bash") {
+		t.Fatalf("bash output: %q", out)
+	}
+
+	// 失败命令：输出 + 错误回传模型自纠。
+	p := testutil.Scripted(
+		testutil.ToolCalls(testutil.Call("1", "bash", `{"command":"definitely_missing_cmd_xyz"}`)),
+		testutil.Text("done"),
+	)
+	state, err := core.NewAgent(p, core.WithHooks(hook)).Run(context.Background(), "hi")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if state.Messages[2].Err == "" {
+		t.Fatal("failed command should produce tool error")
 	}
 }
 

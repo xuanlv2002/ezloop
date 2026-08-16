@@ -4,7 +4,7 @@
 //	FileSystem（必须） read_file（分页）/ write_file / list_dir
 //	Modifier（可选）   edit_file（原子查找替换）/ apply_patch（多文件原子修改）
 //	Searcher（可选）   grep（正则搜内容）/ find（glob 查文件名）
-//	EnableExec 选项    run_command（终端执行，默认关闭，建议配 approve）
+//	EnableExec 选项    bash（shell 执行，默认关闭，建议配 approve）
 //
 // 所有修改类操作（write/edit/patch）经 per-path 修改队列串行化，
 // 防止并发工具执行时对同一文件的写冲突。
@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -24,7 +25,7 @@ import (
 )
 
 type Options struct {
-	// EnableExec 启用 run_command 终端执行工具，默认关闭。
+	// EnableExec 启用 bash 终端执行工具，默认关闭。
 	EnableExec bool
 }
 
@@ -61,7 +62,7 @@ func (h *Hook) OnStart(_ context.Context, state *types.LoopState) error {
 		state.Tools.Register(findTool{s: s})
 	}
 	if h.opts.EnableExec {
-		state.Tools.Register(runCommandTool{})
+		state.Tools.Register(bashTool{})
 	}
 	return nil
 }
@@ -347,31 +348,36 @@ func (t findTool) Invoke(ctx context.Context, args json.RawMessage) (string, err
 	return strings.Join(found, "\n"), nil
 }
 
-// ---- run_command（EnableExec）----
+// ---- bash（EnableExec）----
 
-type runCommandTool struct{}
+// bashTool 以 shell 语义执行单条命令字符串（Windows: cmd /c，其他: sh -c），
+// 支持管道、重定向与 && 组合。输出为 stdout+stderr 合并；退出码非零时
+// 返回输出与错误（供模型自纠）。
+type bashTool struct{}
 
-func (runCommandTool) Name() string        { return "run_command" }
-func (runCommandTool) Description() string { return "执行终端命令并返回合并输出（exit code 非零时返回错误）" }
-func (runCommandTool) ArgsSchema() json.RawMessage {
+func (bashTool) Name() string        { return "bash" }
+func (bashTool) Description() string { return "执行 shell 命令并返回合并输出（支持管道、重定向、&& 组合）" }
+func (bashTool) ArgsSchema() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{
-		"cmd":{"type":"string","description":"可执行文件名"},
-		"args":{"type":"array","items":{"type":"string"}}
-	},"required":["cmd"]}`)
+		"command":{"type":"string","description":"完整 shell 命令，如 ls -la | grep go"}
+	},"required":["command"]}`)
 }
 
-func (runCommandTool) Invoke(ctx context.Context, args json.RawMessage) (string, error) {
-	var in struct {
-		Cmd  string   `json:"cmd"`
-		Args []string `json:"args"`
-	}
+func (bashTool) Invoke(ctx context.Context, args json.RawMessage) (string, error) {
+	var in struct{ Command string `json:"command"` }
 	if err := json.Unmarshal(args, &in); err != nil {
 		return "", fmt.Errorf("invalid args: %w", err)
 	}
-	if in.Cmd == "" {
-		return "", fmt.Errorf("cmd is required")
+	if strings.TrimSpace(in.Command) == "" {
+		return "", fmt.Errorf("command is required")
 	}
-	out, err := exec.CommandContext(ctx, in.Cmd, in.Args...).CombinedOutput()
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.CommandContext(ctx, "cmd", "/c", in.Command)
+	} else {
+		cmd = exec.CommandContext(ctx, "sh", "-c", in.Command)
+	}
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return string(out), fmt.Errorf("exit: %w", err)
 	}

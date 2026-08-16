@@ -3,7 +3,7 @@
 // 能力清单：
 //   Provider   openai（.env / 环境变量配置，SiliconFlow/DeepSeek/Ollama 兼容）
 //   Warp       modelretry（模型重试）· safetool（panic 防护）· offload（大结果卸载）
-//   Hook       filetools（read/write/edit/grep/find + run_command，CLI 审批）
+//   Hook       filetools（read/write/edit/grep/find + bash，CLI 审批）
 //              skill（从 skills/*.md 按需注入）· summary（每轮结束自动摘要）
 //              localsession（会话持久化，/resume 恢复）
 //   交互       流式输出 · 工具执行前 y/n 确认（中断） · Ctrl+C 取消当轮

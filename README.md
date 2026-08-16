@@ -80,7 +80,7 @@ import (
     "github.com/xuanlv2002/ezloop/core"
     "github.com/xuanlv2002/ezloop/event"
     "github.com/xuanlv2002/ezloop/ext/provider/openai"
-    "github.com/xuanlv2002/ezloop/ext/provider/modelretry"
+    "github.com/xuanlv2002/ezloop/ext/warp/model/modelretry"
     "github.com/xuanlv2002/ezloop/ext/hook/mcp"
     "github.com/xuanlv2002/ezloop/ext/warp/tool/safetool"
 )
@@ -262,7 +262,7 @@ agent := core.NewAgent(p, core.WithHooks(mcp.NewHook(cfg)))
 | `ext/hook/skill` | hook | 技能注入：代码定义或从 FS 目录加载 *.md（可选 .keywords） |
 | `ext/hook/summary` | hook | loop 结束自动生成摘要写入 Metadata |
 | `ext/hook/approve` | hook | 工具审批：同步阻塞式 Approver + 轮次式审批 Store（见 examples/approval） |
-| `ext/hook/filetools` | hook | 文件工具集：read_file（行分页/50KB 上限）、write、list、edit、apply_patch、grep、find、run_command；按 FS 能力注册，修改走 per-path 队列 |
+| `ext/hook/filetools` | hook | 文件工具集：read_file（行分页/50KB 上限）、write、list、edit、apply_patch、grep、find、bash；按 FS 能力注册，修改走 per-path 队列 |
 | `ext/hook/localsession` | hook | 会话持久化：EndHook 滚动快照到 sessions/<id>.json，Load/List 恢复续聊 |
 
 ## 包结构
