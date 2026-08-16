@@ -7,6 +7,7 @@ import (
 	"github.com/xuanlv2002/ezloop/hook"
 	"github.com/xuanlv2002/ezloop/provider"
 	"github.com/xuanlv2002/ezloop/types"
+	"github.com/xuanlv2002/ezloop/warp"
 )
 
 const DefaultMaxIterations = 16
@@ -42,7 +43,7 @@ type Agent struct {
 	endHooks        []hook.EndHook
 
 	tools        []types.Tool
-	toolWarps    []types.ToolWarpHandler
+	toolWarps    []warp.ToolHandler
 	hyper        HyperParams
 	onEvent      event.OnEvent
 	systemPrompt string
@@ -134,18 +135,18 @@ func WithStreaming(enabled bool) Option {
 	return func(a *Agent) { a.streaming = enabled }
 }
 
-// WithModelWarp 传入模型节点中间件（引擎标准能力），
+// WithModelWarp 传入模型节点中间件（引擎标准能力，类型定义见 warp 包），
 // 在 NewAgent 时包装 provider。先注册的位于最外层。
-func WithModelWarp(warps ...provider.WarpHandler) Option {
+func WithModelWarp(warps ...warp.ModelHandler) Option {
 	return func(a *Agent) {
-		a.provider = provider.Warp(a.provider, warps...)
+		a.provider = warp.Model(a.provider, warps...)
 	}
 }
 
-// WithToolWarp 传入工具节点中间件（引擎标准能力）。
+// WithToolWarp 传入工具节点中间件（引擎标准能力，类型定义见 warp 包）。
 // 挂载在 ToolRegistry 上：静态注册（WithTools）与 hook 运行时注入的工具
 // 都会被包装。先注册的位于最外层。
-func WithToolWarp(warps ...types.ToolWarpHandler) Option {
+func WithToolWarp(warps ...warp.ToolHandler) Option {
 	return func(a *Agent) {
 		a.toolWarps = append(a.toolWarps, warps...)
 	}

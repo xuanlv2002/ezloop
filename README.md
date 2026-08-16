@@ -120,11 +120,11 @@ state, err = h.Wait()
 
 ```
 框架层（只含接口与引擎，零扩展依赖）
-├── types/      统一结构体 LoopState / Message / Tool + ToolWarp
+├── types/      统一结构体 LoopState / Message / Tool
 ├── event/      事件定义与 OnEvent 回调 + ctx 事件出口（warp 层用）
 ├── hook/       7 个 hook 小接口 + Action 短路语义
-├── warp/       节点装饰器统一链式组装 Handler[T] + Chain[T]
-├── provider/   ModelProvider / StreamProvider 抽象 + Warp
+├── provider/   ModelProvider / StreamProvider 抽象
+├── warp/       节点装饰器统一定义：Handler[T] + Chain + Model/Tool 两类 Handler
 └── core/       NewAgent 组装 + loop 引擎
 
 扩展层（能力实现，官方 SDK 依赖放这里，不用不引入）

@@ -13,6 +13,7 @@ import (
 	"github.com/xuanlv2002/ezloop/event"
 	"github.com/xuanlv2002/ezloop/provider"
 	"github.com/xuanlv2002/ezloop/types"
+	"github.com/xuanlv2002/ezloop/warp"
 )
 
 // EventRetry 是重试事件：Data 为 *RetryInfo。
@@ -76,8 +77,8 @@ func defaultRetryable(err error) bool {
 var _ provider.ModelProvider = (*RetryProvider)(nil)
 var _ provider.StreamProvider = (*RetryProvider)(nil)
 
-// Warp 返回可传入 core.WithWarp 的中间件形式。
-func Warp(opts ...func(*Options)) provider.WarpHandler {
+// Warp 返回可传入 core.WithModelWarp 的中间件形式。
+func Warp(opts ...func(*Options)) warp.ModelHandler {
 	return func(p provider.ModelProvider) provider.ModelProvider {
 		return New(p, opts...)
 	}

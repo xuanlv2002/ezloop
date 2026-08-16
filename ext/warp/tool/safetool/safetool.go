@@ -8,10 +8,11 @@ import (
 	"fmt"
 
 	"github.com/xuanlv2002/ezloop/types"
+	"github.com/xuanlv2002/ezloop/warp"
 )
 
 // Warp 返回工具中间件。
-func Warp() types.ToolWarpHandler {
+func Warp() warp.ToolHandler {
 	return func(inner types.Tool) types.Tool {
 		return &safeTool{inner: inner}
 	}

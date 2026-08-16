@@ -10,6 +10,7 @@ import (
 	"github.com/xuanlv2002/ezloop/hook"
 	"github.com/xuanlv2002/ezloop/provider"
 	"github.com/xuanlv2002/ezloop/types"
+	"github.com/xuanlv2002/ezloop/warp"
 )
 
 // Run 驱动整个 loop：model ↔ tool 循环，直到模型不再发起 tool call、
@@ -29,7 +30,7 @@ func (a *Agent) Run(ctx context.Context, input string, runOpts ...RunOption) (st
 	// 先挂 tool warp，再注册静态工具，保证两者都会被包装。
 	if len(a.toolWarps) > 0 {
 		state.Tools.SetWarp(func(t types.Tool) types.Tool {
-			return types.ToolWarp(t, a.toolWarps...)
+			return warp.Tool(t, a.toolWarps...)
 		})
 	}
 	for _, t := range a.tools {

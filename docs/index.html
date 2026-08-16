@@ -444,12 +444,12 @@
       <tr>
         <td><strong>model</strong></td>
         <td>节点本身：模型调用</td>
-        <td>实现 <code>provider.ModelProvider</code> + <code>WithModelWarp</code> 中间件</td>
+        <td>实现 <code>provider.ModelProvider</code> + <code>WithModelWarp</code> 中间件（<code>warp.ModelHandler</code>）</td>
       </tr>
       <tr>
         <td><strong>tool</strong></td>
         <td>节点本身：工具执行</td>
-        <td>实现 <code>types.Tool</code> + <code>WithToolWarp</code> 中间件</td>
+        <td>实现 <code>types.Tool</code> + <code>WithToolWarp</code> 中间件（<code>warp.ToolHandler</code>）</td>
       </tr>
       <tr>
         <td><strong>hook</strong></td>
@@ -772,7 +772,7 @@ entries, _ := fsys.<span class="f">List</span>(ctx, <span class="s">"."</span>)
 core.<span class="f">WithModelWarp</span>(modelretry.<span class="f">Warp</span>(<span class="k">func</span>(o *modelretry.Options) {
     o.RetryIf = <span class="k">func</span>(err error) <span class="t">bool</span> { <span class="k">return</span> !strings.<span class="f">Contains</span>(err.<span class="f">Error</span>(), <span class="s">"quota"</span>) }
 }))
-<span class="c">// 降级 / 多模型路由？自己写一个 WarpHandler：func(ModelProvider) ModelProvider</span></pre>
+<span class="c">// 降级 / 多模型路由？自己写一个 warp.ModelHandler：func(ModelProvider) ModelProvider</span></pre>
       </div>
     </div>
 

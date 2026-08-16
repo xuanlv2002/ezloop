@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
-
-	"github.com/xuanlv2002/ezloop/warp"
 )
 
 type Tool interface {
@@ -14,15 +12,6 @@ type Tool interface {
 	Description() string
 	ArgsSchema() json.RawMessage
 	Invoke(ctx context.Context, args json.RawMessage) (string, error)
-}
-
-// ToolWarpHandler 是工具中间件：包装工具实现重试、超时、审计、缓存等，
-// 与 provider.WarpHandler 对称的节点装饰器，共用 warp.Chain 链式组装。
-type ToolWarpHandler = warp.Handler[Tool]
-
-// ToolWarp 用中间件链包装工具：先注册的位于最外层。
-func ToolWarp(t Tool, warps ...ToolWarpHandler) Tool {
-	return warp.Chain(t, warps...)
 }
 
 type ToolRegistry struct {
