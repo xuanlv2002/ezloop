@@ -39,5 +39,9 @@ func (e Event) String() string {
 
 type OnEvent func(Event)
 
+// Emitter 是事件出口的最小接口面：warp 链在每次 Run 组装时由引擎注入，
+// 节点内部（重试、降级、防护等）经它发事件——只观察，不碰 state。
+type Emitter func(typ EventType, data any)
+
 // Noop 供无事件消费时使用。
 func Noop(Event) {}

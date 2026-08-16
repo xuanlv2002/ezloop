@@ -109,19 +109,20 @@ func TestDefaultRetryablePolicy(t *testing.T) {
 	}
 }
 
-// 重试事件经 ctx 出口流出：每次重试一条，含尝试序号与失败原因。
+// 重试事件经组装时注入的 Emitter 流出：每次重试一条，含尝试序号与失败原因。
 func TestRetryEvents(t *testing.T) {
 	fp := &flakyProvider{failures: 2}
 	var mu sync.Mutex
 	var infos []*RetryInfo
-	ctx := event.ContextWithEmitter(context.Background(), func(e event.Event) {
+	em := event.Emitter(func(typ event.EventType, data any) {
 		mu.Lock()
 		defer mu.Unlock()
-		if e.Type == EventRetry {
-			infos = append(infos, e.Data.(*RetryInfo))
+		if typ == EventRetry {
+			infos = append(infos, data.(*RetryInfo))
 		}
 	})
-	resp, err := New(fp, fast()).Invoke(ctx, &types.ModelRequest{})
+	p := Warp(fast())(em, fp)
+	resp, err := p.Invoke(context.Background(), &types.ModelRequest{})
 	if err != nil || resp.Content != "ok" {
 		t.Fatalf("err=%v", err)
 	}

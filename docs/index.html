@@ -482,10 +482,10 @@
 
     <h3>Event 与 Hook 分离</h3>
     <p><code class="inline">OnEvent</code> 回调实时<strong>观察</strong>（含流式 chunk），只读不写；
-    <strong>修改</strong>状态是 Hook 的职责。emit 的入口按层对称：hook（横向切面）走
-    <code class="inline">state.EmitEvent("ns.type", data)</code>；warp（纵向装饰）拿不到 state，
-    走 <code class="inline">event.EmitEvent(ctx, "ns.type", data)</code>——引擎在模型与工具两条
-    warp 链上平级注入出口（如 <code class="inline">modelretry.retry</code>），两层事件汇入同一个流。</p>
+    <strong>修改</strong>状态是 Hook 的职责。emit 的入口按层对称：hook（横向切面）拿 state，
+    走 <code class="inline">state.EmitEvent("ns.type", data)</code>；warp（纵向装饰）在每次 Run
+    组装时由引擎注入 <code class="inline">event.Emitter</code>（观察面的最小暴露，不碰 state），
+    两层事件汇入同一个流（如 <code class="inline">modelretry.retry</code>）。</p>
     <p><strong>并发契约：</strong>工具天然并发执行，OnEvent 回调可能被多个 goroutine 同时调用
     （engine 自身事件仍串行且保序）——回调必须并发安全且快速返回；
     需要免锁消费时用 <code class="inline">RunAsync</code> 的 Events 通道。</p>

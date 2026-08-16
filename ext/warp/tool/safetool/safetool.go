@@ -7,13 +7,14 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/xuanlv2002/ezloop/event"
 	"github.com/xuanlv2002/ezloop/types"
 	"github.com/xuanlv2002/ezloop/warp"
 )
 
-// Warp 返回工具中间件。
+// Warp 返回工具中间件（Emitter 保留给需要发事件的装饰器）。
 func Warp() warp.ToolHandler {
-	return func(inner types.Tool) types.Tool {
+	return func(_ event.Emitter, inner types.Tool) types.Tool {
 		return &safeTool{inner: inner}
 	}
 }

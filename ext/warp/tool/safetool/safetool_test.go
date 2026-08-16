@@ -17,7 +17,7 @@ func (panicTool) Invoke(_ context.Context, _ json.RawMessage) (string, error) {
 }
 
 func TestWarpRecoversPanic(t *testing.T) {
-	_, err := Warp()(panicTool{}).Invoke(context.Background(), json.RawMessage(`{}`))
+	_, err := Warp()(nil, panicTool{}).Invoke(context.Background(), json.RawMessage(`{}`))
 	if err == nil || !strings.Contains(err.Error(), "panicked") || !strings.Contains(err.Error(), "boom") {
 		t.Fatalf("err: %v", err)
 	}

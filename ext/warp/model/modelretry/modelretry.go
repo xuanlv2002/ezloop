@@ -45,6 +45,7 @@ type Options struct {
 type RetryProvider struct {
 	inner provider.ModelProvider
 	opts  Options
+	em    event.Emitter // 引擎组装时注入，可为 nil（直接 New 构造时）
 }
 
 // New 返回包装后的 provider；若 inner 支持 Stream 则包装后同样支持。
@@ -77,10 +78,13 @@ func defaultRetryable(err error) bool {
 var _ provider.ModelProvider = (*RetryProvider)(nil)
 var _ provider.StreamProvider = (*RetryProvider)(nil)
 
-// Warp 返回可传入 core.WithModelWarp 的中间件形式。
+// Warp 返回可传入 core.WithModelWarp 的中间件形式，
+// 引擎组装时注入 per-Run 事件出口（重试事件经它发出）。
 func Warp(opts ...func(*Options)) warp.ModelHandler {
-	return func(p provider.ModelProvider) provider.ModelProvider {
-		return New(p, opts...)
+	return func(em event.Emitter, p provider.ModelProvider) provider.ModelProvider {
+		r := New(p, opts...)
+		r.em = em
+		return r
 	}
 }
 
@@ -138,12 +142,14 @@ func (r *RetryProvider) backoff(ctx context.Context, attempt int, cause error) e
 	delay := r.opts.BaseDelay << (attempt - 1)
 	// 加 20% 抖动，避免并发重试形成共振。
 	delay += time.Duration(float64(delay) * 0.2 * rand.Float64())
-	event.EmitEvent(ctx, EventRetry, &RetryInfo{
-		Attempt:     attempt + 1,
-		MaxAttempts: r.opts.MaxAttempts,
-		Delay:       delay,
-		Err:         cause,
-	})
+	if r.em != nil {
+		r.em(EventRetry, &RetryInfo{
+			Attempt:     attempt + 1,
+			MaxAttempts: r.opts.MaxAttempts,
+			Delay:       delay,
+			Err:         cause,
+		})
+	}
 	timer := time.NewTimer(delay)
 	defer timer.Stop()
 	select {

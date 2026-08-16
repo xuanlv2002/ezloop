@@ -13,6 +13,7 @@ import (
 	"github.com/xuanlv2002/ezloop/event"
 	"github.com/xuanlv2002/ezloop/hook"
 	"github.com/xuanlv2002/ezloop/internal/testutil"
+	"github.com/xuanlv2002/ezloop/provider"
 	"github.com/xuanlv2002/ezloop/types"
 )
 
@@ -373,7 +374,7 @@ func TestHistorySystemNotDuplicated(t *testing.T) {
 // ToolWarp 覆盖静态注册与 hook 注入的工具。
 type tagWrap struct{ log *[]string }
 
-func (w tagWrap) warp(inner types.Tool) types.Tool {
+func (w tagWrap) warp(_ event.Emitter, inner types.Tool) types.Tool {
 	return &taggedTool{inner: inner, log: w.log}
 }
 
@@ -500,26 +501,35 @@ func TestStreamFallbackWarning(t *testing.T) {
 	}
 }
 
-// provider/warp 经 ctx 出口发的事件流经引擎事件流，且带迭代号。
-type emittingProvider struct{}
-
-func (p *emittingProvider) Invoke(ctx context.Context, _ *types.ModelRequest) (*types.ModelResponse, error) {
-	event.EmitEvent(ctx, "provider.custom", "inner-event")
-	return &types.ModelResponse{Content: "ok"}, nil
+// model warp 组装时拿到的 Emitter：事件流经引擎 OnEvent 且带迭代号。
+type emProvider struct {
+	em    event.Emitter
+	inner provider.ModelProvider
 }
 
-func TestProviderEventsFlowThroughCtx(t *testing.T) {
+func (p *emProvider) Invoke(ctx context.Context, req *types.ModelRequest) (*types.ModelResponse, error) {
+	if p.em != nil {
+		p.em("modelwarp.custom", "inner-event")
+	}
+	return p.inner.Invoke(ctx, req)
+}
+
+func TestModelWarpEmitsThroughEngine(t *testing.T) {
 	var mu sync.Mutex
 	var saw bool
 	var iter int
-	a := NewAgent(&emittingProvider{}, WithOnEvent(func(e event.Event) {
-		if e.Type != "provider.custom" {
-			return
-		}
-		mu.Lock()
-		defer mu.Unlock()
-		saw, iter = true, e.Iteration
-	}))
+	a := NewAgent(testutil.Scripted(testutil.Text("ok")),
+		WithModelWarp(func(em event.Emitter, inner provider.ModelProvider) provider.ModelProvider {
+			return &emProvider{em: em, inner: inner}
+		}),
+		WithOnEvent(func(e event.Event) {
+			if e.Type != "modelwarp.custom" {
+				return
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			saw, iter = true, e.Iteration
+		}))
 	if _, err := a.Run(context.Background(), "hi"); err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -530,15 +540,20 @@ func TestProviderEventsFlowThroughCtx(t *testing.T) {
 	}
 }
 
-// tool warp 经 ctx 出口发事件：到达 OnEvent；并发工具下出口被并发调用，
+// tool warp 组装时拿到的 Emitter：事件到达 OnEvent；并发工具下出口被并发调用，
 // 收集方自行加锁（并发安全是使用方的契约责任，-race 钉住引擎侧无竞争）。
-type emitWarp struct{ inner types.Tool }
+type emTool struct {
+	em    event.Emitter
+	inner types.Tool
+}
 
-func (t emitWarp) Name() string                { return t.inner.Name() }
-func (t emitWarp) Description() string         { return t.inner.Description() }
-func (t emitWarp) ArgsSchema() json.RawMessage { return t.inner.ArgsSchema() }
-func (t emitWarp) Invoke(ctx context.Context, args json.RawMessage) (string, error) {
-	event.EmitEvent(ctx, "toolwarp.custom", t.inner.Name())
+func (t emTool) Name() string                { return t.inner.Name() }
+func (t emTool) Description() string         { return t.inner.Description() }
+func (t emTool) ArgsSchema() json.RawMessage { return t.inner.ArgsSchema() }
+func (t emTool) Invoke(ctx context.Context, args json.RawMessage) (string, error) {
+	if t.em != nil {
+		t.em("toolwarp.custom", t.inner.Name())
+	}
 	return t.inner.Invoke(ctx, args)
 }
 
@@ -556,7 +571,9 @@ func TestToolWarpEventsFlow(t *testing.T) {
 			testutil.Text("done"),
 		),
 		WithTools(&sleepTool{delay: 10 * time.Millisecond}),
-		WithToolWarp(func(inner types.Tool) types.Tool { return emitWarp{inner} }),
+		WithToolWarp(func(em event.Emitter, inner types.Tool) types.Tool {
+			return emTool{em: em, inner: inner}
+		}),
 		WithHyperParams(HyperParams{MaxConcurrency: 4}),
 		WithOnEvent(func(e event.Event) {
 			if e.Type != "toolwarp.custom" {

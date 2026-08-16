@@ -31,8 +31,9 @@ func (hp HyperParams) withDefaults() HyperParams {
 }
 
 type Agent struct {
-	provider  provider.ModelProvider
-	streaming bool
+	provider   provider.ModelProvider
+	modelWarps []warp.ModelHandler
+	streaming  bool
 
 	startHooks      []hook.StartHook
 	modelStartHooks []hook.ModelStartHook
@@ -135,11 +136,12 @@ func WithStreaming(enabled bool) Option {
 	return func(a *Agent) { a.streaming = enabled }
 }
 
-// WithModelWarp 传入模型节点中间件（引擎标准能力，类型定义见 warp 包），
-// 在 NewAgent 时包装 provider。先注册的位于最外层。
+// WithModelWarp 传入模型节点中间件（类型定义见 warp 包）。
+// 组装延迟到每次 Run：引擎注入 per-Run 事件出口后才包装，
+// 先注册的位于最外层，warp 实例 per-Run 独立。
 func WithModelWarp(warps ...warp.ModelHandler) Option {
 	return func(a *Agent) {
-		a.provider = warp.Model(a.provider, warps...)
+		a.modelWarps = append(a.modelWarps, warps...)
 	}
 }
 

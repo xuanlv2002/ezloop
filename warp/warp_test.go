@@ -3,8 +3,10 @@ package warp
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"testing"
 
+	"github.com/xuanlv2002/ezloop/event"
 	"github.com/xuanlv2002/ezloop/provider"
 	"github.com/xuanlv2002/ezloop/types"
 )
@@ -33,36 +35,54 @@ func (p taggedProvider) Invoke(ctx context.Context, req *types.ModelRequest) (*t
 }
 
 // 先注册的位于最外层；空链透传。
-func TestWarpOrderFirstRegisteredOutermost(t *testing.T) {
+func TestWarpModelChain(t *testing.T) {
 	var tags []string
 	inner := tagProvider{tag: "core", tags: &tags}
-	w1 := func(inner provider.ModelProvider) provider.ModelProvider {
+	w1 := func(_ event.Emitter, inner provider.ModelProvider) provider.ModelProvider {
 		return taggedProvider{tag: "w1", inner: inner, tags: &tags}
 	}
-	w2 := func(inner provider.ModelProvider) provider.ModelProvider {
+	w2 := func(_ event.Emitter, inner provider.ModelProvider) provider.ModelProvider {
 		return taggedProvider{tag: "w2", inner: inner, tags: &tags}
 	}
-	p := Model(inner, w1, w2)
+	p := Model(nil, inner, w1, w2)
 	if _, err := p.Invoke(context.Background(), &types.ModelRequest{}); err != nil {
 		t.Fatalf("err: %v", err)
 	}
 	want := []string{"enter:w1", "enter:w2", "core", "exit:w2", "exit:w1"}
-	if len(tags) != len(want) {
-		t.Fatalf("tags: %v", tags)
-	}
-	for i := range want {
-		if tags[i] != want[i] {
-			t.Fatalf("order: %v", tags)
-		}
+	if !reflect.DeepEqual(tags, want) {
+		t.Fatalf("order: %v", tags)
 	}
 
 	var tags2 []string
-	p2 := Model(tagProvider{tag: "core", tags: &tags2})
+	p2 := Model(nil, tagProvider{tag: "core", tags: &tags2})
 	if _, err := p2.Invoke(context.Background(), &types.ModelRequest{}); err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if len(tags2) != 1 || tags2[0] != "core" {
+	if !reflect.DeepEqual(tags2, []string{"core"}) {
 		t.Fatalf("empty chain: %v", tags2)
+	}
+}
+
+// Emitter 注入：链上每个工厂收到的都是引擎传入的同一出口。
+func TestWarpEmitterInjection(t *testing.T) {
+	em := event.Emitter(func(_ event.EventType, _ any) {})
+	var received []event.Emitter
+	h := func(_ event.Emitter, inner provider.ModelProvider) provider.ModelProvider {
+		return inner
+	}
+	collect := func(got event.Emitter, inner provider.ModelProvider) provider.ModelProvider {
+		received = append(received, got)
+		return inner
+	}
+	Model(em, tagProvider{}, h, collect, collect)
+	if len(received) != 2 {
+		t.Fatalf("received: %d", len(received))
+	}
+	want := reflect.ValueOf(em).Pointer()
+	for _, r := range received {
+		if reflect.ValueOf(r).Pointer() != want {
+			t.Fatal("every handler must receive the engine-provided emitter")
+		}
 	}
 }
 
@@ -79,13 +99,13 @@ func (e echoTool) Invoke(_ context.Context, _ json.RawMessage) (string, error) {
 
 func TestToolChain(t *testing.T) {
 	var tags []string
-	tt := Tool(echoTool{tags: &tags}, func(inner types.Tool) types.Tool {
+	tt := Tool(nil, echoTool{tags: &tags}, func(_ event.Emitter, inner types.Tool) types.Tool {
 		return tagTool{prefix: "w1", inner: inner, tags: &tags}
 	})
 	if _, err := tt.Invoke(context.Background(), nil); err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if len(tags) != 2 || tags[0] != "w1" || tags[1] != "core" {
+	if !reflect.DeepEqual(tags, []string{"w1", "core"}) {
 		t.Fatalf("tool chain: %v", tags)
 	}
 }

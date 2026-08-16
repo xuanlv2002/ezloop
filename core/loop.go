@@ -27,10 +27,15 @@ func (a *Agent) Run(ctx context.Context, input string, runOpts ...RunOption) (st
 		StartedAt:     time.Now(),
 		Emitter:       a.onEvent,
 	}
+	// per-Run 事件出口与 warp 组装：模型/工具两条链注入同一 Emitter，
+	// warp 实例 per-Run 独立（状态不跨 Run 共享）。
+	em := event.Emitter(func(typ event.EventType, data any) {
+		a.emit(state, typ, data)
+	})
 	// 先挂 tool warp，再注册静态工具，保证两者都会被包装。
 	if len(a.toolWarps) > 0 {
 		state.Tools.SetWarp(func(t types.Tool) types.Tool {
-			return warp.Tool(t, a.toolWarps...)
+			return warp.Tool(em, t, a.toolWarps...)
 		})
 	}
 	for _, t := range a.tools {
@@ -46,10 +51,15 @@ func (a *Agent) Run(ctx context.Context, input string, runOpts ...RunOption) (st
 		opt(state)
 	}
 	a.emit(state, event.EventLoopStart, input)
+
+	model := a.provider
+	if len(a.modelWarps) > 0 {
+		model = warp.Model(em, a.provider, a.modelWarps...)
+	}
 	// 流式降级警告：Warp 链可能擦除 Stream 能力（包装者只实现了 Invoke），
 	// 显式发事件而非静默变更行为。
 	if a.streaming {
-		if _, ok := a.provider.(provider.StreamProvider); !ok {
+		if _, ok := model.(provider.StreamProvider); !ok {
 			a.emit(state, event.EventStreamFallback,
 				"streaming requested but provider does not implement StreamProvider; falling back to Invoke")
 		}
@@ -104,7 +114,7 @@ func (a *Agent) Run(ctx context.Context, input string, runOpts ...RunOption) (st
 		}
 
 		// 模型call
-		resp, err := a.callModel(ctx, state)
+		resp, err := a.callModel(ctx, model, state)
 		if err != nil {
 			return state, a.fail(ctx, state, err)
 		}
@@ -217,8 +227,7 @@ func (a *Agent) execToolCalls(ctx context.Context, state *types.LoopState) error
 		state.StopReason = types.StopAborted
 	}
 
-	// 执行段。工具节点与模型节点平级注入事件出口（tool warp 用 event.EmitEvent）。
-	tctx := a.withEmitter(ctx, state)
+	// 执行段。tool warp 已在 Run 组装时注入 Emitter（见 SetWarp）。
 	invoke := func(i int) {
 		call := &calls[i]
 		result := &types.ToolResult{CallID: call.ID, Name: call.Name}
@@ -233,7 +242,7 @@ func (a *Agent) execToolCalls(ctx context.Context, state *types.LoopState) error
 			result.Err = err
 			return
 		}
-		content, err := tool.Invoke(tctx, call.Args)
+		content, err := tool.Invoke(ctx, call.Args)
 		if err != nil {
 			result.Err = err
 			return
@@ -297,31 +306,19 @@ func (a *Agent) execToolCalls(ctx context.Context, state *types.LoopState) error
 	return hookErr
 }
 
-func (a *Agent) callModel(ctx context.Context, state *types.LoopState) (*types.ModelResponse, error) {
+func (a *Agent) callModel(ctx context.Context, model provider.ModelProvider, state *types.LoopState) (*types.ModelResponse, error) {
 	req := &types.ModelRequest{Messages: state.Messages, Tools: state.Tools.List()}
 	a.emit(state, event.EventModelStart, nil)
 
-	ctx = a.withEmitter(ctx, state)
-
 	if a.streaming {
-		if sp, ok := a.provider.(provider.StreamProvider); ok {
+		if sp, ok := model.(provider.StreamProvider); ok {
 			return sp.Stream(ctx, req, func(c types.ModelChunk) error {
 				a.emit(state, event.EventModelChunk, c.ContentDelta)
 				return nil
 			})
 		}
 	}
-	return a.provider.Invoke(ctx, req)
-}
-
-// withEmitter 把事件出口注入 ctx：warp 层（重试、降级、卸载、防护等）
-// 拿不到 LoopState，经 ctx 发事件（event.EmitEvent）流经 OnEvent / RunAsync。
-// 模型与工具两条 warp 链平级注入；工具并发执行时出口会被并发调用，
-// 并发安全由使用方的回调负责（RunAsync 的 channel 出口天然安全）。
-func (a *Agent) withEmitter(ctx context.Context, state *types.LoopState) context.Context {
-	return event.ContextWithEmitter(ctx, func(e event.Event) {
-		a.emit(state, e.Type, e.Data)
-	})
+	return model.Invoke(ctx, req)
 }
 
 func (a *Agent) runEndHooks(ctx context.Context, state *types.LoopState) error {
