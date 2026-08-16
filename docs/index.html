@@ -3,99 +3,324 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ezloop · 快速开始</title>
+<title>ezloop · 简单，不简陋</title>
 <style>
   :root {
-    --bg: #ffffff;
-    --bg-soft: #f6f8fa;
-    --sidebar: #0f172a;
-    --sidebar-hover: #1e293b;
-    --text: #1f2937;
-    --muted: #64748b;
-    --accent: #00add8;
-    --accent-soft: #e0f7fd;
-    --border: #e5e7eb;
-    --code-bg: #0f172a;
-    --code-text: #e2e8f0;
+    --bg: #05070d;
+    --bg-soft: #0a101d;
+    --panel: #0b1322;
+    --sidebar: #04060c;
+    --sidebar-hover: #0e1830;
+    --text: #e8edf6;
+    --muted: #8b98b0;
+    --accent: #7dd3fc;
+    --accent-deep: #38bdf8;
+    --border: #16213a;
+    --border-soft: #1c2942;
+    --code-bg: #070d1a;
+    --code-text: #dbe4f0;
+    --hook: #fbbf24;
+    --model: #00add8;
+    --tool: #34d399;
+    --asm: #a78bfa;
+    --white: #ffffff;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
   body {
     font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
     color: var(--text); background: var(--bg); line-height: 1.75;
   }
   a { color: var(--accent); text-decoration: none; }
   a:hover { text-decoration: underline; }
+  ::selection { background: rgba(56,189,248,.3); }
 
   /* ─── 左侧导航 ─── */
   nav {
-    position: fixed; top: 0; left: 0; bottom: 0; width: 264px;
-    background: var(--sidebar); color: #cbd5e1;
-    padding: 28px 0; overflow-y: auto;
+    position: fixed; top: 0; left: 0; bottom: 0; width: 268px; z-index: 50;
+    background: rgba(4,6,12,.92); backdrop-filter: blur(12px);
+    color: #cbd5e1; padding: 28px 0; overflow-y: auto;
+    border-right: 1px solid var(--border);
   }
-  .brand {
-    padding: 0 24px 20px; border-bottom: 1px solid #1e293b;
+  .brand { padding: 0 24px 20px; border-bottom: 1px solid var(--border); }
+  .brand .logo-mini { display: flex; align-items: center; gap: 12px; }
+  .brand h1 {
+    color: var(--white); font-size: 24px; letter-spacing: 1px; font-weight: 300;
   }
-  .brand h1 { color: #fff; font-size: 26px; letter-spacing: 1px; }
-  .brand p { font-size: 12.5px; color: #64748b; margin-top: 4px; }
+  .brand h1 b { font-weight: 700; }
+  .brand p { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
   .nav-group { margin-top: 18px; }
   .nav-group .label {
-    font-size: 11.5px; letter-spacing: 2px; color: #475569;
+    font-size: 11.5px; letter-spacing: 2px; color: #4b5a75;
     padding: 8px 24px 4px; text-transform: uppercase;
   }
   nav a.item {
     display: block; padding: 7px 24px; color: #94a3b8; font-size: 14px;
     border-left: 3px solid transparent; transition: all .15s;
   }
-  nav a.item:hover { background: var(--sidebar-hover); color: #fff; text-decoration: none; }
+  nav a.item:hover { background: var(--sidebar-hover); color: var(--white); text-decoration: none; }
   nav a.item.active {
     background: var(--sidebar-hover); color: var(--accent);
     border-left-color: var(--accent);
   }
+  .nav-footer {
+    margin-top: 28px; padding: 16px 24px 0; border-top: 1px solid var(--border);
+    font-size: 12.5px; color: var(--muted);
+  }
+  .nav-footer a { color: #94a3b8; }
 
-  /* ─── 右侧内容 ─── */
-  main { margin-left: 264px; max-width: 860px; padding: 48px 56px 96px; }
-  section { margin-bottom: 72px; scroll-margin-top: 24px; }
+  /* ─── 右侧内容：居中于导航右侧的剩余空间（268 + (剩余-900)/2）─── */
+  main {
+    max-width: 900px;
+    margin-left: max(268px, calc(268px + (100% - 1168px) / 2));
+    margin-right: auto;
+    padding: 72px 56px 96px;
+  }
+  section { margin-bottom: 88px; scroll-margin-top: 24px; }
   h2 {
     font-size: 26px; padding-bottom: 12px; border-bottom: 1px solid var(--border);
-    margin-bottom: 20px;
+    margin-bottom: 8px; display: flex; align-items: baseline; gap: 12px;
+    color: var(--white); font-weight: 650;
   }
-  h2 .num { color: var(--accent); margin-right: 10px; font-family: Consolas, monospace; }
-  h3 { font-size: 18px; margin: 28px 0 12px; }
-  p { margin: 10px 0; }
-  ul, ol { padding-left: 24px; margin: 10px 0; }
+  h2 .no {
+    color: var(--accent); font-size: 15px; font-weight: 700; letter-spacing: 1px;
+  }
+  h3 { font-size: 18.5px; margin: 34px 0 12px; color: var(--white); font-weight: 600; }
+  section .ext h3 { margin-top: 18px; }
+  p { margin: 10px 0; color: #c4cede; }
+  .sub { color: var(--muted); font-size: 14.5px; margin-bottom: 22px; }
+  ul, ol { padding-left: 24px; margin: 10px 0; color: #c4cede; }
   li { margin: 5px 0; }
+  li::marker { color: var(--accent); }
+  strong { color: var(--white); }
   code.inline {
-    background: var(--accent-soft); color: #0369a1; border-radius: 4px;
-    padding: 2px 7px; font-size: 88%;
-    font-family: Consolas, "JetBrains Mono", monospace;
+    background: rgba(56,189,248,.12); color: var(--accent);
+    padding: 1.5px 7px; border-radius: 5px;
+    font-family: Consolas, "JetBrains Mono", monospace; font-size: 87%;
   }
+
+  /* ─── HERO：粒子 + 光子 logo（块级自适应宽度，不使用 100vw 避免横向滚动条）─── */
+  .hero {
+    position: relative; margin-left: 268px;
+    min-height: 100vh;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center; overflow: hidden; padding: 60px 30px 90px;
+    background: radial-gradient(ellipse 900px 520px at 50% 30%, rgba(14,42,66,.55), transparent 70%);
+    border-bottom: 1px solid var(--border);
+  }
+  #particles { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .hero-inner { position: relative; z-index: 2; display: flex; flex-direction: column; align-items: center; }
+  .hero .logo-lg { width: 200px; height: 200px; margin-bottom: 6px; filter: drop-shadow(0 0 32px rgba(56,189,248,.35)); }
+  .hero .slogan {
+    font-size: 15px; letter-spacing: 8px; color: #bfe7f8; margin: 18px 0 4px;
+    font-weight: 500; text-indent: 8px;
+  }
+  .hero h1 {
+    font-size: 62px; letter-spacing: 3px; line-height: 1.12; color: var(--white);
+    font-weight: 300;
+  }
+  .hero h1 b { font-weight: 750; }
+  .hero .tagline { font-size: 17px; color: #a9b7cc; margin-top: 12px; }
+  .hero .tagline b { color: var(--white); }
+  .hero-cards {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 40px;
+    width: min(760px, 100%);
+  }
+  .hero-cards .card {
+    background: rgba(255,255,255,.035); border: 1px solid rgba(255,255,255,.09);
+    border-radius: 14px; padding: 16px 15px 13px; backdrop-filter: blur(6px);
+    transition: all .25s;
+  }
+  .hero-cards .card:hover {
+    background: rgba(56,189,248,.07); border-color: rgba(56,189,248,.35);
+    transform: translateY(-3px);
+  }
+  .card .ico { width: 22px; height: 22px; color: var(--accent); display: block; }
+  .card .t { font-weight: 600; font-size: 14.5px; margin-top: 6px; color: var(--white); }
+  .card .d { font-size: 12.5px; color: var(--muted); line-height: 1.55; margin-top: 3px; }
+
+  .install {
+    display: flex; align-items: center; gap: 12px; margin-top: 38px;
+    background: rgba(7,13,26,.85); border: 1px solid var(--border-soft);
+    border-radius: 10px; padding: 12px 22px;
+    color: #a5f3fc; font-family: Consolas, monospace; font-size: 14px;
+    backdrop-filter: blur(6px);
+  }
+  .install .prompt { color: #34d399; }
+  .install .path { color: #93c5fd; }
+  .scroll-hint {
+    position: absolute; bottom: 26px; left: 50%; transform: translateX(-50%);
+    color: #5b6b87; font-size: 12px; letter-spacing: 3px; z-index: 2;
+    animation: floaty 2.6s ease-in-out infinite;
+  }
+  @keyframes floaty { 0%,100% { transform: translate(-50%,0); } 50% { transform: translate(-50%,7px); } }
+
+  /* ─── 代码块 ─── */
+  .codeblock {
+    background: var(--code-bg); border: 1px solid var(--border-soft); border-radius: 10px;
+    margin: 16px 0 22px; overflow: hidden;
+  }
+  .codeblock .bar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 9px 16px; background: rgba(255,255,255,.025);
+    border-bottom: 1px solid rgba(255,255,255,.06);
+  }
+  .codeblock .bar .dot { width: 11px; height: 11px; border-radius: 50%; }
+  .dot.r { background: #f87171; } .dot.y { background: #fbbf24; } .dot.g { background: #34d399; }
+  .codeblock .bar .name {
+    margin-left: 6px; color: #7c8db0; font-size: 12.5px;
+    font-family: Consolas, monospace;
+  }
+  .codeblock pre {
+    padding: 16px 20px; overflow-x: auto; font-size: 13.5px; line-height: 1.72;
+    color: var(--code-text); font-family: Consolas, "JetBrains Mono", monospace;
+  }
+  pre .k { color: #c792ea; }
+  pre .s { color: #c3e88d; }
+  pre .c { color: #5c6f94; font-style: italic; }
+  pre .f { color: #82aaff; }
+  pre .t { color: #ffcb6b; }
+  pre .n { color: #f78c6c; }
+
+  /* ─── 表格 ─── */
+  table { width: 100%; border-collapse: collapse; margin: 14px 0 24px; font-size: 14.5px; }
+  th {
+    text-align: left; padding: 10px 14px; background: rgba(255,255,255,.035);
+    border-bottom: 1px solid var(--border-soft); font-size: 13px; color: #9fb0c8;
+    letter-spacing: .5px;
+  }
+  td { padding: 9px 14px; border-bottom: 1px solid var(--border); vertical-align: top; color: #c4cede; }
+  tr:hover td { background: rgba(56,189,248,.045); }
+  td code, th code {
+    font-family: Consolas, monospace; font-size: 87%;
+    background: rgba(56,189,248,.12); color: var(--accent);
+    padding: 1px 6px; border-radius: 5px;
+  }
+
+  /* ─── 原则卡片 ─── */
+  .principles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin: 22px 0; }
+  .principles .p {
+    border: 1px solid var(--border-soft); border-radius: 12px; padding: 18px;
+    background: linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.008));
+  }
+  .p .num {
+    display: inline-flex; width: 26px; height: 26px; border-radius: 8px;
+    align-items: center; justify-content: center;
+    background: rgba(56,189,248,.14); color: var(--accent);
+    font-weight: 700; font-size: 13.5px;
+  }
+  .p .t { font-weight: 600; margin: 10px 0 6px; font-size: 15.5px; color: var(--white); }
+  .p .d { font-size: 13.5px; color: var(--muted); line-height: 1.65; }
+
+  /* ─── 提示框 ─── */
   .tip {
-    background: #fffbeb; border-left: 4px solid #f59e0b; border-radius: 4px;
-    padding: 12px 18px; margin: 18px 0; font-size: 14.5px;
+    border-left: 4px solid var(--accent-deep);
+    background: rgba(56,189,248,.07); border-radius: 0 10px 10px 0;
+    padding: 12px 18px; margin: 18px 0; font-size: 14px; color: #c8dced;
   }
-  .tip.blue { background: #eff6ff; border-left-color: #3b82f6; }
+  .tip b { color: var(--accent); }
+  .tip.warn { border-left-color: var(--hook); background: rgba(251,191,36,.07); color: #e8dcc0; }
+  .tip.warn b { color: var(--hook); }
 
-  pre {
-    background: var(--code-bg); color: var(--code-text); border-radius: 10px;
-    padding: 20px 24px; overflow-x: auto; margin: 16px 0;
-    font-size: 13.5px; line-height: 1.7;
-    font-family: Consolas, "JetBrains Mono", monospace;
+  /* ─── 架构图卡片 ─── */
+  .diagram-card {
+    border: 1px solid var(--border-soft); border-radius: 14px; padding: 20px 12px 8px;
+    background: var(--bg-soft); margin: 18px 0 10px;
   }
-  pre .cm { color: #64748b; }          /* 注释 */
-  pre .kw { color: #7dd3fc; }          /* 关键字 */
-  pre .str { color: #86efac; }         /* 字符串 */
-  pre .fn { color: #fbbf24; }          /* 函数/类型 */
-  pre .tag { color: #f0abfc; }         /* 包名/点号前缀 */
+  .diagram-card svg { width: 100%; height: auto; display: block; }
 
-  table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 14.5px; }
-  th, td { border: 1px solid var(--border); padding: 9px 14px; text-align: left; }
-  th { background: var(--bg-soft); }
+  /* ─── 架构图：HTML 流式布局（flex 自动对齐，无绝对坐标）─── */
+  .flow { border: 1px solid var(--border-soft); border-radius: 14px; padding: 20px 18px 14px; background: var(--bg-soft); margin: 18px 0 10px; }
+  .flow-asm { border: 1px dashed #6d5bb0; background: rgba(167,139,250,.07); border-radius: 12px; padding: 14px 10px 12px; }
+  .flow-asm-title { text-align: center; font-weight: 700; color: #c4b5fd; font-size: 14.5px; margin-bottom: 12px; }
+  .flow-pills { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+  .pill { background: rgba(167,139,250,.14); border: 1px solid #8b76d9; border-radius: 999px; padding: 5px 18px; text-align: center; }
+  .pill code { color: #ddd3fc; font-size: 12.5px; }
+  .pill span { display: block; font-size: 10.5px; color: #9d8fd0; margin-top: 1px; }
+  .fa-v { width: 1.6px; height: 24px; background: #475569; position: relative; margin: 5px auto; }
+  .fa-v::after { content: ''; position: absolute; bottom: -1px; left: -3.7px; border-top: 7px solid #64748b; border-left: 4.5px solid transparent; border-right: 4.5px solid transparent; }
+  .fa-v.dashed { background: repeating-linear-gradient(180deg, #64748b 0 4px, transparent 4px 8px); }
+  .flow-note { text-align: center; font-size: 11.5px; color: var(--muted); }
+  .flow-engine { border: 1px solid #263449; background: rgba(255,255,255,.018); border-radius: 12px; padding: 14px 12px 12px; }
+  .flow-engine-title { font-size: 13px; font-weight: 700; color: #9fb0c8; margin-bottom: 10px; padding-left: 4px; }
+  .flow-loop { border: 1.5px dashed #64748b; border-radius: 10px; padding: 18px 10px 10px; position: relative; margin-top: 8px; }
+  .flow-loop-label { position: absolute; top: -9px; left: 14px; background: var(--bg-soft); padding: 0 8px; font-size: 11.5px; color: #8b98b0; font-weight: 600; }
+  .flow-row, .branch-row { display: flex; align-items: center; gap: 8px; }
+  .flow-branches { margin-top: 12px; display: flex; flex-direction: column; gap: 10px; padding-left: 4px; }
+  .fa { flex: 1; height: 1.6px; background: #475569; position: relative; min-width: 18px; }
+  .fa::after { content: ''; position: absolute; right: -1px; top: -3.7px; border-left: 7px solid #64748b; border-top: 4.5px solid transparent; border-bottom: 4.5px solid transparent; }
+  .hpin { display: flex; flex-direction: column; align-items: center; gap: 3px; flex: none; }
+  .hpin .dot { width: 20px; height: 20px; border-radius: 50%; background: var(--hook); color: #0b1322; font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+  .hpin .lbl { font-size: 10.5px; color: #fcd34d; font-weight: 600; white-space: nowrap; text-align: center; line-height: 1.3; }
+  .hpin .lbl small { display: block; color: #9d8460; font-weight: 500; font-size: 9.5px; }
+  .node { border-radius: 10px; padding: 9px 14px; text-align: center; font-weight: 700; font-size: 13.5px; flex: none; }
+  .node small { display: block; font-weight: 400; font-size: 10px; opacity: .85; margin-top: 2px; }
+  .node-model { background: var(--model); color: #04222b; }
+  .node-tool { background: var(--tool); color: #03291d; }
+  .node-branch { background: rgba(251,191,36,.1); border: 1px solid #ca8a04; color: #fde68a; font-size: 12.5px; padding: 7px 13px; }
+  .tag-warp { display: inline-block; font-size: 9.5px; font-weight: 600; border-radius: 5px; padding: 1px 6px; margin-top: 4px; background: rgba(167,139,250,.3); color: #ddd3fc; }
+  .node-model .tag-warp { background: rgba(12,44,58,.28); color: #d8f5fc; }
+  .node-tool .tag-warp { background: rgba(6,46,33,.3); color: #d3fae8; }
+  .btag { font-size: 11.5px; color: #9fb0c8; font-weight: 600; width: 18px; text-align: center; flex: none; }
+  .node-done { background: rgba(52,211,153,.1); border: 1px solid #34d399; color: #6ee7b7; font-size: 12px; padding: 6px 14px; }
+  .flow-back { margin-top: 12px; border-top: 2px dashed var(--hook); padding-top: 8px; display: flex; align-items: center; gap: 10px; color: #fcd34d; font-size: 11.5px; font-weight: 600; flex-wrap: wrap; }
+  .flow-back .icon { font-size: 15px; line-height: 1; }
+  .flow-outs { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 4px; }
+  .out-card { border: 1px solid #263449; background: rgba(255,255,255,.025); border-radius: 12px; padding: 12px; text-align: center; }
+  .out-card .t { font-weight: 700; font-size: 13.5px; color: var(--text); }
+  .out-card .d { font-size: 11px; color: var(--muted); margin-top: 3px; line-height: 1.55; }
+  @media (max-width: 760px) {
+    .flow-row, .branch-row { flex-wrap: wrap; justify-content: center; }
+    .fa { min-width: 14px; }
+    .flow-outs { grid-template-columns: 1fr; }
+  }
+  .diagram-cap { text-align: center; font-size: 13px; color: var(--muted); padding: 10px 0 12px; }
 
-  footer { border-top: 1px solid var(--border); padding-top: 20px; color: var(--muted); font-size: 13.5px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 10px 22px; margin: 14px 0 6px; font-size: 13px; color: #9fb0c8; }
+  .legend span { display: inline-flex; align-items: center; gap: 7px; }
+  .legend i { width: 12px; height: 12px; border-radius: 4px; display: inline-block; }
+  .legend .l-hook { background: var(--hook); }
+  .legend .l-model { background: var(--model); }
+  .legend .l-tool { background: var(--tool); }
+  .legend .l-asm { background: var(--asm); }
+  .legend .l-back { background: transparent; border-top: 3px dashed var(--hook); height: 0; border-radius: 0; width: 20px; }
 
-  @media (max-width: 900px) {
-    nav { position: static; width: 100%; bottom: auto; }
-    main { margin-left: 0; padding: 32px 22px; }
+  /* ─── 扩展指南小节 ─── */
+  .ext {
+    border: 1px solid var(--border-soft); border-radius: 12px; padding: 4px 22px 8px;
+    margin: 16px 0; background: var(--panel);
+  }
+  .ext h3 { margin-top: 18px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .badge {
+    font-size: 11px; font-weight: 700; letter-spacing: 1px; padding: 2.5px 9px;
+    border-radius: 999px; text-transform: uppercase;
+  }
+  .badge.model { background: rgba(0,173,216,.16); color: #67e0f9; }
+  .badge.tool   { background: rgba(52,211,153,.14); color: #6ee7b7; }
+  .badge.hook   { background: rgba(251,191,36,.13); color: #fcd34d; }
+  .badge.warp   { background: rgba(167,139,250,.15); color: #c4b5fd; }
+  .badge.base   { background: rgba(255,255,255,.08); color: #cbd5e1; }
+
+  footer {
+    margin-left: max(268px, calc(268px + (100% - 1168px) / 2));
+    margin-right: auto;
+    padding: 26px 56px; border-top: 1px solid var(--border);
+    color: var(--muted); font-size: 13.5px; text-align: center;
+  }
+
+  @media (max-width: 1168px) {
+    nav { display: none; }
+    main, footer {
+      margin-left: 0; margin-right: 0; padding-left: 22px; padding-right: 22px;
+    }
+    .hero { margin-left: 0; padding: 50px 22px 80px; min-height: 100vh; }
+    .hero h1 { font-size: 42px; }
+    .hero-cards { grid-template-columns: repeat(2, 1fr); }
+    .principles { grid-template-columns: 1fr; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .scroll-hint { animation: none; }
   }
 </style>
 </head>
@@ -103,239 +328,888 @@
 
 <nav id="nav">
   <div class="brand">
-    <h1>ezloop</h1>
-    <p>一个 Loop · 两个节点 · 七个钩子</p>
+    <div class="logo-mini">
+      <svg width="40" height="40" viewBox="0 0 100 100" aria-hidden="true">
+        <defs>
+          <linearGradient id="mring" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#7dd3fc"/><stop offset=".55" stop-color="#38bdf8"/><stop offset="1" stop-color="#a78bfa"/>
+          </linearGradient>
+        </defs>
+        <circle cx="50" cy="50" r="33" fill="none" stroke="url(#mring)" stroke-width="4"
+                stroke-linecap="round" stroke-dasharray="160 42" transform="rotate(-35 50 50)"/>
+        <circle cx="50" cy="50" r="5" fill="#fff"/>
+        <circle cx="50" cy="50" r="9" fill="rgba(255,255,255,.25)"/>
+        <circle cx="77" cy="31" r="3.6" fill="#fff">
+          <animate attributeName="opacity" values="1;.5;1" dur="2.2s" repeatCount="indefinite"/>
+        </circle>
+      </svg>
+      <h1><b>ez</b>loop</h1>
+    </div>
+    <p>简单，不简陋。</p>
   </div>
   <div class="nav-group">
-    <div class="label">开始</div>
-    <a class="item" href="#intro">简介</a>
-    <a class="item" href="#install">安装</a>
+    <div class="label">框架简介</div>
+    <a class="item" href="#idea">核心理念</a>
+    <a class="item" href="#engine">Loop 引擎</a>
+    <a class="item" href="#architecture">架构全景</a>
+  </div>
+  <div class="nav-group">
+    <div class="label">快速开始</div>
     <a class="item" href="#first-agent">第一个 Agent</a>
+    <a class="item" href="#ext">官方扩展指南</a>
+    <a class="item" href="#local-agent">构建本地 Agent</a>
+    <a class="item" href="#web-kernel">Web Agent 内核</a>
   </div>
-  <div class="nav-group">
-    <div class="label">核心用法</div>
-    <a class="item" href="#streaming">流式输出</a>
-    <a class="item" href="#tools">自定义工具</a>
-    <a class="item" href="#multiturn">多轮对话</a>
-    <a class="item" href="#async">异步与取消</a>
-  </div>
-  <div class="nav-group">
-    <div class="label">扩展体系</div>
-    <a class="item" href="#hooks">Hook 插件</a>
-    <a class="item" href="#warp">Warp 中间件</a>
-    <a class="item" href="#mcp">MCP 接入</a>
-  </div>
-  <div class="nav-group">
-    <div class="label">更多</div>
-    <a class="item" href="#next">下一步</a>
+  <div class="nav-footer">
+    <a href="https://github.com/xuanlv2002/ezloop" target="_blank">GitHub</a> ·
+    <a href="https://pkg.go.dev/github.com/xuanlv2002/ezloop" target="_blank">pkg.go.dev</a>
   </div>
 </nav>
 
+<!-- ═══════════════ HERO ═══════════════ -->
+<div class="hero">
+  <canvas id="particles"></canvas>
+  <div class="hero-inner">
+    <!-- 光子 logo：一颗光子沿轨道循环 —— ez 系列图腾 -->
+    <svg class="logo-lg" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="ezloop logo">
+      <defs>
+        <linearGradient id="ringGrad" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#7dd3fc"/>
+          <stop offset=".5" stop-color="#38bdf8"/>
+          <stop offset="1" stop-color="#a78bfa"/>
+        </linearGradient>
+      </defs>
+
+      <!-- 旋转组：轨道 + 光子（光子沿轨道循环 = loop） -->
+      <g>
+        <circle cx="100" cy="100" r="60" fill="none" stroke="url(#ringGrad)" stroke-width="4"
+                stroke-linecap="round" stroke-dasharray="290 87" transform="rotate(-35 100 100)"/>
+        <circle cx="146" cy="61" r="12" fill="rgba(255,255,255,.16)"/>
+        <circle cx="146" cy="61" r="6" fill="#ffffff"/>
+        <animateTransform attributeName="transform" type="rotate" from="0 100 100" to="360 100 100"
+                          dur="16s" repeatCount="indefinite"/>
+      </g>
+
+      <!-- 中心核 -->
+      <circle cx="100" cy="100" r="13" fill="rgba(255,255,255,.15)"/>
+      <circle cx="100" cy="100" r="7" fill="#ffffff"/>
+    </svg>
+
+    <div class="slogan">简 单 ， 不 简 陋 。</div>
+    <h1><b>ez</b>loop</h1>
+    <div class="tagline"><b>一个 Loop · 两个节点 · 七个钩子</b> —— 用节点装饰器与流式插件组装任意智能体</div>
+
+    <div class="hero-cards">
+      <div class="card">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><polyline points="20 3.5 20 7 16.5 7"/></svg>
+        <div class="t">极简引擎</div><div class="d">引擎只负责流转，不理解任何具体能力</div>
+      </div>
+      <div class="card">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><line x1="17.5" y1="14" x2="17.5" y2="21"/><line x1="14" y1="17.5" x2="21" y2="17.5"/></svg>
+        <div class="t">一切皆插件</div><div class="d">重试、MCP、审批、会话，全部是 Warp / Hook</div>
+      </div>
+      <div class="card">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2.5H6.5a2 2 0 0 0-2 2v15a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V8z"/><polyline points="14 2.5 14 8 19.5 8"/><line x1="8.5" y1="13" x2="15.5" y2="13"/><line x1="8.5" y1="17" x2="15.5" y2="17"/></svg>
+        <div class="t">状态即消息</div><div class="d">LoopState.Messages 可序列化、可恢复</div>
+      </div>
+      <div class="card">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 4 14 11 14 10.5 22 20 10 13 10"/></svg>
+        <div class="t">流式 + 异步</div><div class="d">SSE chunk 事件、RunAsync 双轨 API</div>
+      </div>
+    </div>
+
+    <div class="install">
+      <span class="prompt">$</span>
+      <span>go get</span><span class="path">github.com/xuanlv2002/ezloop</span>
+    </div>
+  </div>
+  <div class="scroll-hint">▼ SCROLL</div>
+</div>
+
 <main>
 
-<section id="intro">
-  <h2><span class="num">00</span>简介</h2>
-  <p>ezloop 是一个极简风格的 Golang Agent 框架：核心只有一个 <b>model ↔ tool 循环引擎</b>，其余一切（重试、MCP、审批、技能、文件工具…）都是可插拔的扩展。</p>
-  <table>
-    <tr><th>概念</th><th>关注点</th><th>扩展方式</th></tr>
-    <tr><td><b>model</b></td><td>节点本身：模型调用</td><td>实现 <code class="inline">provider.ModelProvider</code> + <code class="inline">WithModelWarp</code></td></tr>
-    <tr><td><b>tool</b></td><td>节点本身：工具执行</td><td>实现 <code class="inline">types.Tool</code> + <code class="inline">WithToolWarp</code></td></tr>
-    <tr><td><b>hook</b></td><td>流的前后：生命周期与控制流</td><td>实现 hook 小接口 + <code class="inline">WithHooks</code></td></tr>
-  </table>
-  <p>一句话：<b>model 和 tool 管节点怎么执行，hook 管流程什么时候插入逻辑。</b></p>
-</section>
+  <!-- ═══════════════ 01 核心理念 ═══════════════ -->
+  <section id="idea">
+    <h2><span class="no">01</span>核心理念</h2>
+    <p class="sub">引擎不理解任何具体能力，它只负责流转。</p>
 
-<section id="install">
-  <h2><span class="num">01</span>安装</h2>
-  <p>要求 Go 1.25+：</p>
-<pre>go get github.com/xuanlv2002/ezloop</pre>
-  <p>框架层零第三方依赖；接入 MCP 等能力时才会引入对应官方 SDK（都在 <code class="inline">ext/</code> 下，不用不引入）。</p>
-</section>
+    <p>大多数 Agent 框架把重试、MCP、审批、日志焊死在引擎里，能力越多，引擎越重。
+    ezloop 只保留一个 <strong>model ↔ tool 循环引擎</strong>，其余一切皆是可插拔的扩展：
+    模型重试是一个 Warp，MCP 接入是一个 Hook，工具审批是一个 Hook，会话持久化也是一个 Hook。
+    不用，就不引入。</p>
 
-<section id="first-agent">
-  <h2><span class="num">02</span>第一个 Agent</h2>
-  <p>三步：创建 Provider → 组装 Agent → Run。</p>
-<pre><span class="kw">package</span> main
+    <h3>三个核心概念</h3>
+    <table>
+      <tr><th>概念</th><th>关注点</th><th>扩展方式</th></tr>
+      <tr>
+        <td><strong>model</strong></td>
+        <td>节点本身：模型调用</td>
+        <td>实现 <code>provider.ModelProvider</code> + <code>WithModelWarp</code> 中间件</td>
+      </tr>
+      <tr>
+        <td><strong>tool</strong></td>
+        <td>节点本身：工具执行</td>
+        <td>实现 <code>types.Tool</code> + <code>WithToolWarp</code> 中间件</td>
+      </tr>
+      <tr>
+        <td><strong>hook</strong></td>
+        <td>流的前后：生命周期与控制流</td>
+        <td>实现 hook 小接口 + <code>WithHooks</code> 插入</td>
+      </tr>
+    </table>
 
-<span class="kw">import</span> (
-    <span class="str">"context"</span>
+    <h3>三条设计原则</h3>
+    <div class="principles">
+      <div class="p">
+        <span class="num">1</span>
+        <div class="t">节点与流分离</div>
+        <div class="d">model / tool 是循环的节点，用 Warp 装饰 —— 管「怎么执行」；
+        hook 是循环的切面，按时机插入 —— 管「什么时候做什么」。两者互不越界。</div>
+      </div>
+      <div class="p">
+        <span class="num">2</span>
+        <div class="t">扩展永不入核</div>
+        <div class="d">框架层零扩展依赖。官方 SDK、重试策略、审批逻辑全部收敛在 ext/ 层，
+        按需引入，引擎永远保持最小。</div>
+      </div>
+      <div class="p">
+        <span class="num">3</span>
+        <div class="t">状态即消息</div>
+        <div class="d">loop 的全部状态是 <code>LoopState</code>，其中 Messages 可序列化、
+        可恢复、可直接作为下一轮历史。没有隐藏的内存中间态。</div>
+      </div>
+    </div>
 
-    <span class="tag">core</span>   <span class="str">"github.com/xuanlv2002/ezloop/core"</span>
-    <span class="tag">openai</span> <span class="str">"github.com/xuanlv2002/ezloop/ext/provider/openai"</span>
+    <h3>Event 与 Hook 分离</h3>
+    <p><code class="inline">OnEvent</code> 回调实时<strong>观察</strong>（含流式 chunk），只读不写；
+    <strong>修改</strong>状态是 Hook 的职责。任何 hook 都能通过
+    <code class="inline">state.EmitEvent("ns.type", data)</code> 向外推送自定义事件
+    （建议加命名空间前缀，如 <code class="inline">approve.denied</code>），时间戳与迭代号自动补全。</p>
+
+    <div class="tip">
+      <b>KV cache 友好：</b>工具定义与 system 前缀属于 prompt 缓存前缀。mcpRouter 的 schema 恒定、
+      <code>WithHistory</code> 自动过滤历史中的 system 消息 —— 每轮对话的前缀稳定，不击穿缓存。
+    </div>
+  </section>
+
+  <!-- ═══════════════ 02 LOOP 引擎 ═══════════════ -->
+  <section id="engine">
+    <h2><span class="no">02</span>Loop 引擎</h2>
+    <p class="sub">一次 Run 的完整生命周期：注入 → 循环 → 收尾。</p>
+
+    <h3>执行流程</h3>
+    <ol>
+      <li><strong>初始化</strong>：构造 <code>LoopState</code>（system prompt → 历史 → 本轮输入），
+        依次执行 <code class="inline">startHook</code> —— 这是注入工具（mcp router）与技能的时机。</li>
+      <li><strong>循环</strong>（≤ <code>MaxIterations</code>）：
+        <code class="inline">modelStartHook</code> → 调用模型（流式时 chunk 实时成事件）→
+        <code class="inline">modelEndHook</code> →
+        响应含 tool calls 则执行工具后回到模型；不含则循环结束。</li>
+      <li><strong>收尾</strong>：<code class="inline">endHook</code> 无论成败都执行（defer 语义）——
+        摘要、会话快照、连接清理都在这里。</li>
+    </ol>
+
+    <h3>七个 Hook 的作用点</h3>
+    <table>
+      <tr><th>#</th><th>接口</th><th>作用点</th><th>典型用途</th></tr>
+      <tr><td>1</td><td><code>StartHook</code></td><td>loop 开始</td><td>注入工具、技能指令</td></tr>
+      <tr><td>2</td><td><code>ModelStartHook</code></td><td>调用模型前</td><td>预算守卫（置 <code>Stop</code> 提前终止）</td></tr>
+      <tr><td>3</td><td><code>ModelEndHook</code></td><td>模型响应后</td><td>响应改写、审计</td></tr>
+      <tr><td>4</td><td><code>ToolStartHook</code></td><td>工具调用前</td><td>审批 / 权限拦截（<code>Skip</code> / <code>Abort</code> 短路）</td></tr>
+      <tr><td>5</td><td><code>ToolEndHook</code></td><td>工具调用后</td><td>审计日志</td></tr>
+      <tr><td>6</td><td><code>LoopHook</code></td><td>迭代回边前</td><td>上下文压缩、配置热加载</td></tr>
+      <tr><td>7</td><td><code>EndHook</code></td><td>loop 结束</td><td>摘要、资源清理、会话保存</td></tr>
+    </table>
+
+    <div class="codeblock">
+      <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">budget_hook.go — 一个插件只写业务，健壮性由引擎兜底</span></div>
+<pre><span class="k">type</span> <span class="t">BudgetHook</span> <span class="k">struct</span>{ Remaining <span class="t">int</span> }
+
+<span class="k">func</span> (h *<span class="t">BudgetHook</span>) <span class="f">Name</span>() <span class="t">string</span> { <span class="k">return</span> <span class="s">"budget"</span> }
+<span class="k">func</span> (h *<span class="t">BudgetHook</span>) <span class="f">OnModelStart</span>(_ <span class="t">context.Context</span>, s *<span class="t">types.LoopState</span>) <span class="t">error</span> {
+    <span class="k">if</span> s.Iteration &gt; h.Remaining {
+        s.Stop = <span class="k">true</span> <span class="c">// 提前终止，EndHook 仍会执行</span>
+    }
+    <span class="k">return</span> <span class="k">nil</span>
+}
+
+agent := <span class="f">core.NewAgent</span>(p, core.<span class="f">WithHooks</span>(&amp;BudgetHook{Remaining: <span class="n">10</span>}))</pre>
+    </div>
+
+    <h3>工具执行：三阶段模型</h3>
+    <ul>
+      <li><strong>判定</strong> —— <code class="inline">toolStartHook</code> 顺序执行；
+        返回 <code class="inline">ActionSkip</code> 跳过该调用（结果消息注明被谁拦截），
+        <code class="inline">ActionAbort</code> 终止整个 loop。</li>
+      <li><strong>执行</strong> —— 并发执行（≤ <code>MaxConcurrency</code>），每个调用独立 panic 恢复，
+        工具错误不终止 loop。</li>
+      <li><strong>收尾</strong> —— 结果消息、<code class="inline">toolEndHook</code>、事件严格按调用顺序发出，并发但不乱序。</li>
+    </ul>
+
+    <h3>健壮性语义（引擎内置）</h3>
+    <ul>
+      <li><strong>工具错误回传模型自纠</strong> —— 只有 hook 报错或 <code>ActionAbort</code> 才终止 loop；</li>
+      <li><strong>Hook 标准防护</strong> —— 任意 hook panic 被恢复为带 hook 名与阶段的 error，单个扩展崩溃不会炸掉 loop；</li>
+      <li><strong>ctx 取消</strong> —— 循环顶部与模型调用检查 <code class="inline">ctx.Err()</code>，归类为 <code class="inline">cancelled</code> 而非 <code class="inline">error</code>；</li>
+      <li><strong>EndHook 保证执行</strong> —— defer 语义，成败皆跑。</li>
+    </ul>
+
+    <h3>双轨 API：同步与异步</h3>
+    <div class="codeblock">
+      <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">run.go</span></div>
+<pre><span class="c">// 同步：单轮 + 实时回调</span>
+state, err := agent.<span class="f">Run</span>(ctx, <span class="s">"帮我读一下 hello.txt"</span>)
+
+<span class="c">// 多轮：上一轮的 Messages 直接作为历史（system 自动去重）</span>
+state, err = agent.<span class="f">Run</span>(ctx, <span class="s">"再总结一下"</span>, core.<span class="f">WithHistory</span>(state.Messages...))
+
+<span class="c">// 异步：事件通道 + 取消（服务端场景，与 WithOnEvent 二选一）</span>
+h := agent.<span class="f">RunAsync</span>(ctx, <span class="s">"长任务"</span>)
+<span class="k">defer</span> h.<span class="f">Cancel</span>()                     <span class="c">// 幂等</span>
+<span class="k">for</span> e := <span class="k">range</span> h.<span class="f">Events</span>() { <span class="f">render</span>(e) }  <span class="c">// loop 结束自动 close</span>
+state, err = h.<span class="f">Wait</span>()</pre>
+    </div>
+    <p>RunAsync 的事件通道缓冲 256、满时阻塞 loop（不丢事件）；
+    <code class="inline">Cancel()</code> 幂等，取消后 state 归类 <code class="inline">cancelled</code>。</p>
+  </section>
+
+  <!-- ═══════════════ 03 架构全景 ═══════════════ -->
+  <section id="architecture">
+    <h2><span class="no">03</span>架构全景</h2>
+    <p class="sub">一张图看懂各组件的作用点：组装层包装节点，Hook 插入流程，引擎只负责流转。</p>
+
+    <div class="diagram-card">
+      <div class="flow">
+
+        <!-- 组装层 -->
+        <div class="flow-asm">
+          <div class="flow-asm-title">core.NewAgent(p, opts...) — 组装层</div>
+          <div class="flow-pills">
+            <div class="pill"><code>WithModelWarp(...)</code><span>包装 model 节点</span></div>
+            <div class="pill"><code>WithToolWarp(...)</code><span>包装 tool 节点</span></div>
+            <div class="pill"><code>WithHooks(...)</code><span>插入流程 ①—⑦</span></div>
+          </div>
+        </div>
+
+        <div class="fa-v dashed"></div>
+        <div class="flow-note">选项在循环内落位（紫色徽章 = Warp 包装，橙色圆点 = Hook 作用点）</div>
+        <div class="fa-v"></div>
+
+        <!-- Loop 引擎 -->
+        <div class="flow-engine">
+          <div class="flow-engine-title">Loop 引擎 — 只负责流转</div>
+
+          <div class="hpin">
+            <span class="dot">1</span>
+            <span class="lbl">startHook<small>注入工具 / 技能</small></span>
+          </div>
+          <div class="fa-v"></div>
+
+          <div class="flow-loop">
+            <div class="flow-loop-label">loop ≤ MaxIterations</div>
+
+            <div class="flow-row">
+              <div class="hpin"><span class="dot">2</span><span class="lbl">modelStart</span></div>
+              <div class="fa"></div>
+              <div class="node node-model">model<small>Invoke / Stream</small><span class="tag-warp">ModelWarp 包装</span></div>
+              <div class="fa"></div>
+              <div class="hpin"><span class="dot">3</span><span class="lbl">modelEnd</span></div>
+              <div class="fa"></div>
+              <div class="node node-branch">tool calls?</div>
+            </div>
+
+            <div class="flow-branches">
+              <div class="branch-row">
+                <span class="btag">有</span>
+                <div class="hpin"><span class="dot">4</span><span class="lbl">toolStart<small>可 Skip / Abort</small></span></div>
+                <div class="fa"></div>
+                <div class="node node-tool">tool ×N<small>并发 ≤ MaxConcurrency · 保序</small><span class="tag-warp">ToolWarp 包装</span></div>
+                <div class="fa"></div>
+                <div class="hpin"><span class="dot">5</span><span class="lbl">toolEnd</span></div>
+              </div>
+              <div class="branch-row">
+                <span class="btag">无</span>
+                <div class="hpin"><span class="dot">7</span><span class="lbl">endHook</span></div>
+                <div class="fa"></div>
+                <div class="node node-done">最终回答</div>
+              </div>
+            </div>
+
+            <div class="flow-back">
+              <span class="icon">↺</span>
+              <span>⑥ loopHook · 上下文压缩 / 配置热加载</span>
+              <span style="color:#9d8460;font-weight:500">— 回到 modelStart，进入下一轮迭代</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="fa-v"></div>
+
+        <div class="flow-outs">
+          <div class="out-card">
+            <div class="t">State</div>
+            <div class="d">LoopState · Messages 可序列化<br>多轮 WithHistory · localsession 恢复</div>
+          </div>
+          <div class="out-card">
+            <div class="t">Event 流</div>
+            <div class="d">OnEvent 回调 / RunAsync 通道<br>流式 chunk · 工具进度 · 自定义事件</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="legend">
+      <span><i class="l-asm"></i>组装层 Warp / Hooks</span>
+      <span><i class="l-model"></i>model 节点</span>
+      <span><i class="l-tool"></i>tool 节点</span>
+      <span><i class="l-hook"></i>Hook 作用点</span>
+      <span><i class="l-back"></i>迭代回边</span>
+    </div>
+  </section>
+
+  <!-- ═══════════════ 04 第一个 Agent ═══════════════ -->
+  <section id="first-agent">
+    <h2><span class="no">04</span>第一个 Agent</h2>
+    <p class="sub">十行代码跑起来 —— OpenAI 兼容接口（DeepSeek / SiliconFlow / vLLM / Ollama 通用）。</p>
+
+    <div class="codeblock">
+      <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">main.go</span></div>
+<pre><span class="k">package</span> main
+
+<span class="k">import</span> (
+    <span class="s">"context"</span>
+    <span class="s">"fmt"</span>
+    <span class="s">"os"</span>
+
+    <span class="s">"github.com/xuanlv2002/ezloop/core"</span>
+    <span class="s">"github.com/xuanlv2002/ezloop/ext/provider/openai"</span>
 )
 
-<span class="kw">func</span> <span class="fn">main</span>() {
-    p := openai.<span class="fn">New</span>(openai.Options{
-        BaseURL: <span class="str">"https://api.openai.com/v1"</span>, <span class="cm">// 可换 DeepSeek / Ollama 等兼容端点</span>
-        APIKey:  <span class="str">"sk-xxx"</span>,
-        Model:   <span class="str">"gpt-4o-mini"</span>,
+<span class="k">func</span> <span class="f">main</span>() {
+    p := openai.<span class="f">New</span>(openai.Options{
+        BaseURL: os.<span class="f">Getenv</span>(<span class="s">"OPENAI_BASE_URL"</span>),
+        APIKey:  os.<span class="f">Getenv</span>(<span class="s">"OPENAI_API_KEY"</span>),
+        Model:   <span class="s">"deepseek-ai/DeepSeek-V3.2"</span>,
     })
+    agent := core.<span class="f">NewAgent</span>(p, core.<span class="f">WithSystemPrompt</span>(<span class="s">"你是一个严谨的助手"</span>))
 
-    agent := core.<span class="fn">NewAgent</span>(p,
-        core.<span class="fn">WithSystemPrompt</span>(<span class="str">"你是一个严谨的助手"</span>),
-    )
-
-    state, err := agent.<span class="fn">Run</span>(context.Background(), <span class="str">"你好，介绍一下你自己"</span>)
-    <span class="kw">if</span> err != <span class="kw">nil</span> {
-        <span class="fn">panic</span>(err)
+    state, err := agent.<span class="f">Run</span>(context.<span class="f">Background</span>(), <span class="s">"用一句话介绍 loop 引擎"</span>)
+    <span class="k">if</span> err != <span class="k">nil</span> {
+        <span class="f">panic</span>(err)
     }
-    <span class="fn">println</span>(state.LastResponse.Content) <span class="cm">// 最终回答</span>
-    <span class="fn">println</span>(state.StopReason)               <span class="cm">// completed</span>
+    fmt.<span class="f">Println</span>(state.Messages[<span class="f">len</span>(state.Messages)-<span class="n">1</span>].Content)
 }</pre>
-  <p>Run 内部发生了什么：模型响应若包含 tool calls，引擎自动执行工具并把结果回传模型，循环往复，直到模型给出最终回答、达到 <code class="inline">MaxIterations</code>、被 hook 终止或 ctx 取消。</p>
-</section>
+    </div>
 
-<section id="streaming">
-  <h2><span class="num">03</span>流式输出</h2>
-  <p>开启 <code class="inline">WithStreaming</code> 后，chunk 通过事件实时到达：</p>
-<pre>agent := core.<span class="fn">NewAgent</span>(p,
-    core.<span class="fn">WithStreaming</span>(<span class="kw">true</span>),
-    core.<span class="fn">WithOnEvent</span>(<span class="kw">func</span>(e event.Event) {
-        <span class="kw">switch</span> e.Type {
-        <span class="kw">case</span> event.EventModelChunk:
-            <span class="fn">print</span>(e.Data.(<span class="kw">string</span>))      <span class="cm">// 增量文本</span>
-        <span class="kw">case</span> event.EventToolStart:
-            <span class="cm">// e.Data.(*types.ToolCall)</span>
+    <div class="tip">
+      <b>下一步：</b>加工具（<code>WithTools</code>）、加流式（<code>WithStreaming(true)</code> + <code>WithOnEvent</code>），
+      或者直接看 <a href="#local-agent">构建本地 Agent</a> —— 一个集成全部官方扩展的完整示例。
+    </div>
+  </section>
+
+  <!-- ═══════════════ 05 官方扩展指南 ═══════════════ -->
+  <section id="ext">
+    <h2><span class="no">05</span>官方扩展指南</h2>
+    <p class="sub">所有能力都在 ext/ 层，按需引入 —— 不用不依赖。</p>
+
+    <h3>底座</h3>
+    <div class="ext">
+      <h3>ext/fs <span class="badge base">底座</span></h3>
+      <p>FileSystem 核心接口（Read / Write / List）+ 两个可选能力接口：
+      <code class="inline">Modifier</code>（Edit / ApplyPatch 原子补丁）、<code class="inline">Searcher</code>（Grep / Find）。
+      Local 实现全部能力，带 root 沙箱（路径穿越被拒绝）与补丁预检 + 回滚。</p>
+      <div class="codeblock">
+        <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">fs.go</span></div>
+<pre>fsys := fs.<span class="f">NewLocal</span>(<span class="s">"."</span>)              <span class="c">// 沙箱 = 当前目录</span>
+data, _  := fsys.<span class="f">Read</span>(ctx, <span class="s">"a.txt"</span>)
+_        = fsys.<span class="f">Write</span>(ctx, <span class="s">"b.txt"</span>, []<span class="t">byte</span>(<span class="s">"hi"</span>))
+entries, _ := fsys.<span class="f">List</span>(ctx, <span class="s">"."</span>)
+
+<span class="c">// 能力探测：filetools 等下游按实现注册工具</span>
+<span class="k">if</span> m, ok := fsys.(fs.<span class="t">Modifier</span>); ok  { m.<span class="f">Edit</span>(ctx, <span class="s">"a.txt"</span>, <span class="s">"old"</span>, <span class="s">"new"</span>) }
+<span class="k">if</span> s, ok := fsys.(fs.<span class="t">Searcher</span>); ok { s.<span class="f">Grep</span>(ctx, fs.GrepRequest{Pattern: <span class="s">"TODO"</span>}) }</pre>
+      </div>
+    </div>
+
+    <h3>model 节点</h3>
+    <div class="ext">
+      <h3>ext/provider/openai <span class="badge model">model</span></h3>
+      <p>OpenAI 兼容 Provider：Invoke + SSE 流式（tool call 增量聚合、usage 统计），
+      兼容 DeepSeek / SiliconFlow / vLLM / Ollama。</p>
+      <div class="codeblock">
+        <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">provider.go</span></div>
+<pre>p := openai.<span class="f">New</span>(openai.Options{
+    BaseURL: <span class="s">"https://api.siliconflow.cn/v1"</span>,
+    APIKey:  <span class="s">"sk-xxx"</span>,
+    Model:   <span class="s">"deepseek-ai/DeepSeek-V3.2"</span>,
+    Headers: <span class="k">map</span>[<span class="t">string</span>]<span class="t">string</span>{<span class="s">"X-Custom"</span>: <span class="s">"v"</span>},  <span class="c">// 可选</span>
+})
+<span class="c">// 同时实现 Invoke 与 Stream：WithStreaming(true) 时自动走流式</span></pre>
+      </div>
+    </div>
+
+    <h3>Warp：节点装饰器</h3>
+    <div class="ext">
+      <h3>ext/warp/model/modelretry <span class="badge warp">warp</span></h3>
+      <p>模型重试：指数退避 + 抖动；流式仅在尚未发出 chunk 时重试（已发出的内容不可撤回）。</p>
+      <div class="codeblock">
+        <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">retry.go</span></div>
+<pre>agent := core.<span class="f">NewAgent</span>(p, core.<span class="f">WithModelWarp</span>(modelretry.<span class="f">Warp</span>()))
+<span class="c">// 降级 / 多模型路由？自己写一个 WarpHandler：func(ModelProvider) ModelProvider</span></pre>
+      </div>
+    </div>
+
+    <div class="ext">
+      <h3>ext/warp/tool/safetool <span class="badge warp">warp</span></h3>
+      <p>工具防护：panic 恢复为 error（附工具名），工具错误附加上下文 —— 单个工具崩溃不炸 loop。</p>
+      <div class="codeblock">
+        <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">safe.go</span></div>
+<pre>core.<span class="f">WithToolWarp</span>(safetool.<span class="f">Warp</span>())
+<span class="c">// Warp 挂载在 ToolRegistry 上：静态注册与 hook 运行时注入的工具都会被包装</span></pre>
+      </div>
+    </div>
+
+    <div class="ext">
+      <h3>ext/warp/tool/offload <span class="badge warp">warp</span></h3>
+      <p>大结果卸载：超过阈值（默认 4KB）的工具结果写入 FS，上下文只留摘要 + 路径；写失败降级透传。</p>
+      <div class="codeblock">
+        <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">offload.go</span></div>
+<pre>core.<span class="f">WithToolWarp</span>(safetool.<span class="f">Warp</span>(), offload.<span class="f">Warp</span>(fsys))
+<span class="c">// grep 全仓 500 条命中？写进 .ezloop/offload/，模型上下文只留前 512 字节 + 文件路径</span></pre>
+      </div>
+    </div>
+
+    <h3>Hook：流程插件</h3>
+
+    <div class="ext">
+      <h3>ext/hook/mcp <span class="badge hook">hook</span></h3>
+      <p>MCP 接入：mcpRouter 单工具封装。模型只看到一个 schema 恒定的 <code class="inline">mcp_router</code> 工具 ——
+      KV cache 友好、server 列表热加载、ACL / OAuth 内聚在 router 内部，模型通过
+      <code class="inline">action: list_tools</code> 自发现工具。内置官方 go-sdk。</p>
+      <div class="codeblock">
+        <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">mcp.go</span></div>
+<pre>cfg := mcp.Config{
+    Servers: []mcp.ServerConfig{{
+        Name:    <span class="s">"fs"</span>,
+        Factory: mcp.<span class="f">StreamableHTTP</span>(<span class="s">"https://mcp.example.com"</span>,
+            <span class="k">map</span>[<span class="t">string</span>]<span class="t">string</span>{<span class="s">"Authorization"</span>: <span class="s">"Bearer xxx"</span>}),
+        <span class="c">// Allow: []string{"read_*"},  // 可选 ACL 白名单</span>
+    }},
+}
+agent := core.<span class="f">NewAgent</span>(p, core.<span class="f">WithHooks</span>(mcp.<span class="f">NewHook</span>(cfg)))
+<span class="c">// 模型调用 mcp_router：action=list_tools 发现 → action=call_tool 执行</span></pre>
+      </div>
+    </div>
+
+    <div class="ext">
+      <h3>ext/hook/skill <span class="badge hook">hook</span></h3>
+      <p>技能注入：代码定义，或从 FS 目录加载 <code class="inline">*.md</code>（可选同名 <code class="inline">.keywords</code> 文件）；
+      按输入关键词匹配，命中才注入对应 system 指令。</p>
+      <div class="codeblock">
+        <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">skill.go</span></div>
+<pre><span class="c">// 方式一：代码定义</span>
+h := skill.<span class="f">New</span>(skill.Skill{
+    Name: <span class="s">"sql"</span>, Description: <span class="s">"SQL 书写规范"</span>,
+    Keywords:     []<span class="t">string</span>{<span class="s">"sql"</span>, <span class="s">"查询"</span>},
+    Instructions: <span class="s">"所有查询必须带 LIMIT ..."</span>,
+})
+
+<span class="c">// 方式二：目录加载 skills/*.md + skills/foo.keywords</span>
+h, err := skill.<span class="f">NewFromFS</span>(ctx, fsys, <span class="s">"skills"</span>)
+
+agent := core.<span class="f">NewAgent</span>(p, core.<span class="f">WithHooks</span>(h))</pre>
+      </div>
+    </div>
+
+    <div class="ext">
+      <h3>ext/hook/approve <span class="badge hook">hook</span></h3>
+      <p>工具审批：两种玩法 —— 同步阻塞式 Approver（CLI 里 y/n 确认），
+      或轮次式 Store（预先授权指纹，命中即放行，默认消费一次）。拒绝默认 Skip（可传 <code class="inline">ActionAbort</code>）。</p>
+      <div class="codeblock">
+        <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">approve.go</span></div>
+<pre><span class="c">// 同步阻塞：人工确认</span>
+h := approve.<span class="f">New</span>(<span class="k">func</span>(_ context.Context, c *types.ToolCall) (<span class="t">bool</span>, <span class="t">error</span>) {
+    <span class="k">return</span> <span class="f">askHuman</span>(c.Name, c.Args), <span class="k">nil</span>
+})
+
+<span class="c">// 轮次式：预授权（tool + args 指纹粒度，命中即消费）</span>
+store := approve.<span class="f">NewStore</span>(<span class="k">true</span>)
+store.<span class="f">Approve</span>(<span class="s">"write_file"</span>, args)
+h2 := approve.<span class="f">New</span>(store.<span class="f">Approver</span>())</pre>
+      </div>
+    </div>
+
+    <div class="ext">
+      <h3>ext/hook/filetools <span class="badge hook">hook</span></h3>
+      <p>文件工具集：按传入 FS 的能力注册 —— read_file（行分页 / 50KB 上限）、write_file、list_dir，
+      + edit_file / apply_patch（需 Modifier）、grep / find（需 Searcher）、bash（需 EnableExec）。
+      修改类操作走 per-path 队列串行化，防止并发写冲突。建议配 approve。</p>
+      <div class="codeblock">
+        <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">filetools.go</span></div>
+<pre>h := filetools.<span class="f">New</span>(fsys, <span class="k">func</span>(o *filetools.Options) { o.EnableExec = <span class="k">true</span> })
+agent := core.<span class="f">NewAgent</span>(p, core.<span class="f">WithHooks</span>(h))
+<span class="c">// bash：shell 语义单命令字符串（Windows: cmd /c，Unix: sh -c），支持管道与 &&</span></pre>
+      </div>
+    </div>
+
+    <div class="ext">
+      <h3>ext/hook/summary <span class="badge hook">hook</span></h3>
+      <p>自动摘要：loop 结束时用模型生成当轮摘要写入 <code class="inline">state.Metadata["summary"]</code>；
+      失败只记 <code class="inline">summary_error</code>，永不影响主流程。</p>
+      <div class="codeblock">
+        <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">summary.go</span></div>
+<pre>core.<span class="f">WithHooks</span>(summary.<span class="f">New</span>(p, <span class="s">""</span>))  <span class="c">// 第二参数：自定义摘要 prompt</span></pre>
+      </div>
+    </div>
+
+    <div class="ext">
+      <h3>ext/hook/localsession <span class="badge hook">hook</span></h3>
+      <p>会话持久化：每轮 EndHook 滚动快照到 <code class="inline">sessions/&lt;id&gt;.json</code>；
+      Load / List 恢复续聊 —— 「状态即消息」的落地。</p>
+      <div class="codeblock">
+        <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">session.go</span></div>
+<pre>session := localsession.<span class="f">New</span>(fsys, <span class="s">""</span>)          <span class="c">// 空 id 自动生成</span>
+agent := core.<span class="f">NewAgent</span>(p, core.<span class="f">WithHooks</span>(session))
+
+<span class="c">// 恢复历史会话</span>
+s, _ := localsession.<span class="f">Load</span>(ctx, fsys, <span class="s">""</span>, id)
+state, _ := agent.<span class="f">Run</span>(ctx, <span class="s">"继续刚才的话题"</span>, core.<span class="f">WithHistory</span>(s.Messages...))</pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════ 06 构建本地 Agent ═══════════════ -->
+  <section id="local-agent">
+    <h2><span class="no">06</span>构建本地 Agent</h2>
+    <p class="sub">CLI 交互 · 文件沙箱 · 工具审批 · 技能 · 会话持久化 · 流式输出 —— 完整代码见 examples/chat。</p>
+
+    <div class="codeblock">
+      <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">chat.go — 组装（完整版运行：go run ./examples/chat）</span></div>
+<pre>fsys := fs.<span class="f">NewLocal</span>(<span class="s">"."</span>)                        <span class="c">// ① 沙箱 = 当前目录</span>
+session := localsession.<span class="f">New</span>(fsys, <span class="s">""</span>)            <span class="c">// ② 会话持久化</span>
+skillHook, err := skill.<span class="f">NewFromFS</span>(ctx, fsys, <span class="s">"skills"</span>)  <span class="c">// ③ 技能目录</span>
+<span class="k">if</span> err != <span class="k">nil</span> { skillHook = skill.<span class="f">New</span>() }              <span class="c">//   目录不存在则空集</span>
+
+<span class="c">// ④ CLI 审批：只读放行，写操作 y/n 确认</span>
+scanner := bufio.<span class="f">NewScanner</span>(os.Stdin)
+approver := approve.<span class="f">New</span>(<span class="k">func</span>(_ context.Context, c *types.ToolCall) (<span class="t">bool</span>, <span class="t">error</span>) {
+    <span class="k">switch</span> c.Name {
+    <span class="k">case</span> <span class="s">"read_file"</span>, <span class="s">"list_dir"</span>, <span class="s">"grep"</span>, <span class="s">"find"</span>:
+        <span class="k">return</span> <span class="k">true</span>, <span class="k">nil</span>
+    }
+    fmt.<span class="f">Printf</span>(<span class="s">"\n⚠️  放行 %s? [y/N] "</span>, c.Name)
+    scanner.<span class="f">Scan</span>()
+    <span class="k">return</span> strings.<span class="f">EqualFold</span>(strings.<span class="f">TrimSpace</span>(scanner.Text()), <span class="s">"y"</span>), <span class="k">nil</span>
+})
+
+agent := core.<span class="f">NewAgent</span>(p,
+    core.<span class="f">WithSystemPrompt</span>(<span class="s">"你是命令行助手，能用工具就用工具"</span>),
+    core.<span class="f">WithModelWarp</span>(modelretry.<span class="f">Warp</span>()),               <span class="c">// ⑤ 重试</span>
+    core.<span class="f">WithToolWarp</span>(safetool.<span class="f">Warp</span>(), offload.<span class="f">Warp</span>(fsys)),  <span class="c">// ⑥ 防护 + 卸载</span>
+    core.<span class="f">WithHooks</span>(
+        filetools.<span class="f">New</span>(fsys, <span class="k">func</span>(o *filetools.Options) { o.EnableExec = <span class="k">true</span> }),
+        skillHook, approver, summary.<span class="f">New</span>(p, <span class="s">""</span>), session,
+    ),
+    core.<span class="f">WithStreaming</span>(<span class="k">true</span>),
+    core.<span class="f">WithOnEvent</span>(<span class="k">func</span>(e event.Event) {              <span class="c">// ⑦ 流式渲染</span>
+        <span class="k">switch</span> e.Type {
+        <span class="k">case</span> event.EventModelChunk: fmt.<span class="f">Print</span>(e.Data.(<span class="t">string</span>))
+        <span class="k">case</span> event.EventToolStart:  fmt.<span class="f">Printf</span>(<span class="s">"\n🔧 %s "</span>, e.Data.(*types.ToolCall).Name)
         }
     }),
 )</pre>
-  <div class="tip blue">Event 只做观察（只读），Hook 才能修改状态——两者严格分离。任何 hook 也可以用 <code class="inline">state.EmitEvent("my.type", data)</code> 发送自定义事件。</div>
-</section>
+    </div>
 
-<section id="tools">
-  <h2><span class="num">04</span>自定义工具</h2>
-  <p>实现 <code class="inline">types.Tool</code> 四个方法即可：</p>
-<pre><span class="kw">type</span> <span class="fn">TimeTool</span> <span class="kw">struct</span>{}
+    <h3>多轮对话主循环</h3>
+    <div class="codeblock">
+      <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">loop.go</span></div>
+<pre><span class="k">var</span> history []types.Message
+<span class="k">for</span> {
+    fmt.<span class="f">Print</span>(<span class="s">"\n你: "</span>)
+    <span class="k">if</span> !scanner.<span class="f">Scan</span>() { <span class="k">return</span> }
+    input := strings.<span class="f">TrimSpace</span>(scanner.Text())
 
-<span class="kw">func</span> (TimeTool) <span class="fn">Name</span>() <span class="kw">string</span>        { <span class="kw">return</span> <span class="str">"now"</span> }
-<span class="kw">func</span> (TimeTool) <span class="fn">Description</span>() <span class="kw">string</span> { <span class="kw">return</span> <span class="str">"获取当前本地时间"</span> }
-<span class="kw">func</span> (TimeTool) <span class="fn">ArgsSchema</span>() json.RawMessage {
-    <span class="kw">return</span> json.<span class="fn">RawMessage</span>(<span class="str">`{"type":"object","properties":{}}`</span>)
-}
-<span class="kw">func</span> (TimeTool) <span class="fn">Invoke</span>(_ context.Context, _ json.RawMessage) (<span class="kw">string</span>, <span class="kw">error</span>) {
-    <span class="kw">return</span> time.Now().<span class="fn">Format</span>(<span class="str">"2006-01-02 15:04:05"</span>), <span class="kw">nil</span>
-}
+    <span class="c">// Ctrl+C 只取消当轮：换一个可取消的子 ctx，主循环继续</span>
+    turnCtx, cancelTurn := context.<span class="f">WithCancel</span>(ctx)
 
-agent := core.<span class="fn">NewAgent</span>(p,
-    core.<span class="fn">WithTools</span>(TimeTool{}),
-    core.<span class="fn">WithHyperParams</span>(core.HyperParams{
-        MaxIterations:  8,
-        MaxConcurrency: 4, <span class="cm">// 单轮工具并发上限，消息与事件仍保序</span>
-    }),
-)</pre>
-  <div class="tip">工具执行失败或工具不存在<b>不会终止 loop</b>——错误作为结果回传模型供其自纠。同路径并发写冲突可参考 filetools 内置的 per-path 修改队列。</div>
-</section>
+    state, err := agent.<span class="f">Run</span>(turnCtx, input, core.<span class="f">WithHistory</span>(history...))
+    cancelTurn()
+    <span class="k">if</span> err != <span class="k">nil</span> { <span class="k">continue</span> }          <span class="c">// 工具错误早已回传模型自纠，这里只剩中止类</span>
 
-<section id="multiturn">
-  <h2><span class="num">05</span>多轮对话</h2>
-  <p>可恢复状态就是 <code class="inline">state.Messages</code>（纯数据，可存库）。下一轮直接作为历史传入：</p>
-<pre>state1, _ := agent.<span class="fn">Run</span>(ctx, <span class="str">"读取 hello.txt"</span>)
-
-<span class="cm">// 存库 / 传给 UI / 跨进程 …</span>
-
-state2, _ := agent.<span class="fn">Run</span>(ctx, <span class="str">"再总结一下</span>",
-    core.<span class="fn">WithHistory</span>(state1.Messages...))</pre>
-  <p>人机审批也走同一模式：第 1 轮拦截 → 用户批准写入 <code class="inline">approve.Store</code> → 第 2 轮携带历史放行，见 <code class="inline">examples/approval</code>。</p>
-</section>
-
-<section id="async">
-  <h2><span class="num">06</span>异步与取消</h2>
-  <p>服务端场景用 <code class="inline">RunAsync</code>：事件通道 + 取消 + Wait：</p>
-<pre>h := agent.<span class="fn">RunAsync</span>(ctx, <span class="str">"长任务"</span>)
-<span class="kw">defer</span> h.<span class="fn">Cancel</span>()  <span class="cm">// 幂等；loop 以 cancelled 停止</span>
-
-<span class="kw">for</span> e := <span class="kw">range</span> h.<span class="fn">Events</span>() { <span class="cm">// loop 结束自动 close</span>
-    render(e)
-}
-state, err := h.<span class="fn">Wait</span>()</pre>
-  <p>同步模式同样支持取消：<code class="inline">Run(ctx, ...)</code> 的 ctx 取消后，引擎在当前节点收尾并以 <code class="inline">cancelled</code> 停止，EndHook 保证执行。</p>
-</section>
-
-<section id="hooks">
-  <h2><span class="num">07</span>Hook 插件</h2>
-  <p>七个时机的小接口，只实现关心的：</p>
-  <table>
-    <tr><th>接口</th><th>时机</th><th>典型用途</th></tr>
-    <tr><td><code class="inline">StartHook</code></td><td>loop 开始</td><td>注入工具（mcp router / 文件工具）</td></tr>
-    <tr><td><code class="inline">ModelStartHook</code></td><td>调用模型前</td><td>预算守卫、提前终止</td></tr>
-    <tr><td><code class="inline">ModelEndHook</code></td><td>模型响应后</td><td>响应改写</td></tr>
-    <tr><td><code class="inline">ToolStartHook</code></td><td>工具调用前</td><td>审批拦截（Skip / Abort 短路）</td></tr>
-    <tr><td><code class="inline">ToolEndHook</code></td><td>工具调用后</td><td>审计日志</td></tr>
-    <tr><td><code class="inline">LoopHook</code></td><td>迭代回边前</td><td>上下文压缩、配置热加载</td></tr>
-    <tr><td><code class="inline">EndHook</code></td><td>loop 结束</td><td>连接清理、结果摘要</td></tr>
-  </table>
-  <p>手写一个预算守卫只需几行，健壮性（panic 恢复、error 上下文）由引擎兜底：</p>
-<pre><span class="kw">type</span> <span class="fn">BudgetHook</span> <span class="kw">struct</span>{ Max <span class="kw">int</span> }
-
-<span class="kw">func</span> (h BudgetHook) <span class="fn">Name</span>() <span class="kw">string</span> { <span class="kw">return</span> <span class="str">"budget"</span> }
-<span class="kw">func</span> (h BudgetHook) <span class="fn">OnModelStart</span>(_ context.Context, s *types.LoopState) <span class="kw">error</span> {
-    <span class="kw">if</span> s.Iteration > h.Max {
-        s.Stop = <span class="kw">true</span> <span class="cm">// 提前终止</span>
-    }
-    <span class="kw">return</span> <span class="kw">nil</span>
+    history = state.Messages          <span class="c">// 下一轮直接复用（session 已自动快照）</span>
 }</pre>
-  <p>官方插件一行接入：</p>
-<pre>core.<span class="fn">WithHooks</span>(
-    skill.<span class="fn">New</span>(skill.Skill{Name: <span class="str">"sql"</span>, Instructions: <span class="str">"..."</span>, Keywords: []<span class="kw">string</span>{<span class="str">"db"</span>}}),
-    approve.<span class="fn">New</span>(approver),                       <span class="cm">// 工具审批</span>
-    summary.<span class="fn">New</span>(smallModel, <span class="str">""</span>),                  <span class="cm">// 结束自动摘要 → Metadata</span>
-    filetools.<span class="fn">New</span>(fs.<span class="fn">NewLocal</span>(<span class="str">"./workspace"</span>)),     <span class="cm">// 文件工具集（root 沙箱）</span>
-)</pre>
-</section>
+    </div>
 
-<section id="warp">
-  <h2><span class="num">08</span>Warp 中间件</h2>
-  <p>节点维度的装饰器，与 Hook 正交：</p>
-<pre>core.<span class="fn">NewAgent</span>(p,
-    core.<span class="fn">WithModelWarp</span>(modelretry.<span class="fn">Warp</span>()),      <span class="cm">// model 节点：指数退避重试</span>
-    core.<span class="fn">WithToolWarp</span>(
-        safetool.<span class="fn">Warp</span>(),                        <span class="cm">// panic 恢复 + error 上下文</span>
-        offload.<span class="fn">Warp</span>(fsys),                      <span class="cm">// 大结果卸载到文件系统</span>
-    ),
-)</pre>
-  <p><code class="inline">WithToolWarp</code> 挂载在 ToolRegistry 上：<code class="inline">WithTools</code> 静态注册与 hook 运行时注入的工具（如 mcp router）都会被包装。自定义中间件就是一个函数：</p>
-<pre><span class="kw">func</span> <span class="fn">auditWarp</span>(p provider.ModelProvider) provider.ModelProvider { <span class="cm">/* 包装 Invoke/Stream */</span> }</pre>
-</section>
+    <div class="tip">
+      <b>运行：</b><code>cp .env.example .env</code> 填入 API Key，然后 <code>go run ./examples/chat</code>。
+      支持 /new、/sessions、/resume &lt;id&gt;、/exit 命令与 Ctrl+C 取消当轮。
+    </div>
+  </section>
 
-<section id="mcp">
-  <h2><span class="num">09</span>MCP 接入</h2>
-  <p>模型只看到一个 schema 恒定的 <code class="inline">mcp_router</code> 工具（KV cache 友好），server 配置热加载、工具自发现、ACL 收敛在 router 内部：</p>
-<pre>cfg := mcp.Config{
-    Servers: []mcp.ServerConfig{{
-        Name:    <span class="str">"fs"</span>,
-        Allow:   []<span class="kw">string</span>{<span class="str">"read"</span>},                <span class="cm">// ACL 白名单（可选）</span>
-        Factory: mcp.<span class="fn">StreamableHTTP</span>(<span class="str">"https://mcp.example.com"</span>, <span class="kw">nil</span>),
-        <span class="cm">// 或本地进程:  mcp.Stdio("myserver", "--mode=stdio")</span>
-    }},
+  <!-- ═══════════════ 07 WEB AGENT 内核 ═══════════════ -->
+  <section id="web-kernel">
+    <h2><span class="no">07</span>作为 Web Agent 内核</h2>
+    <p class="sub">ezloop 不绑定任何 Web 框架 —— RunAsync + 事件通道就是你的服务端内核。</p>
+
+    <p>三个关键映射：</p>
+    <ul>
+      <li><strong>请求 ctx → RunAsync ctx</strong>：客户端断开自动取消，state 归类 <code class="inline">cancelled</code>；</li>
+      <li><strong>Events 通道 → SSE / WebSocket</strong>：loop 结束通道自动 close，<code class="inline">range</code> 自然退出；</li>
+      <li><strong>state.Messages → 会话存储</strong>：轮次结束 <code class="inline">Wait()</code> 拿最终 state，
+        下轮 <code class="inline">WithHistory</code> 带回（或直接用 localsession 落盘）。</li>
+    </ul>
+
+    <div class="codeblock">
+      <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">server.go — 标准库 SSE，零第三方依赖</span></div>
+<pre><span class="k">func</span> <span class="f">chatHandler</span>(agent *core.Agent, session *localsession.Hook) http.HandlerFunc {
+    <span class="k">return</span> <span class="k">func</span>(w http.ResponseWriter, r *http.Request) {
+        <span class="k">var</span> in <span class="k">struct</span> {
+            Input   <span class="t">string</span> <span class="s">`json:"input"`</span>
+            Session <span class="t">string</span> <span class="s">`json:"session"`</span>
+        }
+        _ = json.<span class="f">NewDecoder</span>(r.Body).<span class="f">Decode</span>(&amp;in)
+
+        <span class="k">var</span> history []types.Message
+        <span class="k">if</span> in.Session != <span class="s">""</span> {
+            <span class="k">if</span> s, err := localsession.<span class="f">Load</span>(r.Context(), fsys, <span class="s">""</span>, in.Session); err == <span class="k">nil</span> {
+                history = s.Messages        <span class="c">// 恢复历史轮次</span>
+            }
+        }
+        session.<span class="f">SetID</span>(in.Session)
+
+        w.Header().<span class="f">Set</span>(<span class="s">"Content-Type"</span>, <span class="s">"text/event-stream"</span>)
+        h := agent.<span class="f">RunAsync</span>(r.Context(), in.Input, core.<span class="f">WithHistory</span>(history...))
+
+        <span class="k">for</span> e := <span class="k">range</span> h.<span class="f">Events</span>() {          <span class="c">// loop 结束自动 close</span>
+            data, _ := json.<span class="f">Marshal</span>(e)
+            fmt.<span class="f">Fprintf</span>(w, <span class="s">"event: %s\ndata: %s\n\n"</span>, e.Type, data)
+            <span class="k">if</span> f, ok := w.(http.Flusher); ok { f.<span class="f">Flush</span>() }
+        }
+        state, _ := h.<span class="f">Wait</span>()               <span class="c">// StopReason / Metadata["summary"]</span>
+        _ = state
+    }
 }
 
-agent := core.<span class="fn">NewAgent</span>(p, core.<span class="fn">WithHooks</span>(mcp.<span class="fn">NewHook</span>(cfg)))</pre>
-  <p>模型通过 <code class="inline">action=list_tools</code> 自发现工具，再以 <code class="inline">action=call_tool</code> 调用；失败返回带 schema 提示的结构化错误供模型自纠。</p>
-</section>
+http.<span class="f">HandleFunc</span>(<span class="s">"/chat"</span>, <span class="f">chatHandler</span>(agent, session))
+http.<span class="f">ListenAndServe</span>(<span class="s">":8080"</span>, <span class="k">nil</span>)</pre>
+    </div>
 
-<section id="next">
-  <h2><span class="num">10</span>下一步</h2>
-  <ul>
-    <li>完整架构与扩展清单：<a href="https://github.com/xuanlv2002/ezloop#readme">GitHub README</a></li>
-    <li>可运行示例：<code class="inline">examples/chat</code>（真实 CLI 对话）、<code class="inline">examples/echo</code>（mcp 全链路）、<code class="inline">examples/approval</code>（轮次式审批）</li>
-    <li>跑测试：<code class="inline">go test ./...</code></li>
-  </ul>
-  <footer>ezloop — 极简不是功能少，是每个能力都长在该长的地方。</footer>
-</section>
+    <div class="tip">
+      <b>事件即协议：</b>前端按 <code>event.Type</code> 渲染 —— model_chunk 打字机、tool_start 显示工具卡片、
+      iteration_end 划轮次线、loop_end 收尾。自定义 hook 的 <code class="inline">approve.denied</code>
+      等事件同样会流经这里。
+    </div>
+
+    <div class="tip warn">
+      <b>注意：</b>同一 Agent 实例可并发服务多个请求（Agent 是只读配置，状态在每次 Run 的 LoopState 里）；
+      但共享的 session Hook 有 ID 概念，多会话场景建议每请求独立 SetID 或每会话一个实例。
+    </div>
+  </section>
 
 </main>
 
+<footer>
+  ezloop — 简单，但不简陋 ·
+  <a href="https://github.com/xuanlv2002/ezloop" target="_blank">GitHub</a>
+</footer>
+
 <script>
-  // scrollspy：高亮当前章节
-  const items = [...document.querySelectorAll('nav a.item')];
-  const sections = items.map(a => document.querySelector(a.getAttribute('href'))).filter(Boolean);
-  function highlight() {
-    let idx = 0;
-    sections.forEach((s, i) => { if (s.getBoundingClientRect().top < 120) idx = i; });
-    items.forEach((a, i) => a.classList.toggle('active', i === idx));
-  }
-  document.addEventListener('scroll', highlight, { passive: true });
-  highlight();
+  // ── 粒子特效：漂浮光点 + 邻近连线 + 鼠标扰动 ──
+  (function () {
+    var canvas = document.getElementById('particles');
+    if (!canvas) return;
+    var ctx = canvas.getContext('2d');
+    var hero = canvas.parentElement;
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    var W, H, parts = [], bursts = [], trail = [];
+    var mouse = { x: -9999, y: -9999 };
+    var reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    function resize() {
+      W = hero.clientWidth; H = hero.clientHeight;
+      canvas.width = W * dpr; canvas.height = H * dpr;
+      canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      var n = Math.max(36, Math.min(110, Math.round(W * H / 16000)));
+      parts = [];
+      for (var i = 0; i < n; i++) {
+        var big = Math.random() < .07;
+        var vx = (Math.random() - .5) * .35, vy = (Math.random() - .5) * .35;
+        parts.push({
+          x: Math.random() * W, y: Math.random() * H,
+          bvx: vx, bvy: vy, vx: vx, vy: vy,
+          r: big ? 2 + Math.random() * 1.4 : .6 + Math.random() * 1.2,
+          base: big ? .5 + Math.random() * .4 : .12 + Math.random() * .5,
+          phase: Math.random() * Math.PI * 2,
+          speed: .4 + Math.random() * 1.1,
+          big: big,
+          violet: Math.random() < .25
+        });
+      }
+    }
+
+    function step(t) {
+      ctx.clearRect(0, 0, W, H);
+      // 发光叠加模式：重叠处更亮，光子感
+      ctx.globalCompositeOperation = 'lighter';
+      var i, j, p, q;
+
+      // ① 鼠标光晕（光子核心）
+      if (mouse.x > -999) {
+        var mg = ctx.createRadialGradient(mouse.x, mouse.y, 0, mouse.x, mouse.y, 110);
+        mg.addColorStop(0, 'rgba(125,211,252,.16)');
+        mg.addColorStop(.5, 'rgba(125,211,252,.05)');
+        mg.addColorStop(1, 'rgba(125,211,252,0)');
+        ctx.fillStyle = mg;
+        ctx.fillRect(mouse.x - 110, mouse.y - 110, 220, 220);
+      }
+
+      // ② 光子拖尾（鼠标轨迹渐隐）
+      for (i = 1; i < trail.length; i++) {
+        var ta = i / trail.length;
+        ctx.strokeStyle = 'rgba(160,220,255,' + (ta * .32) + ')';
+        ctx.lineWidth = ta * 2.6;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(trail[i - 1].x, trail[i - 1].y);
+        ctx.lineTo(trail[i].x, trail[i].y);
+        ctx.stroke();
+      }
+
+      // ③ 粒子更新：基础漂浮 + 鼠标涡旋引力（绕光标螺旋）
+      for (i = 0; i < parts.length; i++) {
+        p = parts[i];
+        p.x += p.vx; p.y += p.vy;
+        var dx = p.x - mouse.x, dy = p.y - mouse.y;
+        var md2 = dx * dx + dy * dy;
+        if (md2 < 25600 && md2 > 25) { // 160px
+          var md = Math.sqrt(md2);
+          var ux = dx / md, uy = dy / md;      // 远离方向
+          var pull = .02 * (1 - md / 160);     // 向心吸引
+          var tang = pull * 1.5;               // 切向 → 旋转
+          p.vx += -ux * pull + -uy * tang;
+          p.vy += -uy * pull + ux * tang;
+          p.vx *= .984; p.vy *= .984;
+          var sp2 = p.vx * p.vx + p.vy * p.vy;
+          if (sp2 > .81) { var sc = .9 / Math.sqrt(sp2); p.vx *= sc; p.vy *= sc; }
+        } else {
+          // 缓慢回归基础漂浮速度
+          p.vx += (p.bvx - p.vx) * .006;
+          p.vy += (p.bvy - p.vy) * .006;
+        }
+        if (p.x < -14) p.x = W + 14; if (p.x > W + 14) p.x = -14;
+        if (p.y < -14) p.y = H + 14; if (p.y > H + 14) p.y = -14;
+      }
+
+      // ④ 粒子绘制：外层光晕 + 内核（双层光子）
+      for (i = 0; i < parts.length; i++) {
+        p = parts[i];
+        var a = p.base * (.55 + .45 * Math.sin(t * .001 * p.speed + p.phase));
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r * (p.big ? 4 : 3), 0, 6.2832);
+        ctx.fillStyle = p.violet ? 'rgba(167,139,250,' + (a * .16) + ')' : 'rgba(125,211,252,' + (a * .18) + ')';
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r, 0, 6.2832);
+        ctx.fillStyle = p.big ? 'rgba(240,250,255,' + Math.min(1, a + .35) + ')'
+              : p.violet ? 'rgba(196,181,253,' + a + ')' : 'rgba(226,232,240,' + a + ')';
+        ctx.fill();
+      }
+
+      // ⑤ 邻近连线
+      ctx.lineWidth = .6;
+      for (i = 0; i < parts.length; i++) {
+        p = parts[i];
+        for (j = i + 1; j < parts.length; j++) {
+          q = parts[j];
+          var ddx = p.x - q.x, ddy = p.y - q.y;
+          var d2 = ddx * ddx + ddy * ddy;
+          if (d2 < 12100) { // 110px
+            var la = (1 - Math.sqrt(d2) / 110) * .1;
+            ctx.strokeStyle = 'rgba(148,197,253,' + la + ')';
+            ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(q.x, q.y); ctx.stroke();
+          }
+        }
+      }
+
+      // ⑥ 鼠标蛛网连线
+      if (mouse.x > -999) {
+        for (i = 0; i < parts.length; i++) {
+          p = parts[i];
+          var mx = p.x - mouse.x, my = p.y - mouse.y;
+          var mdd = mx * mx + my * my;
+          if (mdd < 25600) { // 160px
+            ctx.strokeStyle = 'rgba(125,211,252,' + ((1 - Math.sqrt(mdd) / 160) * .3) + ')';
+            ctx.lineWidth = .8;
+            ctx.beginPath(); ctx.moveTo(mouse.x, mouse.y); ctx.lineTo(p.x, p.y); ctx.stroke();
+          }
+        }
+      }
+
+      // ⑦ 点击爆发光子
+      for (i = bursts.length - 1; i >= 0; i--) {
+        var b = bursts[i];
+        b.x += b.vx; b.y += b.vy;
+        b.vx *= .955; b.vy *= .955;
+        b.life -= .018;
+        if (b.life <= 0) { bursts.splice(i, 1); continue; }
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, b.r * 3.5, 0, 6.2832);
+        ctx.fillStyle = b.violet ? 'rgba(167,139,250,' + (b.life * .2) + ')' : 'rgba(125,211,252,' + (b.life * .22) + ')';
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, b.r, 0, 6.2832);
+        ctx.fillStyle = 'rgba(240,250,255,' + b.life + ')';
+        ctx.fill();
+      }
+
+      ctx.globalCompositeOperation = 'source-over';
+      if (!reduced) requestAnimationFrame(step);
+    }
+
+    hero.addEventListener('mousemove', function (e) {
+      var rect = canvas.getBoundingClientRect();
+      mouse.x = e.clientX - rect.left; mouse.y = e.clientY - rect.top;
+      trail.push({ x: mouse.x, y: mouse.y });
+      if (trail.length > 26) trail.shift();
+    });
+    hero.addEventListener('mouseleave', function () {
+      mouse.x = -9999; mouse.y = -9999; trail.length = 0;
+    });
+    hero.addEventListener('click', function (e) {
+      if (reduced) return;
+      var rect = canvas.getBoundingClientRect();
+      var x = e.clientX - rect.left, y = e.clientY - rect.top;
+      for (var i = 0; i < 26; i++) {
+        var ang = Math.random() * 6.2832, sp = 1 + Math.random() * 3.4;
+        bursts.push({
+          x: x, y: y,
+          vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp,
+          life: 1, r: .8 + Math.random() * 1.8,
+          violet: Math.random() < .3
+        });
+      }
+    });
+    window.addEventListener('resize', resize);
+    resize();
+    requestAnimationFrame(step);
+
+    // ── 滚动高亮当前导航项 ──
+    var links = document.querySelectorAll('nav a.item');
+    var map = {};
+    links.forEach(function (l) { map[l.getAttribute('href').slice(1)] = l; });
+    var observer = new IntersectionObserver(function (entries) {
+      entries.forEach(function (en) {
+        if (en.isIntersecting) {
+          links.forEach(function (l) { l.classList.remove('active'); });
+          var link = map[en.target.id];
+          if (link) link.classList.add('active');
+        }
+      });
+    }, { rootMargin: '-20% 0px -70% 0px' });
+    document.querySelectorAll('section[id]').forEach(function (s) { observer.observe(s); });
+  })();
 </script>
 </body>
 </html>
