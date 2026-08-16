@@ -11,12 +11,16 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/xuanlv2002/ezloop/provider"
 	"github.com/xuanlv2002/ezloop/types"
 )
 
 const DefaultBaseURL = "https://api.openai.com/v1"
+
+// DefaultTimeout 是单次请求（含流式全程）的默认超时。
+const DefaultTimeout = 5 * time.Minute
 
 type Options struct {
 	// BaseURL 形如 https://api.openai.com/v1，实际请求 {BaseURL}/chat/completions。
@@ -27,6 +31,9 @@ type Options struct {
 	Headers map[string]string
 	// Client 可选，默认 http.DefaultClient。
 	Client *http.Client
+	// Timeout 单次请求（含流式全程读 body）的超时，默认 5 分钟。
+	// 与调用方 ctx 的 deadline 取更早者；需要更长的流式任务请显式调大。
+	Timeout time.Duration
 }
 
 type Provider struct {
@@ -40,6 +47,9 @@ var _ provider.StreamProvider = (*Provider)(nil)
 func New(opts Options) *Provider {
 	if opts.BaseURL == "" {
 		opts.BaseURL = DefaultBaseURL
+	}
+	if opts.Timeout <= 0 {
+		opts.Timeout = DefaultTimeout
 	}
 	client := opts.Client
 	if client == nil {
@@ -218,6 +228,10 @@ func checkStatus(resp *http.Response) error {
 
 // Invoke 非流式调用。
 func (p *Provider) Invoke(ctx context.Context, req *types.ModelRequest) (*types.ModelResponse, error) {
+	// 超时包住整个调用（含读 body）；不用 http.Client.Timeout 是因为它对
+	// 流式不友好，这里 Invoke / Stream 统一用 context 控制。
+	ctx, cancel := context.WithTimeout(ctx, p.opts.Timeout)
+	defer cancel()
 	chatReq := &chatRequest{
 		Model:    p.opts.Model,
 		Messages: toChatMessages(req.Messages),
@@ -249,6 +263,9 @@ func (p *Provider) Invoke(ctx context.Context, req *types.ModelRequest) (*types.
 // Stream 流式调用：content 增量经 onChunk 实时透出，
 // tool call 参数分片在内部聚合，最终返回完整响应。
 func (p *Provider) Stream(ctx context.Context, req *types.ModelRequest, onChunk provider.ModelChunkHandler) (*types.ModelResponse, error) {
+	// 超时覆盖流式全程（建连 + SSE 读到 [DONE]），防服务端挂起拖死 loop。
+	ctx, cancel := context.WithTimeout(ctx, p.opts.Timeout)
+	defer cancel()
 	chatReq := &chatRequest{
 		Model:         p.opts.Model,
 		Messages:      toChatMessages(req.Messages),

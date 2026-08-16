@@ -185,6 +185,14 @@ func (r *Router) client(name string) (Client, error) {
 		return nil, err
 	}
 	r.mu.Lock()
+	if existing, live := r.clients[name]; live {
+		// 并发建连竞争：采用先到者，关闭多余的连接避免泄漏。
+		r.mu.Unlock()
+		if cl, ok := c.(Closer); ok {
+			_ = cl.Close()
+		}
+		return existing, nil
+	}
 	r.clients[name] = c
 	r.mu.Unlock()
 	return c, nil

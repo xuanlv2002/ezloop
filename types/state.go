@@ -29,8 +29,8 @@ type LoopState struct {
 	Metadata map[string]any
 
 	// Emitter 由引擎注入：hook 通过它发送自定义事件到 OnEvent 回调。
-	// hook 回调由引擎串行调用，此路径无并发；并发来自 warp 层时
-	// 使用 event.EmitEvent（并发安全责任见其注释）。
+	// hook 回调由引擎串行调用，此路径无并发；OnToolStart / OnToolEnd
+	// 跨调用并发，其中发事件须遵守 OnEvent 的并发契约（快速返回、并发安全）。
 	Emitter event.OnEvent
 
 	// Stop 置 true 后，当前节点收尾完毕即终止 loop。

@@ -139,10 +139,10 @@ flowchart TB
     class H1,H2,H3,H4,H5,H6,H7 hook
     class M model
     class T1,T2,T3 node
-    style MW stroke:#8b76d9,stroke-dasharray:6 4,fill:rgba(167,139,250,.08)
-    style U1 stroke:#8b76d9,stroke-dasharray:6 4,fill:rgba(167,139,250,.08)
-    style U2 stroke:#8b76d9,stroke-dasharray:6 4,fill:rgba(167,139,250,.08)
-    style U3 stroke:#8b76d9,stroke-dasharray:6 4,fill:rgba(167,139,250,.08)
+    style MW stroke:#8b76d9,stroke-dasharray:6 4,fill:#a78bfa14
+    style U1 stroke:#8b76d9,stroke-dasharray:6 4,fill:#a78bfa14
+    style U2 stroke:#8b76d9,stroke-dasharray:6 4,fill:#a78bfa14
+    style U3 stroke:#8b76d9,stroke-dasharray:6 4,fill:#a78bfa14
 ```
 
 **执行顺序（洋葱模型：hook 在节点外，warp 在节点内）**——一次工具调用的完整链路：

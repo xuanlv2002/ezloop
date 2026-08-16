@@ -170,7 +170,7 @@ func main() {
 				fmt.Printf("\n── 迭代 %d ──\n", e.Iteration)
 			case approve.EventRequest:
 				call := e.Data.(*types.ToolCall)
-				go func() { // 判定段串行，同一时刻至多一个请求在等
+				go func() { // 判定段并发，CLI 桥用 askMu 串行化提问
 					in := ask(fmt.Sprintf("\n⚠️  工具 %s 请求执行: %s\n   放行? [y/N] ", call.Name, string(call.Args)))
 					send(ctx, approveCh, approve.Decision{CallID: call.ID, Approve: strings.EqualFold(in, "y")})
 				}()

@@ -48,9 +48,10 @@ func (h *Hook) OnToolEnd(ctx context.Context, _ *types.LoopState, result *types.
 		return nil
 	}
 
-	// 内容哈希做文件名：同工具幂等，重复大输出不堆积文件。
-	sum := sha256.Sum256([]byte(result.Name))
-	prefix := hex.EncodeToString(sum[:4])
+	// 工具名+内容联合哈希做文件名：不同内容各写各的（并发大结果互不覆盖），
+	// 相同内容幂等——重复大输出不堆积文件。
+	sum := sha256.Sum256(append([]byte(result.Name+"\x00"), result.Content...))
+	prefix := hex.EncodeToString(sum[:6])
 	name := fmt.Sprintf("%s-%s.txt", result.Name, prefix)
 	path := strings.TrimSuffix(h.opts.Dir, "/") + "/" + name
 

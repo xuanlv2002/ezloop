@@ -47,9 +47,6 @@ func LoadDir(ctx context.Context, fsys fs.FileSystem, dir string) ([]Skill, erro
 		// 目录不可访问视为无技能（可选目录），不报错。
 		return nil, nil
 	}
-	if err != nil {
-		return nil, fmt.Errorf("skill: list %s: %w", dir, err)
-	}
 	var skills []Skill
 	for _, e := range entries {
 		if e.IsDir || !strings.HasSuffix(e.Name, ".md") {
@@ -66,7 +63,7 @@ func LoadDir(ctx context.Context, fsys fs.FileSystem, dir string) ([]Skill, erro
 		// 可选 keywords 文件：skill.md 对应 skill.keywords
 		kwData, kerr := fsys.Read(ctx, dir+"/"+strings.TrimSuffix(e.Name, ".md")+".keywords")
 		if kerr == nil {
-			for _, kw := range strings.Split(string(kwData), ",") {
+			for kw := range strings.SplitSeq(string(kwData), ",") {
 				if kw = strings.TrimSpace(kw); kw != "" {
 					s.Keywords = append(s.Keywords, kw)
 				}
@@ -96,7 +93,12 @@ func (h *Hook) OnStart(_ context.Context, state *types.LoopState) error {
 		}
 		fmt.Fprintf(&b, "# skill: %s\n%s", s.Name, s.Instructions)
 	}
-	// system 消息置于最前，供 provider 作为系统指令解析。
+	// 拼接到已有 system（WithSystemPrompt 注入的那条）而非新增消息：
+	// 全程单条 system，协议面干净、system 前缀缓存友好。
+	if len(state.Messages) > 0 && state.Messages[0].Role == types.RoleSystem {
+		state.Messages[0].Content += "\n\n" + b.String()
+		return nil
+	}
 	state.Messages = append([]types.Message{{
 		Role:    types.RoleSystem,
 		Content: b.String(),

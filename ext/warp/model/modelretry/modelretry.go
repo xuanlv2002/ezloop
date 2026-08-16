@@ -17,7 +17,7 @@ import (
 )
 
 // EventRetry 是重试事件：Data 为 *RetryInfo。
-// 经引擎注入模型节点的事件出口（event.EmitEvent）流出，
+// 经引擎组装时注入的 event.Emitter 流出，
 // 前端可渲染「第 N 次失败，Xms 后重试」。
 const EventRetry = event.EventType("modelretry.retry")
 
@@ -112,6 +112,10 @@ func (r *RetryProvider) Invoke(ctx context.Context, req *types.ModelRequest) (*t
 func (r *RetryProvider) Stream(ctx context.Context, req *types.ModelRequest, onChunk provider.ModelChunkHandler) (*types.ModelResponse, error) {
 	sp, ok := r.inner.(provider.StreamProvider)
 	if !ok {
+		// 与引擎的降级检测同款事件：降级不静默。
+		if r.em != nil {
+			r.em(event.EventStreamFallback, "modelretry: inner provider does not implement StreamProvider; falling back to Invoke")
+		}
 		return r.Invoke(ctx, req)
 	}
 	var lastErr error

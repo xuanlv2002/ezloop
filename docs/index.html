@@ -962,7 +962,8 @@ core.<span class="f">WithOnEvent</span>(<span class="k">func</span>(e event.Even
       </div>
       <div class="tip">
         <b>多租户：</b>每会话一套 hook 实例（即一套 channel），事件推给前端，前端按钮回包即送回 channel ——
-        同一时刻至多一个请求在等（判定段串行），CallID 不匹配的过期决策自动忽略。
+        判定段并发：多个审批请求同时呈现、各带 CallID；决策 channel 共享一个，
+        内部按 CallID 路由到正确的等待者（错配暂存，不匹配的过期决策自动忽略）。
       </div>
     </div>
 
@@ -1082,8 +1083,10 @@ skillHook, err := skill.<span class="f">NewFromFS</span>(ctx, fsys, <span class=
 scanner := bufio.<span class="f">NewScanner</span>(os.Stdin)
 approver, approveCh := approve.<span class="f">New</span>(<span class="k">func</span>(c *types.ToolCall) <span class="t">bool</span> {
     <span class="k">switch</span> c.Name {
-    <span class="k">case</span> <span class="s">"read_file"</span>, <span class="s">"list_dir"</span>, <span class="s">"grep"</span>, <span class="s">"find"</span>:
-        <span class="k">return</span> <span class="k">false</span>                          <span class="c">// 只读免审；ask_user / task_plan 也免审</span>
+    <span class="k">case</span> <span class="s">"read_file"</span>, <span class="s">"list_dir"</span>, <span class="s">"grep"</span>, <span class="s">"find"</span>, <span class="s">"now"</span>:
+        <span class="k">return</span> <span class="k">false</span>                          <span class="c">// 只读免审</span>
+    <span class="k">case</span> askuser.ToolName, taskplan.ToolName:
+        <span class="k">return</span> <span class="k">false</span>                          <span class="c">// 人机交互工具免审，否则双重中断（先审批再等回答）</span>
     }
     <span class="k">return</span> <span class="k">true</span>
 })

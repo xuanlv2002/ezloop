@@ -37,6 +37,30 @@ func TestSkillInject(t *testing.T) {
 	if strings.Contains(state2.Messages[0].Content, "parameterized") {
 		t.Fatal("unmatched skill must be skipped")
 	}
+
+	// 已有 system（WithSystemPrompt）时拼接而非新增：全程单条 system。
+	state3 := &types.LoopState{
+		Input:    "查数据库",
+		Messages: []types.Message{{Role: types.RoleSystem, Content: "agent rules"}, {Role: types.RoleUser, Content: "查数据库"}},
+	}
+	_ = h.OnStart(context.Background(), state3)
+	if n := countSystem(state3.Messages); n != 1 {
+		t.Fatalf("want single system message, got %d", n)
+	}
+	if !strings.Contains(state3.Messages[0].Content, "agent rules") ||
+		!strings.Contains(state3.Messages[0].Content, "parameterized sql") {
+		t.Fatalf("merged system: %q", state3.Messages[0].Content)
+	}
+}
+
+func countSystem(msgs []types.Message) int {
+	n := 0
+	for _, m := range msgs {
+		if m.Role == types.RoleSystem {
+			n++
+		}
+	}
+	return n
 }
 
 func TestNewFromFS(t *testing.T) {

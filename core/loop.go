@@ -262,14 +262,20 @@ func (a *Agent) execToolCalls(ctx context.Context, state *types.LoopState) error
 		}
 
 		// 后处理：toolEnd hooks（与调用绑定、随调用并发，可改写 result）。
+		// hook 报错终止 loop，但结果仍按真实内容入史——工具副作用已发生，
+		// "not executed" 会误导模型重复执行；tool_end 事件同步补发保持成对。
+		finish := func() {
+			a.emit(state, event.EventToolEnd, result)
+			results[i] = result
+		}
 		for _, h := range a.toolEndHooks {
 			if herr := a.runHook(h, "OnToolEnd", func() error { return h.OnToolEnd(callCtx, state, result) }); herr != nil {
+				finish()
 				fail(herr)
 				return
 			}
 		}
-		a.emit(state, event.EventToolEnd, result)
-		results[i] = result
+		finish()
 	}
 
 	if a.hyper.SerialTools {
