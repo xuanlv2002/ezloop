@@ -24,8 +24,8 @@ type LoopState struct {
 	Usage        Usage
 
 	// Metadata 供 hook 之间共享任意数据。
-	// 并发契约：引擎串行执行全部 hook 回调，在回调内读写是安全的；
-	// hook 自建 goroutine 中访问必须自行加锁。
+	// 并发契约：除 OnToolStart / OnToolEnd（跨调用并发）外，引擎串行执行
+	// hook 回调；这两个回调内写 Metadata 须自行加锁。
 	Metadata map[string]any
 
 	// Emitter 由引擎注入：hook 通过它发送自定义事件到 OnEvent 回调。

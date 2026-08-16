@@ -3,11 +3,13 @@ package approve
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/xuanlv2002/ezloop/core"
+	"github.com/xuanlv2002/ezloop/event"
 	"github.com/xuanlv2002/ezloop/internal/testutil"
 	"github.com/xuanlv2002/ezloop/types"
 )
@@ -117,5 +119,43 @@ func TestApproveCancel(t *testing.T) {
 	}
 	if len(state.Messages) != 3 || state.Messages[2].ToolCallID != "1" {
 		t.Fatalf("history incomplete: %d messages", len(state.Messages))
+	}
+}
+
+// 判定段并发：多个需审批调用同时请求、决策并发回传，全部批准后全部执行且结果保序。
+func TestConcurrentApprovals(t *testing.T) {
+	h, ch := New(nil)
+	state, err := core.NewAgent(
+		testutil.Scripted(
+			testutil.ToolCalls(
+				testutil.Call("1", "echo", `{"n":1}`),
+				testutil.Call("2", "echo", `{"n":2}`),
+				testutil.Call("3", "echo", `{"n":3}`),
+				testutil.Call("4", "echo", `{"n":4}`),
+				testutil.Call("5", "echo", `{"n":5}`),
+			),
+			testutil.Text("done"),
+		),
+		core.WithTools(echoTool{}),
+		core.WithHooks(h),
+		core.WithOnEvent(func(e event.Event) {
+			if e.Type != EventRequest {
+				return
+			}
+			call := e.Data.(*types.ToolCall)
+			go func() { ch <- Decision{CallID: call.ID, Approve: true} }()
+		}),
+	).Run(context.Background(), "hi")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if state.StopReason != types.StopCompleted {
+		t.Fatalf("stop: %s", state.StopReason)
+	}
+	for i := 0; i < 5; i++ {
+		want := fmt.Sprintf(`ran {"n":%d}`, i+1)
+		if state.Messages[2+i].Content != want {
+			t.Fatalf("msg[%d]=%q want %q", i, state.Messages[2+i].Content, want)
+		}
 	}
 }

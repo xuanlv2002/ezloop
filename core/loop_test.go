@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -56,7 +57,7 @@ func TestRunLoopbackAndEventOrder(t *testing.T) {
 	}
 }
 
-// 并发工具执行 + 消息保序 + 单轮完成。
+// 并发工具执行 + 消息保序 + 单轮完成（调用数即并发数，不可配）。
 func TestConcurrentToolsPreserveOrder(t *testing.T) {
 	tool := &sleepTool{delay: 30 * time.Millisecond}
 	a := NewAgent(
@@ -70,7 +71,6 @@ func TestConcurrentToolsPreserveOrder(t *testing.T) {
 			testutil.Text("done"),
 		),
 		WithTools(tool),
-		WithHyperParams(HyperParams{MaxConcurrency: 4}),
 	)
 	state, err := a.Run(context.Background(), "hi")
 	if err != nil {
@@ -83,6 +83,29 @@ func TestConcurrentToolsPreserveOrder(t *testing.T) {
 		if state.Messages[2+i].ToolCallID != want {
 			t.Fatalf("order broken at %d", i)
 		}
+	}
+}
+
+// SerialTools：调用严格逐个执行。
+func TestSerialTools(t *testing.T) {
+	tool := &sleepTool{delay: 10 * time.Millisecond}
+	a := NewAgent(
+		testutil.Scripted(
+			testutil.ToolCalls(
+				testutil.Call("c0", "sleep", `{}`),
+				testutil.Call("c1", "sleep", `{}`),
+				testutil.Call("c2", "sleep", `{}`),
+			),
+			testutil.Text("done"),
+		),
+		WithTools(tool),
+		WithHyperParams(HyperParams{SerialTools: true}),
+	)
+	if _, err := a.Run(context.Background(), "hi"); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if tool.maxSeen != 1 {
+		t.Fatalf("serial must run one at a time, saw %d", tool.maxSeen)
 	}
 }
 
@@ -372,22 +395,35 @@ func TestHistorySystemNotDuplicated(t *testing.T) {
 }
 
 // ToolWarp 覆盖静态注册与 hook 注入的工具。
-type tagWrap struct{ log *[]string }
+type tagWrap struct{ log *logCollector }
 
 func (w tagWrap) warp(_ event.Emitter, inner types.Tool) types.Tool {
 	return &taggedTool{inner: inner, log: w.log}
 }
 
+// 并发契约示例：工具并发执行，warp 内共享状态须自行加锁——
+// 锁必须真正共享（挂在 collector 上），每个包装实例各持一把锁是无效的。
+type logCollector struct {
+	mu  sync.Mutex
+	log []string
+}
+
+func (c *logCollector) add(s string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.log = append(c.log, s)
+}
+
 type taggedTool struct {
 	inner types.Tool
-	log   *[]string
+	log   *logCollector
 }
 
 func (t *taggedTool) Name() string                { return t.inner.Name() }
 func (t *taggedTool) Description() string         { return t.inner.Description() }
 func (t *taggedTool) ArgsSchema() json.RawMessage { return t.inner.ArgsSchema() }
 func (t *taggedTool) Invoke(ctx context.Context, args json.RawMessage) (string, error) {
-	*t.log = append(*t.log, "w:"+t.inner.Name())
+	t.log.add("w:" + t.inner.Name())
 	return t.inner.Invoke(ctx, args)
 }
 
@@ -404,7 +440,7 @@ type renamedEcho struct{ testutil.EchoTool }
 func (renamedEcho) Name() string { return "injected" }
 
 func TestToolWarpWrapsAllSources(t *testing.T) {
-	var log []string
+	log := &logCollector{}
 	a := NewAgent(
 		testutil.Scripted(
 			testutil.ToolCalls(
@@ -415,13 +451,15 @@ func TestToolWarpWrapsAllSources(t *testing.T) {
 		),
 		WithTools(testutil.EchoTool{}),
 		WithHooks(injectHook{tool: renamedEcho{}}),
-		WithToolWarp(tagWrap{log: &log}.warp),
+		WithToolWarp(tagWrap{log: log}.warp),
 	)
 	if _, err := a.Run(context.Background(), "hi"); err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if fmt.Sprint(log) != fmt.Sprint([]string{"w:echo", "w:injected"}) {
-		t.Fatalf("log: %v", log)
+	got := append([]string(nil), log.log...)
+	sort.Strings(got) // 并发执行，append 顺序不定
+	if fmt.Sprint(got) != fmt.Sprint([]string{"w:echo", "w:injected"}) {
+		t.Fatalf("log: %v", got)
 	}
 }
 
@@ -574,7 +612,6 @@ func TestToolWarpEventsFlow(t *testing.T) {
 		WithToolWarp(func(em event.Emitter, inner types.Tool) types.Tool {
 			return emTool{em: em, inner: inner}
 		}),
-		WithHyperParams(HyperParams{MaxConcurrency: 4}),
 		WithOnEvent(func(e event.Event) {
 			if e.Type != "toolwarp.custom" {
 				return

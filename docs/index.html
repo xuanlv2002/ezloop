@@ -573,12 +573,14 @@ agent := <span class="f">core.NewAgent</span>(p, core.<span class="f">WithHooks<
 
     <h3>工具执行：三阶段模型</h3>
     <ul>
-      <li><strong>判定</strong> —— <code class="inline">toolStartHook</code> 顺序执行；
+      <li><strong>判定</strong> —— <code class="inline">toolStartHook</code> 按调用<strong>并发</strong>执行
+        （单调用内 hooks 仍串行）：多个人工审批同时呈现给用户，而不是排队逐个等。
         返回 <code class="inline">hook.Skip(result)</code> 跳过该调用（result 作为工具结果写入历史），
-        <code class="inline">hook.Abort</code> 终止整个 loop。hook 可以阻塞等待人工决策
-        （审批、ask_user、规划确认都建立在这上面），引擎对「等待」零感知。</li>
-      <li><strong>执行</strong> —— 并发执行（≤ <code>MaxConcurrency</code>），每个调用独立 panic 恢复，
-        工具错误不终止 loop。</li>
+        <code class="inline">hook.Abort</code> 终止整个 loop（联动取消其余判定）。
+        hook 可以阻塞等待人工决策（审批、ask_user、规划确认都建立在这上面），引擎对「等待」零感知。</li>
+      <li><strong>执行</strong> —— 每个调用是独立单元（判定 → warp 壳内执行 → toolEnd 后处理整链跟调用走），
+        默认全部并发（调用数即并发数，不可配；SerialTools 可选串行；限流在 tool warp 内实现），
+        每个调用独立 panic 恢复，工具错误不终止 loop。</li>
       <li><strong>收尾</strong> —— 结果消息、<code class="inline">toolEndHook</code>、事件严格按调用顺序发出，并发但不乱序。</li>
     </ul>
 
@@ -665,7 +667,7 @@ state, err = h.<span class="f">Wait</span>()</pre>
               <div class="tools-branch">
                 <div class="tools-head">
                   <span class="btag">有</span>
-                  <div class="hpin"><span class="dot">4</span><span class="lbl">toolStart<small>逐个串行判定 · Skip / Abort 短路</small></span></div>
+                  <div class="hpin"><span class="dot">4</span><span class="lbl">toolStart<small>按调用并发判定 · 审批同时呈现</small></span></div>
                   <div class="fa"></div>
                   <span style="font-size:11px;color:#9fb0c8;">放行的调用进入并发泳道 ↓</span>
                 </div>
@@ -683,7 +685,7 @@ state, err = h.<span class="f">Wait</span>()</pre>
                     <div class="node node-tool small">grep<small>call_3</small></div>
                   </div>
                 </div>
-                <div class="tools-note">同一 ToolWarp 链应用到每个调用 · 并发 ≤ MaxConcurrency · panic 各自恢复</div>
+                <div class="tools-note">同一 ToolWarp 链应用到每个调用 · 默认全部并发（调用数即并发数，SerialTools 可选串行）· panic 各自恢复</div>
                 <div class="tools-tail">
                   <div class="hpin"><span class="dot">5</span><span class="lbl">toolEnd<small>按原序串行 · 结果入史前可改写（offload）</small></span></div>
                   <div class="fa"></div>

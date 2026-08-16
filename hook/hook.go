@@ -1,8 +1,13 @@
 // Package hook 定义 loop 引擎的全部扩展点。
 // 采用小接口隔离：扩展只需实现关心的接口，NewAgent 内部类型断言归位。
 //
-// 并发契约：引擎串行调用全部 hook 回调；唯一的并发点是工具 Invoke
-// （按 MaxConcurrency 并发执行，但工具签名只拿到 ctx 与 args，碰不到 state）。
+// 并发契约：除 OnToolStart 与 OnToolEnd 外，引擎串行调用全部 hook 回调。
+// 每个工具调用是独立单元（判定 → 执行 → 后处理整链跟调用走），
+// OnToolStart / OnToolEnd 在同一轮的多个调用之间并发（单调用内 hooks 仍串行）——
+// 多个人工审批得以同时呈现而非排队；实现必须并发安全：
+// 安全用法＝只读 state、state.EmitEvent、阻塞等待 channel；
+// 不安全用法＝无锁写共享状态。工具 Invoke 同理并发
+// （但工具签名只拿到 ctx 与 args，碰不到 state）。
 // hook 自建的 goroutine 中不要读写 LoopState / Metadata——
 // 引擎对其并发访问不做保护，需要共享数据时自行加锁或只走 channel。
 package hook

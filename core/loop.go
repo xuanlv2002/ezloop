@@ -170,127 +170,139 @@ func (a *Agent) Run(ctx context.Context, input string, runOpts ...RunOption) (st
 	return state, nil
 }
 
-// execToolCalls 执行本轮全部工具调用，分三段：
-//  1. 判定：toolStart hooks 顺序执行（Skip/Abort 短路在此生效；hook 可阻塞等待人工决策）
-//  2. 执行：放行的调用按 MaxConcurrency 并发 Invoke（单 goroutine 内 recover，工具错误不终止 loop）
-//  3. 收尾：按原始顺序追加消息、顺序执行 toolEnd hooks、按序发事件
+// execToolCalls 执行本轮全部工具调用：
+// 每个调用是独立单元——toolStart 判定 → warp 壳内执行 → toolEnd 后处理，
+// 整链跟随调用并发（SerialTools 时串行）；tool_start/tool_end 事件随调用
+// 即时发出（到达顺序不保证，消费方以 CallID 关联）；全部完成后按原始
+// 顺序汇总写入消息历史。多个人工审批同时呈现而非排队逐个等；
+// 并发数量不可配（调用数即并发数，需要限流在 tool warp 内实现）。
 //
 // 不变量：无论本轮以何种方式结束（完成/Skip/Abort/hook 报错/取消），
 // 每个已写入历史的 tool_call 都有对应的 tool 结果消息——
 // 发给模型的消息序列永远协议完整，持久化恢复无需理解断点。
-// hook 报错或 KindAbort 会终止 loop（state.Stop 由调用方检查）。
+// 任一 Abort/hook 报错联动取消其余调用，未完成的按占位结果补全。
 func (a *Agent) execToolCalls(ctx context.Context, state *types.LoopState) error {
 	calls := state.PendingToolCalls
 	results := make([]*types.ToolResult, len(calls))
-	skip := make([]bool, len(calls))
 
-	// 判定段。hook 报错记录后不再判定/执行，但仍走收尾段补全消息。
-	var hookErr error
-	aborted := false
-	skipResult := make([]string, len(calls)) // 首个 Skip hook 携带的结果文案
-	pending := make([]int, 0, len(calls))
-	for i := range calls {
+	var (
+		mu      sync.Mutex
+		hookErr error
+		aborted bool
+	)
+	callCtx, cancelCalls := context.WithCancel(ctx)
+	defer cancelCalls()
+
+	process := func(i int) {
 		call := &calls[i]
+		result := &types.ToolResult{CallID: call.ID, Name: call.Name}
+		// 事件随调用即时发出（并发、到达顺序不保证）——
+		// 消费方以 CallID 关联调用，顺序不是可靠性的来源。
 		a.emit(state, event.EventToolStart, call)
-		proceed := true
 
-		// 运行 toolStart hooks
-		for _, h := range a.toolStartHooks {
-			action, err := a.runToolStartHook(h, ctx, state, call)
-			if err != nil {
+		// 记录终止原因并联动取消其余调用；已有原因时后续错误多为联动取消，忽略。
+		fail := func(err error) {
+			mu.Lock()
+			defer mu.Unlock()
+			switch {
+			case aborted || hookErr != nil:
+			case ctx.Err() != nil:
+				hookErr = err // 外部取消
+			default:
 				hookErr = err
-				break
+				cancelCalls()
+			}
+		}
+
+		// 判定：toolStart hooks（单调用内串行，Skip 保留首个结果文案）。
+		proceed := true
+		for _, h := range a.toolStartHooks {
+			action, err := a.runToolStartHook(h, callCtx, state, call)
+			if err != nil {
+				fail(err)
+				return
 			}
 			switch action.Kind {
 			case hook.KindSkip:
-				skip[i] = true
-				if skipResult[i] == "" { // 保留首个 Skip hook 携带的结果文案
-					skipResult[i] = action.Result
-				}
 				proceed = false
+				if result.Content == "" {
+					result.Content = action.Result
+				}
 			case hook.KindAbort:
+				mu.Lock()
 				aborted = true
+				mu.Unlock()
+				cancelCalls()
+				return
 			}
-			if aborted {
+		}
+
+		// 执行：warp 壳内 Invoke（工具错误不终止 loop，回传模型自纠）。
+		if proceed {
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						result.Err = fmt.Errorf("tool %q panicked: %v", call.Name, r)
+					}
+				}()
+				tool, err := state.Tools.Lookup(call.Name)
+				if err != nil {
+					result.Err = err
+					return
+				}
+				content, err := tool.Invoke(callCtx, call.Args)
+				if err != nil {
+					result.Err = err
+					return
+				}
+				result.Content = content
+			}()
+		} else if result.Content == "" {
+			result.Content = "skipped by tool-start hook: " + call.Name
+		}
+
+		// 后处理：toolEnd hooks（与调用绑定、随调用并发，可改写 result）。
+		for _, h := range a.toolEndHooks {
+			if herr := a.runHook(h, "OnToolEnd", func() error { return h.OnToolEnd(callCtx, state, result) }); herr != nil {
+				fail(herr)
+				return
+			}
+		}
+		a.emit(state, event.EventToolEnd, result)
+		results[i] = result
+	}
+
+	if a.hyper.SerialTools {
+		for i := range calls {
+			process(i)
+			if hookErr != nil || aborted {
 				break
 			}
 		}
-		if hookErr != nil || aborted {
-			break
+	} else {
+		var wg sync.WaitGroup
+		for i := range calls {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				process(i)
+			}(i)
 		}
-		if proceed {
-			pending = append(pending, i)
-		}
-	}
-	if aborted {
-		state.Stop = true
-		state.StopReason = types.StopAborted
-	}
-
-	// 执行段。tool warp 已在 Run 组装时注入 Emitter（见 SetWarp）。
-	invoke := func(i int) {
-		call := &calls[i]
-		result := &types.ToolResult{CallID: call.ID, Name: call.Name}
-		results[i] = result
-		defer func() {
-			if r := recover(); r != nil {
-				result.Err = fmt.Errorf("tool %q panicked: %v", call.Name, r)
-			}
-		}()
-		tool, err := state.Tools.Lookup(call.Name)
-		if err != nil {
-			result.Err = err
-			return
-		}
-		content, err := tool.Invoke(ctx, call.Args)
-		if err != nil {
-			result.Err = err
-			return
-		}
-		result.Content = content
-	}
-	if !aborted && hookErr == nil {
-		if a.hyper.MaxConcurrency <= 1 || len(pending) <= 1 {
-			for _, i := range pending {
-				invoke(i)
-			}
-		} else {
-			sem := make(chan struct{}, a.hyper.MaxConcurrency)
-			var wg sync.WaitGroup
-			for _, i := range pending {
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
-					sem <- struct{}{}
-					defer func() { <-sem }()
-					invoke(i)
-				}()
-			}
-			wg.Wait()
-		}
+		wg.Wait()
 	}
 
-	// 收尾段：严格按调用顺序，给每个调用补齐结果（不变量在此兑现）。
+	// 汇总：严格按调用顺序写消息（消息历史的确定性在此兑现；
+	// 已完成调用的事件已随调用即时发出，未完成的在此补发，保持事件成对）。
 	for i := range calls {
-		if results[i] == nil {
-			content := skipResult[i] // Skip hook 携带的结果（拒绝理由、用户回答等）
-			if content == "" {
-				if skip[i] {
-					content = "skipped by tool-start hook: " + calls[i].Name
-				} else {
-					content = "not executed: " + calls[i].Name // abort / hook 报错后未及执行
-				}
+		if results[i] == nil { // abort / hook 报错后未完成的调用
+			results[i] = &types.ToolResult{
+				CallID:  calls[i].ID,
+				Name:    calls[i].Name,
+				Content: "not executed: " + calls[i].Name,
 			}
-			results[i] = &types.ToolResult{CallID: calls[i].ID, Name: calls[i].Name, Content: content}
+			a.emit(state, event.EventToolEnd, results[i])
 		}
 		result := results[i]
-		// 先跑 toolEnd hooks 再写消息：hook 可改写 result（如 offload 卸载大结果），
-		// 改写后的内容才进入历史。
-		for _, h := range a.toolEndHooks {
-			if herr := a.runHook(h, "OnToolEnd", func() error { return h.OnToolEnd(ctx, state, result) }); herr != nil {
-				return herr
-			}
-		}
 		errText := ""
 		if result.Err != nil {
 			errText = result.Err.Error()
@@ -301,7 +313,10 @@ func (a *Agent) execToolCalls(ctx context.Context, state *types.LoopState) error
 			Content:    result.Content,
 			Err:        errText,
 		})
-		a.emit(state, event.EventToolEnd, result)
+	}
+	if aborted {
+		state.Stop = true
+		state.StopReason = types.StopAborted
 	}
 	return hookErr
 }

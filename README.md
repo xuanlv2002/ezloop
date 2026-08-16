@@ -97,6 +97,90 @@ for e := range h.Events() { render(e) }   // loop 结束自动 close
 state, err = h.Wait()
 ```
 
+## 架构与循环
+
+**架构全景**：warp 是纵向封装（包住节点 = 在节点内部），hook 是横向切面（节点前后），两层平级——`WithToolWarp` 的链会应用到每个工具调用；warp 链在每次 Run 组装，工厂注入 `event.Emitter`（观察出口，不碰 state）。
+
+```mermaid
+flowchart TB
+    A(["input"]) --> H1("① startHook<br/>注入工具 / 技能 · contextfix 修理历史")
+    H1 --> H2("② modelStart")
+
+    subgraph MW["ModelWarp(modelretry…) · warp 纵向：节点内"]
+        M["model<br/>Invoke / Stream"]
+    end
+
+    H2 --> MW --> H3("③ modelEnd")
+    H3 --> Q{"tool calls?"}
+    Q -- "无" --> H7("⑦ endHook")
+    H7 --> OUT(["最终回答<br/>state + 事件流"])
+    Q -- "有" --> H4("④ toolStart<br/>按调用并发判定<br/>Skip(result) / Abort 短路")
+
+    subgraph LANE["工具泳道 · 每个调用独立单元 · 全并发（SerialTools 可选串行）"]
+        direction LR
+        subgraph U1["ToolWarp"]
+            T1["bash"]
+        end
+        subgraph U2["ToolWarp"]
+            T2["read_file"]
+        end
+        subgraph U3["ToolWarp"]
+            T3["grep"]
+        end
+    end
+
+    H4 --> LANE --> H5("⑤ toolEnd<br/>随调用并发 · 可改写结果（offload）")
+    H5 --> H6("⑥ loopHook · 回边")
+    H6 -.下一轮迭代.-> H2
+
+    classDef hook fill:#fbbf24,stroke:#ca8a04,color:#1c1917
+    classDef node fill:#34d399,stroke:#059669,color:#03291d
+    classDef model fill:#00add8,stroke:#0369a1,color:#04222b
+    class H1,H2,H3,H4,H5,H6,H7 hook
+    class M model
+    class T1,T2,T3 node
+    style MW stroke:#8b76d9,stroke-dasharray:6 4,fill:rgba(167,139,250,.08)
+    style U1 stroke:#8b76d9,stroke-dasharray:6 4,fill:rgba(167,139,250,.08)
+    style U2 stroke:#8b76d9,stroke-dasharray:6 4,fill:rgba(167,139,250,.08)
+    style U3 stroke:#8b76d9,stroke-dasharray:6 4,fill:rgba(167,139,250,.08)
+```
+
+**一次 Run 的实际循环**：每个工具调用是独立单元（判定 → warp 壳内执行 → toolEnd 后处理整链跟调用走），全部完成后按原始顺序汇总入史——多个人工审批同时呈现，消息与事件永远保序、历史永远协议完整。
+
+```mermaid
+sequenceDiagram
+    participant U as 使用方
+    participant E as 引擎 Run
+    participant M as model（warp 链内）
+    participant T as tools（独立单元）
+
+    U->>E: Run(ctx, input, WithHistory...)
+    E->>E: ① startHook（contextfix 修理历史）
+
+    loop ≤ MaxIterations
+        E->>M: ②③ 模型调用（modelretry 可重试并发事件）
+        M-->>E: 响应：文本 或 tool_calls
+
+        alt 含 tool calls
+            E->>T: ④ toolStart 判定（并发 · 审批批量呈现）
+            par 调用 1（bash）
+                T->>T: warp 壳内执行（panic 各自恢复）
+                T->>T: ⑤ toolEnd（offload 可改写结果）
+            and 调用 2（read_file）
+                T->>T: warp 壳内执行
+                T->>T: ⑤ toolEnd
+            end
+            T-->>E: 全部结果按原序汇总入史
+            E->>E: ⑥ loopHook（回边）
+        else 纯文本
+            Note over E: 循环结束（completed）
+        end
+    end
+
+    E->>E: ⑦ endHook（summary / localsession 快照）
+    E-->>U: state（Messages 可恢复 · 事件流已实时输出）
+```
+
 ## 官方扩展
 
 | 扩展 | 类型 | 说明 |

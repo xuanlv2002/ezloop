@@ -16,16 +16,14 @@ const DefaultMaxIterations = 16
 type HyperParams struct {
 	// MaxIterations 最大迭代次数，0 取默认 16。
 	MaxIterations int
-	// MaxConcurrency 单轮工具并发执行上限，1 为串行（默认）。
-	MaxConcurrency int
+	// SerialTools 串行执行工具调用（默认 false = 每个调用独立并发，
+	// 调用数即并发数——并发数量不可配，需要限流在 tool warp 内实现）。
+	SerialTools bool
 }
 
 func (hp HyperParams) withDefaults() HyperParams {
 	if hp.MaxIterations <= 0 {
 		hp.MaxIterations = DefaultMaxIterations
-	}
-	if hp.MaxConcurrency <= 0 {
-		hp.MaxConcurrency = 1
 	}
 	return hp
 }

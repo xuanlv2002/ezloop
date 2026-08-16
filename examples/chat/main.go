@@ -23,6 +23,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -122,7 +123,12 @@ func main() {
 	asker, answerCh := askuser.New()
 	planner, planCh := taskplan.New()
 
+	// 判定段并发：多个审批请求会同时到达，CLI 桥用锁串行化提问
+	// （Web 场景则是并发展示卡片、批量点击后各自回传）。
+	var askMu sync.Mutex
 	ask := func(prompt string) string {
+		askMu.Lock()
+		defer askMu.Unlock()
 		fmt.Print(prompt)
 		if !scanner.Scan() {
 			return ""
@@ -152,7 +158,7 @@ func main() {
 			session,
 		),
 		core.WithTools(nowTool{}, askuser.Tool(), taskplan.Tool()),
-		core.WithHyperParams(core.HyperParams{MaxIterations: 12, MaxConcurrency: 4}),
+		core.WithHyperParams(core.HyperParams{MaxIterations: 12}),
 		core.WithStreaming(true),
 		core.WithOnEvent(func(e event.Event) {
 			switch e.Type {
