@@ -10,6 +10,7 @@ import (
 	"errors"
 
 	"github.com/xuanlv2002/ezloop/event"
+	"github.com/xuanlv2002/ezloop/ext/hook/internal/await"
 	"github.com/xuanlv2002/ezloop/hook"
 	"github.com/xuanlv2002/ezloop/types"
 )
@@ -38,7 +39,7 @@ type Decision struct {
 }
 
 type Hook struct {
-	decisions chan Decision
+	router *await.Router[Decision]
 }
 
 // New 创建 hook 并返回决策 channel 的发送端。
@@ -46,7 +47,7 @@ type Hook struct {
 // 决策必须从其他 goroutine 发送，理由同 approve.New。
 func New() (*Hook, chan<- Decision) {
 	ch := make(chan Decision)
-	return &Hook{decisions: ch}, ch
+	return &Hook{router: await.New(ch, func(d Decision) string { return d.CallID })}, ch
 }
 
 func (h *Hook) Name() string { return "taskplan" }
@@ -56,17 +57,11 @@ func (h *Hook) OnToolStart(ctx context.Context, state *types.LoopState, call *ty
 		return hook.Proceed, nil
 	}
 	state.EmitEvent(EventRequest, call)
-	for {
-		select {
-		case d := <-h.decisions:
-			if d.CallID != "" && d.CallID != call.ID {
-				continue
-			}
-			return hook.Skip(d.formatResult()), nil
-		case <-ctx.Done():
-			return hook.Skip(""), ctx.Err()
-		}
+	d, ok := h.router.Await(ctx, call.ID)
+	if !ok {
+		return hook.Skip(""), ctx.Err()
 	}
+	return hook.Skip(d.formatResult()), nil
 }
 
 func (d Decision) formatResult() string {

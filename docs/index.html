@@ -278,6 +278,27 @@
   }
   .node.small { font-size: 12px; padding: 7px 10px; }
 
+  /* ─── 执行顺序图（洋葱模型：hook 外 · warp 内）─── */
+  .order-lane {
+    border: 1px solid var(--border-soft); border-radius: 12px;
+    background: var(--bg-soft); padding: 14px 12px; margin: 16px 0 20px;
+  }
+  .order-row { display: flex; align-items: stretch; gap: 8px; margin: 6px 0; }
+  .order-row .fa { align-self: center; }
+  .order-row .fa.rev::after { left: -1px; right: auto; border-right: none; border-left: 7px solid #64748b; }
+  .o-back-note { flex: 1; display: flex; align-items: center; justify-content: flex-end; font-size: 11px; color: var(--muted); padding-right: 4px; }
+  .o-h, .o-w, .o-c {
+    flex: 1; text-align: center; border-radius: 9px; padding: 8px 6px;
+    font-weight: 600; font-size: 13px;
+  }
+  .o-h small, .o-w small, .o-c small { display: block; font-weight: 400; font-size: 10.5px; margin-top: 2px; opacity: .85; }
+  .o-h { background: rgba(251,191,36,.14); border: 1px solid #ca8a04; color: #fde68a; }
+  .o-h small { color: #d9b06a; }
+  .o-w { background: rgba(167,139,250,.1); border: 1.5px dashed #8b76d9; color: #ddd3fc; }
+  .o-w small { color: #9d8fd0; }
+  .o-c { background: rgba(52,211,153,.14); border: 1px solid #059669; color: #6ee7b7; }
+  .o-c small { color: #6aa88f; }
+
   /* ─── 多 tool 并发泳道 ─── */
   .tools-branch {
     margin-top: 12px; border: 1px solid #263449; border-radius: 10px;
@@ -571,17 +592,45 @@
 agent := <span class="f">core.NewAgent</span>(p, core.<span class="f">WithHooks</span>(&amp;BudgetHook{Remaining: <span class="n">10</span>}))</pre>
     </div>
 
-    <h3>工具执行：三阶段模型</h3>
+    <h3>执行顺序：hook 与 warp 的层次</h3>
+    <p>每个工具调用是独立单元，一次调用的完整链路（<strong>洋葱模型：hook 在节点外，warp 在节点内</strong>）：</p>
+
+    <div class="order-lane">
+      <div class="order-row">
+        <span class="o-h">① toolStart hooks<small>注册序 · approve → asker</small></span>
+        <span class="fa"></span>
+        <span class="o-w">② ToolWarp 外层<small>先注册 · safetool</small></span>
+        <span class="fa"></span>
+        <span class="o-w">③ ToolWarp 内层<small>后注册 · limit</small></span>
+        <span class="fa"></span>
+        <span class="o-c">④ tool.Invoke<small>本体</small></span>
+      </div>
+      <div class="order-row back">
+        <span class="o-back-note">结果回程（内 → 外）</span>
+        <span class="fa rev"></span>
+        <span class="o-w">⑤' ToolWarp 外层收尾<small>safetool 补上下文</small></span>
+        <span class="fa rev"></span>
+        <span class="o-w">⑤ ToolWarp 内层收尾<small>limit 归还名额</small></span>
+        <span class="fa rev"></span>
+        <span class="o-h">⑥ toolEnd hooks<small>注册序 · 可改写结果（offload）</small></span>
+      </div>
+    </div>
+
+    <table>
+      <tr><th>维度</th><th>顺序规则</th></tr>
+      <tr><td>多个 hook（同一作用点）</td><td>按 <code>WithHooks</code> 注册序，先注册先执行</td></tr>
+      <tr><td>多个 warp</td><td>按 <code>WithToolWarp</code> / <code>WithModelWarp</code> 注册序，<strong>先注册的在外层</strong>：请求外 → 内，结果内 → 外。外层能看到内层与本体的一切（如 safetool 在外层才能捕获 limit 和本体的 panic）</td></tr>
+      <tr><td>hook 与 warp 相对位置</td><td>hook 永远在 warp 之外（节点前后）：toolStart 先于一切 warp，toolEnd 晚于一切 warp</td></tr>
+      <tr><td>同一轮多个调用</td><td>各自独立并发跑完整链（判定 → 执行 → 后处理）；tool_start / tool_end 事件随调用即时发出、到达顺序不保证——<strong>消费方以 CallID 关联</strong>；消息历史按调用原序汇总写入</td></tr>
+      <tr><td>model 侧同理</td><td>modelStart → ModelWarp 链（外 → 内）→ provider → modelEnd</td></tr>
+    </table>
+
     <ul>
-      <li><strong>判定</strong> —— <code class="inline">toolStartHook</code> 按调用<strong>并发</strong>执行
-        （单调用内 hooks 仍串行）：多个人工审批同时呈现给用户，而不是排队逐个等。
-        返回 <code class="inline">hook.Skip(result)</code> 跳过该调用（result 作为工具结果写入历史），
-        <code class="inline">hook.Abort</code> 终止整个 loop（联动取消其余判定）。
-        hook 可以阻塞等待人工决策（审批、ask_user、规划确认都建立在这上面），引擎对「等待」零感知。</li>
-      <li><strong>执行</strong> —— 每个调用是独立单元（判定 → warp 壳内执行 → toolEnd 后处理整链跟调用走），
-        默认全部并发（调用数即并发数，不可配；SerialTools 可选串行；限流在 tool warp 内实现），
+      <li><strong>判定可短路</strong> —— <code class="inline">hook.Skip(result)</code> 跳过调用（result 作为工具结果写入历史），
+        <code class="inline">hook.Abort</code> 终止 loop（联动取消其余调用）。hook 可阻塞等待人工决策
+        （审批、ask_user、规划确认都建立在这上面），多个人工审批<strong>同时呈现</strong>而非排队，引擎对「等待」零感知。</li>
+      <li><strong>默认全并发</strong> —— 调用数即并发数，不可配（SerialTools 可选串行；需要限流在 tool warp 内包信号量），
         每个调用独立 panic 恢复，工具错误不终止 loop。</li>
-      <li><strong>收尾</strong> —— 结果消息、<code class="inline">toolEndHook</code>、事件严格按调用顺序发出，并发但不乱序。</li>
     </ul>
 
     <h3>健壮性语义（引擎内置）</h3>

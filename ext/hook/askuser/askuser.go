@@ -10,6 +10,7 @@ import (
 	"errors"
 
 	"github.com/xuanlv2002/ezloop/event"
+	"github.com/xuanlv2002/ezloop/ext/hook/internal/await"
 	"github.com/xuanlv2002/ezloop/hook"
 	"github.com/xuanlv2002/ezloop/types"
 )
@@ -27,7 +28,7 @@ type Answer struct {
 }
 
 type Hook struct {
-	answers chan Answer
+	router *await.Router[Answer]
 }
 
 // New 创建 hook 并返回回答 channel 的发送端。
@@ -35,7 +36,7 @@ type Hook struct {
 // 回答必须从其他 goroutine 发送，理由同 approve.New。
 func New() (*Hook, chan<- Answer) {
 	ch := make(chan Answer)
-	return &Hook{answers: ch}, ch
+	return &Hook{router: await.New(ch, func(a Answer) string { return a.CallID })}, ch
 }
 
 func (h *Hook) Name() string { return "askuser" }
@@ -45,20 +46,18 @@ func (h *Hook) OnToolStart(ctx context.Context, state *types.LoopState, call *ty
 		return hook.Proceed, nil
 	}
 	state.EmitEvent(EventRequest, call)
-	for {
-		select {
-		case a := <-h.answers:
-			if a.CallID != "" && a.CallID != call.ID {
-				continue
-			}
-			if a.Input == "" {
-				a.Input = "(user gave no input)"
-			}
-			return hook.Skip(a.Input), nil
-		case <-ctx.Done():
-			return hook.Skip(""), ctx.Err()
-		}
+	a, ok := h.router.Await(ctx, call.ID)
+	if !ok {
+		return hook.Skip(""), ctx.Err()
 	}
+	return answerAction(a), nil
+}
+
+func answerAction(a Answer) hook.Action {
+	if a.Input == "" {
+		a.Input = "(user gave no input)"
+	}
+	return hook.Skip(a.Input)
 }
 
 // Tool 返回 ask_user 壳工具：仅提供 schema 供模型发现，

@@ -14,8 +14,8 @@ import (
 )
 
 const (
-	clientName    = "ezloop"
-	clientVersion = "0.1.0"
+	clientName     = "ezloop"
+	clientVersion  = "0.1.0"
 	connectTimeout = 10 * time.Second
 )
 

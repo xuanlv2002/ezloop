@@ -145,7 +145,27 @@ flowchart TB
     style U3 stroke:#8b76d9,stroke-dasharray:6 4,fill:rgba(167,139,250,.08)
 ```
 
-**一次 Run 的实际循环**：每个工具调用是独立单元（判定 → warp 壳内执行 → toolEnd 后处理整链跟调用走），全部完成后按原始顺序汇总入史——多个人工审批同时呈现，消息与事件永远保序、历史永远协议完整。
+**执行顺序（洋葱模型：hook 在节点外，warp 在节点内）**——一次工具调用的完整链路：
+
+```mermaid
+flowchart LR
+    subgraph 去程["去程（外 → 内）"]
+        direction LR
+        H1["① toolStart hooks<br/>注册序"] --> W1["② ToolWarp 外层<br/>先注册"] --> W2["③ ToolWarp 内层"] --> T["④ tool.Invoke"]
+    end
+    subgraph 回程["结果回程（内 → 外）"]
+        direction LR
+        W2R["⑤ 内层收尾"] --> W1R["外层收尾"] --> H2["⑥ toolEnd hooks<br/>注册序 · 可改写结果"]
+    end
+    T --> W2R
+```
+
+- 多个 hook（同一作用点）：按注册序，先注册先执行
+- 多个 warp：先注册的在外层——请求外 → 内，结果内 → 外（safetool 在外层才能捕获 limit 与本体的 panic）
+- hook 永远在 warp 之外：toolStart 先于一切 warp，toolEnd 晚于一切 warp；model 侧同理（modelStart → ModelWarp 链 → provider → modelEnd）
+- 同一轮多个调用：各自并发跑完整链；tool_start / tool_end 事件随调用即时发出（到达顺序不保证，以 CallID 关联），消息历史按原序汇总
+
+**一次 Run 的实际循环**：每个工具调用是独立单元（判定 → warp 壳内执行 → toolEnd 后处理整链跟调用走），全部完成后按原始顺序汇总入史——多个人工审批同时呈现，消息历史永远保序、协议完整。
 
 ```mermaid
 sequenceDiagram

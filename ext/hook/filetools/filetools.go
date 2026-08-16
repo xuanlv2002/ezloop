@@ -89,8 +89,10 @@ const (
 
 type readFileTool struct{ fsys fs.FileSystem }
 
-func (readFileTool) Name() string        { return "read_file" }
-func (readFileTool) Description() string { return "读取文本文件，支持 offset/limit 行分页（默认前 2000 行，50KB 上限）" }
+func (readFileTool) Name() string { return "read_file" }
+func (readFileTool) Description() string {
+	return "读取文本文件，支持 offset/limit 行分页（默认前 2000 行，50KB 上限）"
+}
 func (readFileTool) ArgsSchema() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{
 		"path":{"type":"string","description":"文件路径"},
@@ -170,8 +172,10 @@ type editFileTool struct {
 	mod fs.Modifier
 }
 
-func (editFileTool) Name() string        { return "edit_file" }
-func (editFileTool) Description() string { return "对现有文件做查找替换（原子）：old_text 必须存在于文件中" }
+func (editFileTool) Name() string { return "edit_file" }
+func (editFileTool) Description() string {
+	return "对现有文件做查找替换（原子）：old_text 必须存在于文件中"
+}
 func (editFileTool) ArgsSchema() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"},"old_text":{"type":"string"},"new_text":{"type":"string"}},"required":["path","old_text","new_text"]}`)
 }
@@ -201,8 +205,10 @@ type applyPatchTool struct {
 	mod fs.Modifier
 }
 
-func (applyPatchTool) Name() string        { return "apply_patch" }
-func (applyPatchTool) Description() string { return "一次原子修改多个文件：每个操作为查找替换，任一失败全部不生效" }
+func (applyPatchTool) Name() string { return "apply_patch" }
+func (applyPatchTool) Description() string {
+	return "一次原子修改多个文件：每个操作为查找替换，任一失败全部不生效"
+}
 func (applyPatchTool) ArgsSchema() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{
 		"ops":{"type":"array","items":{"type":"object","properties":{
@@ -355,8 +361,10 @@ func (t findTool) Invoke(ctx context.Context, args json.RawMessage) (string, err
 // 返回输出与错误（供模型自纠）。
 type bashTool struct{}
 
-func (bashTool) Name() string        { return "bash" }
-func (bashTool) Description() string { return "执行 shell 命令并返回合并输出（支持管道、重定向、&& 组合）" }
+func (bashTool) Name() string { return "bash" }
+func (bashTool) Description() string {
+	return "执行 shell 命令并返回合并输出（支持管道、重定向、&& 组合）"
+}
 func (bashTool) ArgsSchema() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{
 		"command":{"type":"string","description":"完整 shell 命令，如 ls -la | grep go"}
@@ -364,7 +372,9 @@ func (bashTool) ArgsSchema() json.RawMessage {
 }
 
 func (bashTool) Invoke(ctx context.Context, args json.RawMessage) (string, error) {
-	var in struct{ Command string `json:"command"` }
+	var in struct {
+		Command string `json:"command"`
+	}
 	if err := json.Unmarshal(args, &in); err != nil {
 		return "", fmt.Errorf("invalid args: %w", err)
 	}

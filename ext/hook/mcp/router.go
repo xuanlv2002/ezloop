@@ -20,10 +20,10 @@ type routerArgs struct {
 }
 
 type toolEntry struct {
-	Server string  `json:"server"`
-	Name   string  `json:"name"`
-	Desc   string  `json:"description,omitempty"`
-	Schema any     `json:"args_schema,omitempty"`
+	Server string `json:"server"`
+	Name   string `json:"name"`
+	Desc   string `json:"description,omitempty"`
+	Schema any    `json:"args_schema,omitempty"`
 }
 
 type callError struct {
@@ -33,9 +33,9 @@ type callError struct {
 
 // Router 实现 types.Tool：对模型暴露唯一入口，内部转发到各 MCP server。
 type Router struct {
-	mu       sync.RWMutex
-	servers  map[string]ServerConfig
-	clients  map[string]Client
+	mu      sync.RWMutex
+	servers map[string]ServerConfig
+	clients map[string]Client
 }
 
 func NewRouter(servers []ServerConfig) *Router {
@@ -46,8 +46,10 @@ func NewRouter(servers []ServerConfig) *Router {
 	return &Router{servers: m, clients: make(map[string]Client)}
 }
 
-func (r *Router) Name() string        { return RouterToolName }
-func (r *Router) Description() string { return "Unified entry for all MCP tools. Use action=list_tools to discover, action=call_tool to invoke." }
+func (r *Router) Name() string { return RouterToolName }
+func (r *Router) Description() string {
+	return "Unified entry for all MCP tools. Use action=list_tools to discover, action=call_tool to invoke."
+}
 
 func (r *Router) ArgsSchema() json.RawMessage {
 	return json.RawMessage(`{

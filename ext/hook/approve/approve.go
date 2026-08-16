@@ -8,6 +8,7 @@ import (
 	"context"
 
 	"github.com/xuanlv2002/ezloop/event"
+	"github.com/xuanlv2002/ezloop/ext/hook/internal/await"
 	"github.com/xuanlv2002/ezloop/hook"
 	"github.com/xuanlv2002/ezloop/types"
 )
@@ -25,8 +26,8 @@ type Decision struct {
 }
 
 type Hook struct {
-	decisions chan Decision
-	needs     func(*types.ToolCall) bool
+	router *await.Router[Decision]
+	needs  func(*types.ToolCall) bool
 }
 
 // New 创建审批 hook，并返回决策 channel 的发送端。
@@ -47,7 +48,10 @@ type Hook struct {
 // 同步在 OnEvent 回调里发送会与 hook 的等待互相死锁。
 func New(needs func(*types.ToolCall) bool) (*Hook, chan<- Decision) {
 	ch := make(chan Decision)
-	return &Hook{decisions: ch, needs: needs}, ch
+	return &Hook{
+		router: await.New(ch, func(d Decision) string { return d.CallID }),
+		needs:  needs,
+	}, ch
 }
 
 func (h *Hook) Name() string { return "approve" }
@@ -57,22 +61,20 @@ func (h *Hook) OnToolStart(ctx context.Context, state *types.LoopState, call *ty
 		return hook.Proceed, nil
 	}
 	state.EmitEvent(EventRequest, call)
-	for {
-		select {
-		case d := <-h.decisions:
-			if d.CallID != "" && d.CallID != call.ID {
-				continue
-			}
-			if d.Approve {
-				return hook.Proceed, nil
-			}
-			reason := "denied by user"
-			if d.Reason != "" {
-				reason += ": " + d.Reason
-			}
-			return hook.Skip(reason), nil
-		case <-ctx.Done():
-			return hook.Skip(""), ctx.Err()
-		}
+	d, ok := h.router.Await(ctx, call.ID)
+	if !ok {
+		return hook.Skip(""), ctx.Err()
 	}
+	return h.decide(d), nil
+}
+
+func (h *Hook) decide(d Decision) hook.Action {
+	if d.Approve {
+		return hook.Proceed
+	}
+	reason := "denied by user"
+	if d.Reason != "" {
+		reason += ": " + d.Reason
+	}
+	return hook.Skip(reason)
 }
