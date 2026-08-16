@@ -34,12 +34,12 @@ import (
 	"github.com/xuanlv2002/ezloop/ext/hook/contextfix"
 	"github.com/xuanlv2002/ezloop/ext/hook/filetools"
 	"github.com/xuanlv2002/ezloop/ext/hook/localsession"
+	"github.com/xuanlv2002/ezloop/ext/hook/offload"
 	"github.com/xuanlv2002/ezloop/ext/hook/skill"
 	"github.com/xuanlv2002/ezloop/ext/hook/summary"
 	"github.com/xuanlv2002/ezloop/ext/hook/taskplan"
 	"github.com/xuanlv2002/ezloop/ext/provider/openai"
 	"github.com/xuanlv2002/ezloop/ext/warp/model/modelretry"
-	"github.com/xuanlv2002/ezloop/ext/warp/tool/offload"
 	"github.com/xuanlv2002/ezloop/ext/warp/tool/safetool"
 	"github.com/xuanlv2002/ezloop/types"
 )
@@ -105,6 +105,17 @@ func main() {
 		switch c.Name {
 		case "read_file", "list_dir", "grep", "find", "now", askuser.ToolName, taskplan.ToolName:
 			return false // 只读工具与人机交互工具免审
+		case "bash":
+			// 参数值级判断：白名单只读命令免审，其余（写/删/网络）需确认
+			var a struct {
+				Command string `json:"command"`
+			}
+			_ = json.Unmarshal(c.Args, &a)
+			for _, p := range []string{"ls", "cat", "head", "tail", "pwd", "git status", "git diff", "git log", "go test"} {
+				if a.Command == p || strings.HasPrefix(a.Command, p+" ") {
+					return false
+				}
+			}
 		}
 		return true
 	})
@@ -128,9 +139,10 @@ func main() {
 	agent := core.NewAgent(p,
 		core.WithSystemPrompt("你是 ezloop 驱动的命令行助手。能用工具就用工具，回答简洁。"),
 		core.WithModelWarp(modelretry.Warp()),
-		core.WithToolWarp(safetool.Warp(), offload.Warp(fsys)),
+		core.WithToolWarp(safetool.Warp()),
 		core.WithHooks(
 			contextfix.New(), // 历史进入引擎前先修理（/resume 旧存档防悬空 tool_call）
+			offload.New(fsys),
 			filetools.New(fsys, func(o *filetools.Options) { o.EnableExec = true }),
 			skillHook,
 			approver,

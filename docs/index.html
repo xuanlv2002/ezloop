@@ -482,9 +482,13 @@
 
     <h3>Event 与 Hook 分离</h3>
     <p><code class="inline">OnEvent</code> 回调实时<strong>观察</strong>（含流式 chunk），只读不写；
-    <strong>修改</strong>状态是 Hook 的职责。任何 hook 都能通过
-    <code class="inline">state.EmitEvent("ns.type", data)</code> 向外推送自定义事件
-    （建议加命名空间前缀，如 <code class="inline">approve.denied</code>），时间戳与迭代号自动补全。</p>
+    <strong>修改</strong>状态是 Hook 的职责。emit 的入口按层对称：hook（横向切面）走
+    <code class="inline">state.EmitEvent("ns.type", data)</code>；warp（纵向装饰）拿不到 state，
+    走 <code class="inline">event.EmitEvent(ctx, "ns.type", data)</code>——引擎在模型与工具两条
+    warp 链上平级注入出口（如 <code class="inline">modelretry.retry</code>），两层事件汇入同一个流。</p>
+    <p><strong>并发契约：</strong>工具天然并发执行，OnEvent 回调可能被多个 goroutine 同时调用
+    （engine 自身事件仍串行且保序）——回调必须并发安全且快速返回；
+    需要免锁消费时用 <code class="inline">RunAsync</code> 的 Events 通道。</p>
 
     <div class="tip">
       <b>KV cache 友好：</b>工具定义与 system 前缀属于 prompt 缓存前缀。mcpRouter 的 schema 恒定、
@@ -516,7 +520,7 @@
       <tr><td>2</td><td><code>ModelStartHook</code></td><td>调用模型前</td><td>预算守卫（置 <code>Stop</code> 提前终止）</td></tr>
       <tr><td>3</td><td><code>ModelEndHook</code></td><td>模型响应后</td><td>响应改写、审计</td></tr>
       <tr><td>4</td><td><code>ToolStartHook</code></td><td>工具调用前</td><td>审批 / 人机中断（<code>Skip(result)</code> / <code>Abort</code> 短路，可阻塞等决策）</td></tr>
-      <tr><td>5</td><td><code>ToolEndHook</code></td><td>工具调用后</td><td>审计日志</td></tr>
+      <tr><td>5</td><td><code>ToolEndHook</code></td><td>工具调用后（结果入史前）</td><td>审计日志、结果后处理（offload 卸载）</td></tr>
       <tr><td>6</td><td><code>LoopHook</code></td><td>迭代回边前</td><td>上下文压缩、配置热加载</td></tr>
       <tr><td>7</td><td><code>EndHook</code></td><td>loop 结束</td><td>摘要、资源清理、会话保存</td></tr>
     </table>
@@ -756,10 +760,18 @@ entries, _ := fsys.<span class="f">List</span>(ctx, <span class="s">"."</span>)
     <h3>Warp：节点装饰器</h3>
     <div class="ext">
       <h3>ext/warp/model/modelretry <span class="badge warp">warp</span></h3>
-      <p>模型重试：指数退避 + 抖动；流式仅在尚未发出 chunk 时重试（已发出的内容不可撤回）。</p>
+      <p>模型重试：指数退避 + 抖动；流式仅在尚未发出 chunk 时重试（已发出的内容不可撤回）。
+      每次重试发出 <code class="inline">modelretry.retry</code> 事件（含尝试序号、失败原因、退避时长），
+      经引擎事件流到达 OnEvent / RunAsync，前端可渲染「第 N 次失败，Xms 后重试」。
+      默认只重试可重试错误（<code class="inline">openai.HTTPError</code> 的 408/429/5xx、未知错误保守重试、取消不重试），
+      <code class="inline">Options.RetryIf</code> 可按错误信息任意自定义。</p>
       <div class="codeblock">
         <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">retry.go</span></div>
 <pre>agent := core.<span class="f">NewAgent</span>(p, core.<span class="f">WithModelWarp</span>(modelretry.<span class="f">Warp</span>()))
+<span class="c">// 自定义可重试判定：</span>
+core.<span class="f">WithModelWarp</span>(modelretry.<span class="f">Warp</span>(<span class="k">func</span>(o *modelretry.Options) {
+    o.RetryIf = <span class="k">func</span>(err error) <span class="t">bool</span> { <span class="k">return</span> !strings.<span class="f">Contains</span>(err.<span class="f">Error</span>(), <span class="s">"quota"</span>) }
+}))
 <span class="c">// 降级 / 多模型路由？自己写一个 WarpHandler：func(ModelProvider) ModelProvider</span></pre>
       </div>
     </div>
@@ -771,16 +783,6 @@ entries, _ := fsys.<span class="f">List</span>(ctx, <span class="s">"."</span>)
         <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">safe.go</span></div>
 <pre>core.<span class="f">WithToolWarp</span>(safetool.<span class="f">Warp</span>())
 <span class="c">// Warp 挂载在 ToolRegistry 上：静态注册与 hook 运行时注入的工具都会被包装</span></pre>
-      </div>
-    </div>
-
-    <div class="ext">
-      <h3>ext/warp/tool/offload <span class="badge warp">warp</span></h3>
-      <p>大结果卸载：超过阈值（默认 4KB）的工具结果写入 FS，上下文只留摘要 + 路径；写失败降级透传。</p>
-      <div class="codeblock">
-        <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">offload.go</span></div>
-<pre>core.<span class="f">WithToolWarp</span>(safetool.<span class="f">Warp</span>(), offload.<span class="f">Warp</span>(fsys))
-<span class="c">// grep 全仓 500 条命中？写进 .ezloop/offload/，模型上下文只留前 512 字节 + 文件路径</span></pre>
       </div>
     </div>
 
@@ -834,7 +836,12 @@ agent := core.<span class="f">NewAgent</span>(p, core.<span class="f">WithHooks<
       <div class="codeblock">
         <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">approve.go</span></div>
 <pre>h, decisions := approve.<span class="f">New</span>(<span class="k">func</span>(c *types.ToolCall) <span class="t">bool</span> {
-    <span class="k">return</span> c.Name != <span class="s">"read_file"</span>   <span class="c">// false = 免审放行；nil = 全部审批</span>
+    <span class="k">if</span> c.Name == <span class="s">"bash"</span> {                    <span class="c">// 参数值级判断：</span>
+        <span class="k">var</span> a <span class="k">struct</span>{ Command <span class="t">string</span> <span class="s">`json:"command"`</span> }
+        _ = json.<span class="f">Unmarshal</span>(c.Args, &amp;a)
+        <span class="k">return</span> !<span class="f">isReadOnly</span>(a.Command)       <span class="c">// 只读命令免审，其余中断等确认</span>
+    }
+    <span class="k">return</span> c.Name != <span class="s">"read_file"</span>           <span class="c">// false = 免审放行；nil = 全部审批</span>
 })
 agent := core.<span class="f">NewAgent</span>(p, core.<span class="f">WithHooks</span>(h))
 
@@ -889,7 +896,8 @@ decisions &lt;- taskplan.Decision{Kind: taskplan.Revise, Input: <span class="s">
 
     <div class="ext">
       <h3>ext/hook/contextfix <span class="badge hook">hook</span></h3>
-      <p>历史修理：Run 开始时（OnStart）给缺失 tool 结果的调用补占位消息 ——
+      <p>历史修理（双向）：Run 开始时（OnStart）给缺失 tool 结果的调用补占位消息、
+      删除对应 assistant 已丢失的孤儿 tool 消息 ——
       引擎保证本轮产生的历史完整，本 hook 保证历史进入引擎前完整
       （外部注入的残缺历史、旧版本存档）。完整历史原样返回，零分配。</p>
       <div class="codeblock">
@@ -898,6 +906,18 @@ decisions &lt;- taskplan.Decision{Kind: taskplan.Revise, Input: <span class="s">
     contextfix.<span class="f">New</span>(),  <span class="c">// 建议挂 hooks 首位：历史先修理，后续 hook 再消费</span>
     <span class="c">// ...</span>
 )</pre>
+      </div>
+    </div>
+
+    <div class="ext">
+      <h3>ext/hook/offload <span class="badge hook">hook</span></h3>
+      <p>大结果卸载（ToolEndHook）：超过阈值（默认 4KB）的工具结果写入 FS，上下文只留摘要 + 路径；
+      写失败降级透传。结果后处理不耦合工具节点本身——挂在收尾段改写 result，
+      故为 hook 而非 warp。</p>
+      <div class="codeblock">
+        <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">offload.go</span></div>
+<pre>core.<span class="f">WithHooks</span>(offload.<span class="f">New</span>(fsys))
+<span class="c">// grep 全仓 500 条命中？写进 .ezloop/offload/，模型上下文只留前 512 字节 + 文件路径</span></pre>
       </div>
     </div>
 
@@ -967,15 +987,16 @@ planner, planCh := taskplan.<span class="f">New</span>()
 agent := core.<span class="f">NewAgent</span>(p,
     core.<span class="f">WithSystemPrompt</span>(<span class="s">"你是命令行助手，能用工具就用工具"</span>),
     core.<span class="f">WithModelWarp</span>(modelretry.<span class="f">Warp</span>()),               <span class="c">// ⑤ 重试</span>
-    core.<span class="f">WithToolWarp</span>(safetool.<span class="f">Warp</span>(), offload.<span class="f">Warp</span>(fsys)),  <span class="c">// ⑥ 防护 + 卸载</span>
+    core.<span class="f">WithToolWarp</span>(safetool.<span class="f">Warp</span>()),               <span class="c">// ⑥ 工具防护</span>
     core.<span class="f">WithHooks</span>(
         contextfix.<span class="f">New</span>(),   <span class="c">// ⑦ 历史修理：/resume 旧存档防悬空 tool_call</span>
+        offload.<span class="f">New</span>(fsys),  <span class="c">// ⑧ 大结果卸载</span>
         filetools.<span class="f">New</span>(fsys, <span class="k">func</span>(o *filetools.Options) { o.EnableExec = <span class="k">true</span> }),
         skillHook, approver, asker, planner, summary.<span class="f">New</span>(p, <span class="s">""</span>), session,
     ),
-    core.<span class="f">WithTools</span>(askuser.<span class="f">Tool</span>(), taskplan.<span class="f">Tool</span>()),  <span class="c">// ⑧ 壳工具供模型发现</span>
+    core.<span class="f">WithTools</span>(askuser.<span class="f">Tool</span>(), taskplan.<span class="f">Tool</span>()),  <span class="c">// ⑨ 壳工具供模型发现</span>
     core.<span class="f">WithStreaming</span>(<span class="k">true</span>),
-    core.<span class="f">WithOnEvent</span>(<span class="k">func</span>(e event.Event) {              <span class="c">// ⑨ 流式渲染 + CLI 决策桥</span>
+    core.<span class="f">WithOnEvent</span>(<span class="k">func</span>(e event.Event) {              <span class="c">// ⑩ 流式渲染 + CLI 决策桥</span>
         <span class="k">switch</span> e.Type {
         <span class="k">case</span> event.EventModelChunk: fmt.<span class="f">Print</span>(e.Data.(<span class="t">string</span>))
         <span class="k">case</span> event.EventToolStart:  fmt.<span class="f">Printf</span>(<span class="s">"\n🔧 %s "</span>, e.Data.(*types.ToolCall).Name)

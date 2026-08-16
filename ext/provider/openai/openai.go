@@ -63,10 +63,10 @@ type streamOptions struct {
 }
 
 type chatMessage struct {
-	Role       string        `json:"role"`
-	Content    string        `json:"content"`
+	Role       string         `json:"role"`
+	Content    string         `json:"content"`
 	ToolCalls  []chatToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string        `json:"tool_call_id,omitempty"`
+	ToolCallID string         `json:"tool_call_id,omitempty"`
 }
 
 type chatTool struct {
@@ -189,10 +189,29 @@ func (p *Provider) post(ctx context.Context, req *chatRequest) (*http.Response, 
 	return p.client.Do(httpReq)
 }
 
+// HTTPError 是非 2xx 响应的结构化错误，实现 Retryable() bool：
+// modelretry 等装饰器按此判断可重试性，无需解析错误文本。
+type HTTPError struct {
+	Status int
+	Body   string
+}
+
+func (e *HTTPError) Error() string {
+	return fmt.Sprintf("openai: http %d: %s", e.Status, e.Body)
+}
+
+// Retryable：408（请求超时）、429（限流）与 5xx 可安全重试；
+// 其余 4xx（鉴权错误、请求格式错误等）重试无意义。
+func (e *HTTPError) Retryable() bool {
+	return e.Status == http.StatusRequestTimeout ||
+		e.Status == http.StatusTooManyRequests ||
+		e.Status >= http.StatusInternalServerError
+}
+
 func checkStatus(resp *http.Response) error {
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
-		return fmt.Errorf("openai: http %d: %s", resp.StatusCode, string(body))
+		return &HTTPError{Status: resp.StatusCode, Body: string(body)}
 	}
 	return nil
 }

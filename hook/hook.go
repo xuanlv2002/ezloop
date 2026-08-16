@@ -1,5 +1,10 @@
 // Package hook 定义 loop 引擎的全部扩展点。
 // 采用小接口隔离：扩展只需实现关心的接口，NewAgent 内部类型断言归位。
+//
+// 并发契约：引擎串行调用全部 hook 回调；唯一的并发点是工具 Invoke
+// （按 MaxConcurrency 并发执行，但工具签名只拿到 ctx 与 args，碰不到 state）。
+// hook 自建的 goroutine 中不要读写 LoopState / Metadata——
+// 引擎对其并发访问不做保护，需要共享数据时自行加锁或只走 channel。
 package hook
 
 import (
@@ -60,6 +65,8 @@ type ToolStartHook interface {
 
 type ToolEndHook interface {
 	Hook
+	// OnToolEnd 在工具调用后、结果写入消息历史前触发：
+	// 可改写 result.Content（如 offload 卸载大结果），改写后进入历史。
 	OnToolEnd(ctx context.Context, state *types.LoopState, result *types.ToolResult) error
 }
 

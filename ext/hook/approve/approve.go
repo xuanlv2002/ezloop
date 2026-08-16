@@ -31,6 +31,18 @@ type Hook struct {
 
 // New 创建审批 hook，并返回决策 channel 的发送端。
 // needs 为 nil 时全部工具需审批；返回 false 的调用直接放行。
+// needs 拿到完整 ToolCall（含 Args），支持参数值级判断——
+// 如 bash 只放行白名单命令、write_file 只审计特定路径外写操作：
+//
+//	approve.New(func(c *types.ToolCall) bool {
+//	    if c.Name == "bash" {
+//	        var a struct{ Command string `json:"command"` }
+//	        _ = json.Unmarshal(c.Args, &a)
+//	        return !isReadOnlyCommand(a.Command) // 按命令内容决定是否中断
+//	    }
+//	    return true
+//	})
+//
 // 决策必须从其他 goroutine 发送（如事件回调中 go 发送、WebSocket handler），
 // 同步在 OnEvent 回调里发送会与 hook 的等待互相死锁。
 func New(needs func(*types.ToolCall) bool) (*Hook, chan<- Decision) {

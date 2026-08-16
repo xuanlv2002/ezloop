@@ -24,9 +24,13 @@ type LoopState struct {
 	Usage        Usage
 
 	// Metadata 供 hook 之间共享任意数据。
+	// 并发契约：引擎串行执行全部 hook 回调，在回调内读写是安全的；
+	// hook 自建 goroutine 中访问必须自行加锁。
 	Metadata map[string]any
 
 	// Emitter 由引擎注入：hook 通过它发送自定义事件到 OnEvent 回调。
+	// hook 回调由引擎串行调用，此路径无并发；并发来自 warp 层时
+	// 使用 event.EmitEvent（并发安全责任见其注释）。
 	Emitter event.OnEvent
 
 	// Stop 置 true 后，当前节点收尾完毕即终止 loop。

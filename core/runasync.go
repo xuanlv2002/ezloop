@@ -41,7 +41,8 @@ func (a *Agent) RunAsync(ctx context.Context, input string, runOpts ...RunOption
 	ctx, cancel := context.WithCancel(ctx)
 	events := make(chan event.Event, 256)
 
-	// 浅拷贝 agent 并替换事件出口；NewAgent 后字段只读，拷贝安全。
+	// 浅拷贝 agent 并替换事件出口。拷贝安全的前提是 Agent 构建后只读——
+	// 这一约定由 TestAgentConcurrentRuns 以 -race 钉住，勿在构建后改动 Agent。
 	clone := *a
 	clone.onEvent = func(e event.Event) { events <- e }
 

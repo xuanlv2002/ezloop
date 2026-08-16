@@ -5,20 +5,39 @@ package modelretry
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand"
 	"time"
 
+	"github.com/xuanlv2002/ezloop/event"
 	"github.com/xuanlv2002/ezloop/provider"
 	"github.com/xuanlv2002/ezloop/types"
 )
+
+// EventRetry 是重试事件：Data 为 *RetryInfo。
+// 经引擎注入模型节点的事件出口（event.EmitEvent）流出，
+// 前端可渲染「第 N 次失败，Xms 后重试」。
+const EventRetry = event.EventType("modelretry.retry")
+
+// RetryInfo 描述一次即将进行的重试。
+type RetryInfo struct {
+	Attempt     int // 即将开始的尝试序号（2 = 第二次尝试）
+	MaxAttempts int
+	Delay       time.Duration
+	Err         error // 上一次尝试的失败原因
+}
 
 type Options struct {
 	// MaxAttempts 总尝试次数（含首次），默认 3。
 	MaxAttempts int
 	// BaseDelay 首次重试前等待，默认 500ms，之后指数翻倍。
 	BaseDelay time.Duration
-	// RetryIf 可选，默认所有 error 都重试。
+	// RetryIf 决定一个错误是否重试，可按错误类型/文本/状态码任意匹配。
+	// 默认策略（见 defaultRetryable）：
+	//   - context 取消不重试；
+	//   - 错误（或其包装）实现了 Retryable() bool 接口（如 openai.HTTPError）按其判断；
+	//   - 其余无法识别的错误保守重试。
 	RetryIf func(err error) bool
 }
 
@@ -34,9 +53,24 @@ func New(p provider.ModelProvider, opts ...func(*Options)) *RetryProvider {
 		fn(&o)
 	}
 	if o.RetryIf == nil {
-		o.RetryIf = func(error) bool { return true }
+		o.RetryIf = defaultRetryable
 	}
 	return &RetryProvider{inner: p, opts: o}
+}
+
+// retryable 是与 openai.HTTPError 等结构化错误的解耦契约：
+// provider 层实现它，本包无需感知具体错误类型。
+type retryable interface{ Retryable() bool }
+
+func defaultRetryable(err error) bool {
+	if errors.Is(err, context.Canceled) {
+		return false
+	}
+	var r retryable
+	if errors.As(err, &r) {
+		return r.Retryable()
+	}
+	return true
 }
 
 var _ provider.ModelProvider = (*RetryProvider)(nil)
@@ -53,7 +87,7 @@ func (r *RetryProvider) Invoke(ctx context.Context, req *types.ModelRequest) (*t
 	var lastErr error
 	for attempt := 0; attempt < r.opts.MaxAttempts; attempt++ {
 		if attempt > 0 {
-			if err := r.backoff(ctx, attempt); err != nil {
+			if err := r.backoff(ctx, attempt, lastErr); err != nil {
 				return nil, err
 			}
 		}
@@ -78,7 +112,7 @@ func (r *RetryProvider) Stream(ctx context.Context, req *types.ModelRequest, onC
 	var lastErr error
 	for attempt := 0; attempt < r.opts.MaxAttempts; attempt++ {
 		if attempt > 0 {
-			if err := r.backoff(ctx, attempt); err != nil {
+			if err := r.backoff(ctx, attempt, lastErr); err != nil {
 				return nil, err
 			}
 		}
@@ -98,10 +132,17 @@ func (r *RetryProvider) Stream(ctx context.Context, req *types.ModelRequest, onC
 	return nil, fmt.Errorf("modelretry: giving up: %w", lastErr)
 }
 
-func (r *RetryProvider) backoff(ctx context.Context, attempt int) error {
+// backoff 发出重试事件后等待退避时间；cause 是上一次尝试的失败原因。
+func (r *RetryProvider) backoff(ctx context.Context, attempt int, cause error) error {
 	delay := r.opts.BaseDelay << (attempt - 1)
 	// 加 20% 抖动，避免并发重试形成共振。
 	delay += time.Duration(float64(delay) * 0.2 * rand.Float64())
+	event.EmitEvent(ctx, EventRetry, &RetryInfo{
+		Attempt:     attempt + 1,
+		MaxAttempts: r.opts.MaxAttempts,
+		Delay:       delay,
+		Err:         cause,
+	})
 	timer := time.NewTimer(delay)
 	defer timer.Stop()
 	select {

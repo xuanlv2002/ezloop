@@ -33,7 +33,7 @@ func run(t *testing.T, fsys fs.FileSystem) string {
 			testutil.Text("done"),
 		),
 		core.WithTools(bigTool{n: 10_000}),
-		core.WithToolWarp(Warp(fsys)),
+		core.WithHooks(New(fsys)),
 	).Run(context.Background(), "hi")
 	if err != nil {
 		t.Fatalf("err: %v", err)
@@ -41,7 +41,7 @@ func run(t *testing.T, fsys fs.FileSystem) string {
 	return state.Messages[2].Content
 }
 
-// 大结果卸载到 FS；写入失败降级透传原文。
+// 大结果卸载到 FS，消息里只留摘要与路径；写入失败降级透传原文。
 func TestOffloadAndDegrade(t *testing.T) {
 	fsys := fs.NewLocal(t.TempDir())
 	msg := run(t, fsys)

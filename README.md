@@ -105,7 +105,7 @@ state, err = h.Wait()
 | `ext/provider/openai` | model | OpenAI 兼容 Provider（Invoke + SSE 流式），兼容 DeepSeek/SiliconFlow/Ollama/vLLM |
 | `ext/warp/model/modelretry` | warp | 模型重试：指数退避，流式仅在未发出 chunk 时重试 |
 | `ext/warp/tool/safetool` | warp | 工具防护：panic 恢复 + error 附加上下文 |
-| `ext/warp/tool/offload` | warp | 大结果卸载：超阈值写入 FS，上下文只留摘要+路径 |
+| `ext/hook/offload` | hook | 大结果卸载：超阈值写入 FS，上下文只留摘要+路径 |
 | `ext/hook/mcp` | hook | mcpRouter 单工具封装（schema 恒定、KV cache 友好、配置热加载），内置官方 go-sdk |
 | `ext/hook/skill` | hook | 技能注入：代码定义或从 FS 目录加载 *.md（可选 .keywords） |
 | `ext/hook/summary` | hook | loop 结束自动生成摘要写入 Metadata |
@@ -121,15 +121,16 @@ state, err = h.Wait()
 ```
 框架层（只含接口与引擎，零扩展依赖）
 ├── types/      统一结构体 LoopState / Message / Tool + ToolWarp
-├── event/      事件定义与 OnEvent 回调
+├── event/      事件定义与 OnEvent 回调 + ctx 事件出口（warp 层用）
 ├── hook/       7 个 hook 小接口 + Action 短路语义
+├── warp/       节点装饰器统一链式组装 Handler[T] + Chain[T]
 ├── provider/   ModelProvider / StreamProvider 抽象 + Warp
 └── core/       NewAgent 组装 + loop 引擎
 
 扩展层（能力实现，官方 SDK 依赖放这里，不用不引入）
 ├── ext/provider/openai
-├── ext/warp/{model/modelretry, tool/safetool, tool/offload}
-├── ext/hook/{mcp,skill,summary,approve,askuser,taskplan,filetools,localsession}
+├── ext/warp/{model/modelretry, tool/safetool}
+├── ext/hook/{mcp,skill,summary,approve,askuser,taskplan,contextfix,offload,filetools,localsession}
 └── examples/chat        # 完整 agent：集成全部能力
 ```
 

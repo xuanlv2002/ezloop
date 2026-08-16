@@ -1,8 +1,8 @@
-// Package contextfix 在每次 Run 开始时修理消息历史：
-// assistant 的 tool_call 若缺少对应 tool 结果消息（外部注入的残缺历史、
-// 旧存档、异常中断等），自动补一条占位结果，保证发给模型的序列协议完整。
+// Package contextfix 在每次 Run 开始时修理消息历史，双向修补：
+// 补缺 —— assistant 的 tool_call 缺少对应 tool 结果时补占位消息；
+// 删孤 —— tool 结果消息对应的 assistant 调用已丢失时删除（保留会被 API 拒绝）。
 // 与引擎收尾段的不变量互补：引擎保证本轮产生的历史完整，
-// 本 hook 负责历史进入引擎前完整。
+// 本 hook 保证历史进入引擎前完整（外部注入的残缺历史、旧存档、异常中断等）。
 package contextfix
 
 import (
@@ -25,33 +25,42 @@ func (Hook) OnStart(_ context.Context, state *types.LoopState) error {
 	return nil
 }
 
-// Fix 给缺失 tool 结果的调用补占位消息，插在所属 assistant 消息之后。
-// 历史完整时原样返回。
+// Fix 双向修理历史；历史完整时原样返回（不新建切片）。
 func Fix(msgs []types.Message) []types.Message {
+	called := make(map[string]bool, len(msgs)) // assistant 发起过的调用
 	answered := make(map[string]bool, len(msgs))
 	for _, m := range msgs {
+		if m.Role == types.RoleAssistant {
+			for _, c := range m.ToolCalls {
+				called[c.ID] = true
+			}
+		}
 		if m.Role == types.RoleTool && m.ToolCallID != "" {
 			answered[m.ToolCallID] = true
 		}
 	}
-	missing := false
+	missing, orphan := false, false
 	for _, m := range msgs {
-		if m.Role != types.RoleAssistant {
-			continue
+		if m.Role == types.RoleTool && m.ToolCallID != "" && !called[m.ToolCallID] {
+			orphan = true
 		}
-		for _, c := range m.ToolCalls {
-			if !answered[c.ID] {
-				missing = true
-				break
+		if m.Role == types.RoleAssistant {
+			for _, c := range m.ToolCalls {
+				if !answered[c.ID] {
+					missing = true
+				}
 			}
 		}
 	}
-	if !missing {
+	if !missing && !orphan {
 		return msgs
 	}
 
 	fixed := make([]types.Message, 0, len(msgs)+4)
 	for _, m := range msgs {
+		if m.Role == types.RoleTool && m.ToolCallID != "" && !called[m.ToolCallID] {
+			continue // 孤儿 tool：对应 assistant 已丢失，删除
+		}
 		fixed = append(fixed, m)
 		if m.Role != types.RoleAssistant || len(m.ToolCalls) == 0 {
 			continue

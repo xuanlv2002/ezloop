@@ -45,18 +45,31 @@ func (a *Agent) Run(ctx context.Context, input string, runOpts ...RunOption) (st
 		opt(state)
 	}
 	a.emit(state, event.EventLoopStart, input)
+	// 流式降级警告：Warp 链可能擦除 Stream 能力（包装者只实现了 Invoke），
+	// 显式发事件而非静默变更行为。
+	if a.streaming {
+		if _, ok := a.provider.(provider.StreamProvider); !ok {
+			a.emit(state, event.EventStreamFallback,
+				"streaming requested but provider does not implement StreamProvider; falling back to Invoke")
+		}
+	}
 
 	// 捕获 panic，保证 EndHook 执行。
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("ezloop: panic: %v", r)
-			state.StopReason = types.StopError
-			// 发送错误事件，便于外部日志记录。
-			a.emit(state, event.EventError, err)
+			if ctx.Err() != nil {
+				state.StopReason = types.StopCancelled
+			} else {
+				state.StopReason = types.StopError
+				// 发送错误事件，便于外部日志记录。
+				a.emit(state, event.EventError, err)
+			}
 		}
 
-		// 运行结束，执行 EndHook
-		if endErr := a.runEndHooks(ctx, state); endErr != nil && err == nil {
+		// 运行结束，执行 EndHook。用脱离取消的 ctx：
+		// 收尾清理（关连接、写快照）不应随请求取消而失败。
+		if endErr := a.runEndHooks(context.WithoutCancel(ctx), state); endErr != nil && err == nil {
 			err = endErr
 		}
 		state.EndedAt = time.Now()
@@ -68,7 +81,7 @@ func (a *Agent) Run(ctx context.Context, input string, runOpts ...RunOption) (st
 	// 运行 startHook
 	for _, h := range a.startHooks {
 		if err = a.runHook(h, "OnStart", func() error { return h.OnStart(ctx, state) }); err != nil {
-			return state, a.fail(state, err)
+			return state, a.fail(ctx, state, err)
 		}
 	}
 
@@ -82,7 +95,7 @@ func (a *Agent) Run(ctx context.Context, input string, runOpts ...RunOption) (st
 		// 运行 modelStartHook
 		for _, h := range a.modelStartHooks {
 			if err = a.runHook(h, "OnModelStart", func() error { return h.OnModelStart(ctx, state) }); err != nil {
-				return state, a.fail(state, err)
+				return state, a.fail(ctx, state, err)
 			}
 		}
 		if state.Stop {
@@ -92,12 +105,7 @@ func (a *Agent) Run(ctx context.Context, input string, runOpts ...RunOption) (st
 		// 模型call
 		resp, err := a.callModel(ctx, state)
 		if err != nil {
-			if ctx.Err() != nil {
-				// 取消/超时优先于一般错误归类。
-				state.StopReason = types.StopCancelled
-				return state, err
-			}
-			return state, a.fail(state, err)
+			return state, a.fail(ctx, state, err)
 		}
 		state.LastResponse = resp
 		state.Usage.Add(resp.Usage)
@@ -112,7 +120,7 @@ func (a *Agent) Run(ctx context.Context, input string, runOpts ...RunOption) (st
 		// 运行 modelEndHook
 		for _, h := range a.modelEndHooks {
 			if err = a.runHook(h, "OnModelEnd", func() error { return h.OnModelEnd(ctx, state) }); err != nil {
-				return state, a.fail(state, err)
+				return state, a.fail(ctx, state, err)
 			}
 		}
 		if state.Stop {
@@ -127,12 +135,7 @@ func (a *Agent) Run(ctx context.Context, input string, runOpts ...RunOption) (st
 
 		// 工具调用
 		if err = a.execToolCalls(ctx, state); err != nil {
-			if ctx.Err() != nil {
-				// 取消/超时优先于一般错误归类。
-				state.StopReason = types.StopCancelled
-				return state, err
-			}
-			return state, a.fail(state, err)
+			return state, a.fail(ctx, state, err)
 		}
 		if state.Stop {
 			break
@@ -140,7 +143,7 @@ func (a *Agent) Run(ctx context.Context, input string, runOpts ...RunOption) (st
 		// 运行 loop hooks
 		for _, h := range a.loopHooks {
 			if err = a.runHook(h, "OnLoop", func() error { return h.OnLoop(ctx, state) }); err != nil {
-				return state, a.fail(state, err)
+				return state, a.fail(ctx, state, err)
 			}
 		}
 		a.emit(state, event.EventIterationEnd, state.Iteration)
@@ -213,7 +216,8 @@ func (a *Agent) execToolCalls(ctx context.Context, state *types.LoopState) error
 		state.StopReason = types.StopAborted
 	}
 
-	// 执行段。
+	// 执行段。工具节点与模型节点平级注入事件出口（tool warp 用 event.EmitEvent）。
+	tctx := a.withEmitter(ctx, state)
 	invoke := func(i int) {
 		call := &calls[i]
 		result := &types.ToolResult{CallID: call.ID, Name: call.Name}
@@ -228,7 +232,7 @@ func (a *Agent) execToolCalls(ctx context.Context, state *types.LoopState) error
 			result.Err = err
 			return
 		}
-		content, err := tool.Invoke(ctx, call.Args)
+		content, err := tool.Invoke(tctx, call.Args)
 		if err != nil {
 			result.Err = err
 			return
@@ -270,6 +274,13 @@ func (a *Agent) execToolCalls(ctx context.Context, state *types.LoopState) error
 			results[i] = &types.ToolResult{CallID: calls[i].ID, Name: calls[i].Name, Content: content}
 		}
 		result := results[i]
+		// 先跑 toolEnd hooks 再写消息：hook 可改写 result（如 offload 卸载大结果），
+		// 改写后的内容才进入历史。
+		for _, h := range a.toolEndHooks {
+			if herr := a.runHook(h, "OnToolEnd", func() error { return h.OnToolEnd(ctx, state, result) }); herr != nil {
+				return herr
+			}
+		}
 		errText := ""
 		if result.Err != nil {
 			errText = result.Err.Error()
@@ -280,11 +291,6 @@ func (a *Agent) execToolCalls(ctx context.Context, state *types.LoopState) error
 			Content:    result.Content,
 			Err:        errText,
 		})
-		for _, h := range a.toolEndHooks {
-			if herr := a.runHook(h, "OnToolEnd", func() error { return h.OnToolEnd(ctx, state, result) }); herr != nil {
-				return herr
-			}
-		}
 		a.emit(state, event.EventToolEnd, result)
 	}
 	return hookErr
@@ -293,6 +299,8 @@ func (a *Agent) execToolCalls(ctx context.Context, state *types.LoopState) error
 func (a *Agent) callModel(ctx context.Context, state *types.LoopState) (*types.ModelResponse, error) {
 	req := &types.ModelRequest{Messages: state.Messages, Tools: state.Tools.List()}
 	a.emit(state, event.EventModelStart, nil)
+
+	ctx = a.withEmitter(ctx, state)
 
 	if a.streaming {
 		if sp, ok := a.provider.(provider.StreamProvider); ok {
@@ -303,6 +311,16 @@ func (a *Agent) callModel(ctx context.Context, state *types.LoopState) (*types.M
 		}
 	}
 	return a.provider.Invoke(ctx, req)
+}
+
+// withEmitter 把事件出口注入 ctx：warp 层（重试、降级、卸载、防护等）
+// 拿不到 LoopState，经 ctx 发事件（event.EmitEvent）流经 OnEvent / RunAsync。
+// 模型与工具两条 warp 链平级注入；工具并发执行时出口会被并发调用，
+// 并发安全由使用方的回调负责（RunAsync 的 channel 出口天然安全）。
+func (a *Agent) withEmitter(ctx context.Context, state *types.LoopState) context.Context {
+	return event.ContextWithEmitter(ctx, func(e event.Event) {
+		a.emit(state, e.Type, e.Data)
+	})
 }
 
 func (a *Agent) runEndHooks(ctx context.Context, state *types.LoopState) error {
@@ -342,8 +360,14 @@ func (a *Agent) runToolStartHook(h hook.ToolStartHook, ctx context.Context, stat
 	return action, err
 }
 
-func (a *Agent) fail(state *types.LoopState, err error) error {
+// fail 是所有错误路径的统一出口：取消/超时归类 cancelled（不发错误事件），
+// 其余归类 error。hook 因 ctx 取消而报错同样走这里，归类保持一致。
+func (a *Agent) fail(ctx context.Context, state *types.LoopState, err error) error {
 	state.Stop = true
+	if ctx.Err() != nil {
+		state.StopReason = types.StopCancelled
+		return err
+	}
 	state.StopReason = types.StopError
 	a.emit(state, event.EventError, err)
 	return err

@@ -96,6 +96,10 @@ func WithHyperParams(hp HyperParams) Option {
 	return func(a *Agent) { a.hyper = hp }
 }
 
+// WithOnEvent 设置事件回调。
+// 并发契约：工具并发执行时（含 tool warp 的事件），回调可能被多个
+// goroutine 同时调用——实现必须并发安全且快速返回；
+// 需要免锁消费时用 RunAsync 的 Events 通道（channel 天然并发安全）。
 func WithOnEvent(fn event.OnEvent) Option {
 	return func(a *Agent) { a.onEvent = fn }
 }

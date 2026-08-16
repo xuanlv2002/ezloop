@@ -53,6 +53,39 @@ func TestFixLeavesCompleteHistory(t *testing.T) {
 	}
 }
 
+// 孤儿 tool 消息（对应 assistant 已丢失）→ 删除。
+func TestFixRemovesOrphanToolMessages(t *testing.T) {
+	msgs := []types.Message{
+		{Role: types.RoleUser, Content: "q1"},
+		{Role: types.RoleTool, ToolCallID: "ghost", Content: "ran"}, // assistant 丢失
+		{Role: types.RoleAssistant, Content: "done"},
+		{Role: types.RoleUser, Content: "q2"},
+		{Role: types.RoleAssistant, ToolCalls: []types.ToolCall{testutil.Call("b", "echo", `{}`)}},
+		{Role: types.RoleTool, ToolCallID: "b", Content: "ran"},
+	}
+	fixed := Fix(msgs)
+	if len(fixed) != 5 {
+		t.Fatalf("len: %d", len(fixed))
+	}
+	for _, m := range fixed {
+		if m.ToolCallID == "ghost" {
+			t.Fatal("orphan tool message must be removed")
+		}
+	}
+	// 双向混合：删孤儿的同时补缺失
+	msgs2 := []types.Message{
+		{Role: types.RoleTool, ToolCallID: "ghost", Content: ""},
+		{Role: types.RoleAssistant, ToolCalls: []types.ToolCall{testutil.Call("x", "echo", `{}`)}},
+	}
+	fixed2 := Fix(msgs2)
+	if len(fixed2) != 2 { // 删 ghost，assistant + 补 x 结果
+		t.Fatalf("len: %d", len(fixed2))
+	}
+	if fixed2[1].ToolCallID != "x" || fixed2[1].Content != Placeholder {
+		t.Fatalf("filled: %+v", fixed2[1])
+	}
+}
+
 // 全链路：残缺历史经 WithHistory 注入，OnStart 修理后请求模型。
 func TestFixViaAgentRun(t *testing.T) {
 	history := []types.Message{

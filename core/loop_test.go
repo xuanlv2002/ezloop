@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -262,6 +263,35 @@ func TestContextCancellation(t *testing.T) {
 	}
 }
 
+// 取消归类统一：hook 因 ctx 取消而报错 → 同样归类 cancelled；
+// EndHook 拿到脱离取消的 ctx（清理动作不失败）。
+type ctxErrStart struct{ endSawLiveCtx *bool }
+
+func (ctxErrStart) Name() string { return "ctxerr" }
+func (h ctxErrStart) OnStart(ctx context.Context, _ *types.LoopState) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+func (h ctxErrStart) OnEnd(ctx context.Context, _ *types.LoopState) error {
+	*h.endSawLiveCtx = ctx.Err() == nil
+	return nil
+}
+
+func TestCancelClassificationUnified(t *testing.T) {
+	endSawLiveCtx := false
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() { time.Sleep(30 * time.Millisecond); cancel() }()
+
+	state, err := NewAgent(testutil.Scripted(), WithHooks(ctxErrStart{&endSawLiveCtx})).
+		Run(ctx, "hi")
+	if err == nil || state.StopReason != types.StopCancelled {
+		t.Fatalf("stop=%s err=%v", state.StopReason, err)
+	}
+	if !endSawLiveCtx {
+		t.Fatal("EndHook must observe a live (non-cancelled) ctx")
+	}
+}
+
 // RunAsync：事件通道 + Wait。
 func TestRunAsync(t *testing.T) {
 	a := NewAgent(
@@ -417,5 +447,132 @@ func TestHookEmitsCustomEvent(t *testing.T) {
 	}
 	if got != 1 {
 		t.Fatalf("custom events: %d", got)
+	}
+}
+
+type constProvider struct {
+	calls atomic.Int32
+}
+
+func (p *constProvider) Invoke(_ context.Context, _ *types.ModelRequest) (*types.ModelResponse, error) {
+	p.calls.Add(1)
+	return &types.ModelResponse{Content: "ok"}, nil
+}
+
+// 同一 Agent 并发 Run 的钉子测试（-race 下运行钉住"Agent 构建后只读"约定）。
+// RunAsync 的浅拷贝、共享 hook 列表、共享 provider 都依赖此约定。
+func TestAgentConcurrentRuns(t *testing.T) {
+	p := &constProvider{}
+	a := NewAgent(p, WithOnEvent(func(event.Event) {}))
+	const n = 16
+	var wg sync.WaitGroup
+	for i := range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			state, err := a.Run(context.Background(), fmt.Sprintf("q%d", i))
+			if err != nil || state.StopReason != types.StopCompleted {
+				t.Errorf("run %d: stop=%s err=%v", i, state.StopReason, err)
+			}
+		}()
+	}
+	wg.Wait()
+	if got := p.calls.Load(); got != n {
+		t.Fatalf("provider calls: %d want %d", got, n)
+	}
+}
+
+// streaming 开启但 provider 无 Stream 能力 → 发 stream_fallback 警告事件，不静默。
+func TestStreamFallbackWarning(t *testing.T) {
+	saw := false
+	a := NewAgent(&constProvider{},
+		WithStreaming(true),
+		WithOnEvent(func(e event.Event) {
+			if e.Type == event.EventStreamFallback {
+				saw = true
+			}
+		}))
+	if _, err := a.Run(context.Background(), "hi"); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if !saw {
+		t.Fatal("want stream_fallback event when provider lacks Stream")
+	}
+}
+
+// provider/warp 经 ctx 出口发的事件流经引擎事件流，且带迭代号。
+type emittingProvider struct{}
+
+func (p *emittingProvider) Invoke(ctx context.Context, _ *types.ModelRequest) (*types.ModelResponse, error) {
+	event.EmitEvent(ctx, "provider.custom", "inner-event")
+	return &types.ModelResponse{Content: "ok"}, nil
+}
+
+func TestProviderEventsFlowThroughCtx(t *testing.T) {
+	var mu sync.Mutex
+	var saw bool
+	var iter int
+	a := NewAgent(&emittingProvider{}, WithOnEvent(func(e event.Event) {
+		if e.Type != "provider.custom" {
+			return
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		saw, iter = true, e.Iteration
+	}))
+	if _, err := a.Run(context.Background(), "hi"); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if !saw || iter != 1 {
+		t.Fatalf("saw=%v iter=%d", saw, iter)
+	}
+}
+
+// tool warp 经 ctx 出口发事件：到达 OnEvent；并发工具下出口被并发调用，
+// 收集方自行加锁（并发安全是使用方的契约责任，-race 钉住引擎侧无竞争）。
+type emitWarp struct{ inner types.Tool }
+
+func (t emitWarp) Name() string                { return t.inner.Name() }
+func (t emitWarp) Description() string         { return t.inner.Description() }
+func (t emitWarp) ArgsSchema() json.RawMessage { return t.inner.ArgsSchema() }
+func (t emitWarp) Invoke(ctx context.Context, args json.RawMessage) (string, error) {
+	event.EmitEvent(ctx, "toolwarp.custom", t.inner.Name())
+	return t.inner.Invoke(ctx, args)
+}
+
+func TestToolWarpEventsFlow(t *testing.T) {
+	var mu sync.Mutex
+	var seen []string
+	a := NewAgent(
+		testutil.Scripted(
+			testutil.ToolCalls(
+				testutil.Call("1", "sleep", `{}`),
+				testutil.Call("2", "sleep", `{}`),
+				testutil.Call("3", "sleep", `{}`),
+				testutil.Call("4", "sleep", `{}`),
+			),
+			testutil.Text("done"),
+		),
+		WithTools(&sleepTool{delay: 10 * time.Millisecond}),
+		WithToolWarp(func(inner types.Tool) types.Tool { return emitWarp{inner} }),
+		WithHyperParams(HyperParams{MaxConcurrency: 4}),
+		WithOnEvent(func(e event.Event) {
+			if e.Type != "toolwarp.custom" {
+				return
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			seen = append(seen, e.Data.(string))
+		}),
+	)
+	if _, err := a.Run(context.Background(), "hi"); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(seen) != 4 {
+		t.Fatalf("tool warp events: %v", seen)
 	}
 }
