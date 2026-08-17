@@ -27,14 +27,21 @@ type Event struct {
 	Type      EventType
 	Timestamp time.Time
 	Iteration int
-	Data      any
+	// TaskID 标识事件所属的上下文隔离 fork（ext/hook/task）；主循环事件为空串。
+	// 工具并发、fork 也并发，消费方以 TaskID 区分同一时刻多个 fork 的事件归属。
+	TaskID string
+	Data   any
 }
 
 func (e Event) String() string {
-	if e.Data == nil {
-		return fmt.Sprintf("[%s] iter=%d", e.Type, e.Iteration)
+	task := ""
+	if e.TaskID != "" {
+		task = " task=" + e.TaskID
 	}
-	return fmt.Sprintf("[%s] iter=%d data=%v", e.Type, e.Iteration, e.Data)
+	if e.Data == nil {
+		return fmt.Sprintf("[%s]%s iter=%d", e.Type, task, e.Iteration)
+	}
+	return fmt.Sprintf("[%s]%s iter=%d data=%v", e.Type, task, e.Iteration, e.Data)
 }
 
 type OnEvent func(Event)

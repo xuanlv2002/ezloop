@@ -5,30 +5,43 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/xuanlv2002/ezloop/core"
 	"github.com/xuanlv2002/ezloop/event"
 	"github.com/xuanlv2002/ezloop/internal/testutil"
+	"github.com/xuanlv2002/ezloop/provider"
 	"github.com/xuanlv2002/ezloop/types"
 )
 
-// 委派 → 子循环完成 → 最终答案作为工具结果进入主历史，主循环继续。
-func TestTaskDelegationReturnsResult(t *testing.T) {
-	sub := testutil.Scripted(testutil.Text("sub result"))
-	h := New(sub)
+// withTask 构建一个已绑定 task hook 的 Agent，并附加 opts。
+// task hook 需在 NewAgent 之后 Bind，本辅助函数把两步合为一次调用。
+func withTask(p provider.ModelProvider, opts ...core.Option) *core.Agent {
+	h := New()
+	a := core.NewAgent(p, append([]core.Option{core.WithHooks(h)}, opts...)...)
+	h.Bind(a)
+	return a
+}
+
+// fork → 子循环完成 → 最终答案作为工具结果进入主历史，主循环继续。
+// fork 复用主 Agent 的 provider：脚本在同一 provider 上按调用顺序交错消费。
+func TestTaskForkReturnsResult(t *testing.T) {
+	p := testutil.Scripted(
+		testutil.ToolCalls(testutil.Call("1", ToolName, `{"task":"count files"}`)),
+		testutil.Text("sub result"),
+		testutil.Text("done"),
+	)
 
 	var sawStart, sawEnd bool
-	state, err := core.NewAgent(
-		testutil.Scripted(
-			testutil.ToolCalls(testutil.Call("1", ToolName, `{"task":"count files"}`)),
-			testutil.Text("done"),
-		),
-		core.WithHooks(h),
+	var taskIDs []string
+	state, err := withTask(
+		p,
 		core.WithOnEvent(func(e event.Event) {
 			switch e.Type {
 			case EventStart:
 				sawStart = true
+				taskIDs = append(taskIDs, e.TaskID)
 			case EventEnd:
 				sawEnd = true
 			}
@@ -43,6 +56,9 @@ func TestTaskDelegationReturnsResult(t *testing.T) {
 	if !sawStart || !sawEnd {
 		t.Fatalf("events start=%v end=%v", sawStart, sawEnd)
 	}
+	if len(taskIDs) != 1 || taskIDs[0] == "" {
+		t.Fatalf("task.start should carry taskId: %v", taskIDs)
+	}
 	if state.Messages[2].Role != types.RoleTool || state.Messages[2].ToolCallID != "1" {
 		t.Fatalf("msg shape: %+v", state.Messages[2])
 	}
@@ -56,7 +72,7 @@ func TestTaskDelegationReturnsResult(t *testing.T) {
 
 // WithHooks 即可：task 工具由 OnStart 自动注册，无需 core.WithTools(Tool())。
 func TestHookRegistersToolOnStart(t *testing.T) {
-	h := New(testutil.Scripted())
+	h := New()
 	state := &types.LoopState{Tools: types.NewToolRegistry()}
 	if err := h.OnStart(context.Background(), state); err != nil {
 		t.Fatalf("OnStart: %v", err)
@@ -66,23 +82,17 @@ func TestHookRegistersToolOnStart(t *testing.T) {
 	}
 }
 
-// 子 Agent 默认继承父 state 的工具：子循环能调用父工具完成子任务。
+// fork 继承父 state 的工具：子循环能调用父工具完成子任务。
 func TestTaskInheritsParentTools(t *testing.T) {
 	rec := &recTool{}
-	sub := testutil.Scripted(
+	p := testutil.Scripted(
+		testutil.ToolCalls(testutil.Call("1", ToolName, `{"task":"go"}`)),
 		testutil.ToolCalls(testutil.Call("s1", "rec", `{"v":"x"}`)),
 		testutil.Text("sub done"),
+		testutil.Text("final"),
 	)
-	h := New(sub) // InheritTools 默认 true
 
-	state, err := core.NewAgent(
-		testutil.Scripted(
-			testutil.ToolCalls(testutil.Call("1", ToolName, `{"task":"go"}`)),
-			testutil.Text("final"),
-		),
-		core.WithTools(rec),
-		core.WithHooks(h),
-	).Run(context.Background(), "delegate")
+	state, err := withTask(p, core.WithTools(rec)).Run(context.Background(), "delegate")
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -90,14 +100,14 @@ func TestTaskInheritsParentTools(t *testing.T) {
 		t.Fatalf("stop: %s", state.StopReason)
 	}
 	if rec.calls != 1 {
-		t.Fatalf("sub should invoke inherited tool once, got %d", rec.calls)
+		t.Fatalf("fork should invoke inherited tool once, got %d", rec.calls)
 	}
 	if state.Messages[2].Content != "sub done" {
 		t.Fatalf("result: %q", state.Messages[2].Content)
 	}
 }
 
-// 继承工具时剔除 task 自身，防止子 Agent 无界递归。
+// 继承工具时剔除 task 自身，防止 fork 再次隔离造成递归（单层保证）。
 func TestInheritedToolsFiltersTask(t *testing.T) {
 	state := &types.LoopState{Tools: types.NewToolRegistry()}
 	state.Tools.Register(testutil.EchoTool{})
@@ -109,40 +119,54 @@ func TestInheritedToolsFiltersTask(t *testing.T) {
 	}
 }
 
-// 子循环出错不终止主循环：错误作为工具结果回传，主模型自纠。
-func TestTaskSubAgentErrorBecomesResult(t *testing.T) {
-	h := New(errProvider{})
-	state, err := core.NewAgent(
-		testutil.Scripted(
-			testutil.ToolCalls(testutil.Call("1", ToolName, `{"task":"boom"}`)),
-			testutil.Text("recovered"),
-		),
-		core.WithHooks(h),
-	).Run(context.Background(), "delegate")
+// 隔离核心属性：fork 内部的过程性上下文（中间工具调用）不进入主上下文，
+// 只有最终答案回传。
+func TestForkDoesNotLeakIntermediateContext(t *testing.T) {
+	p := testutil.Scripted(
+		testutil.ToolCalls(testutil.Call("1", ToolName, `{"task":"go"}`)),
+		testutil.ToolCalls(testutil.Call("s1", "echo", `{"v":"x"}`)), // fork 中间调用
+		testutil.Text("final answer"),
+		testutil.Text("done"),
+	)
+
+	state, err := withTask(p, core.WithTools(testutil.EchoTool{})).Run(context.Background(), "delegate")
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
 	if state.StopReason != types.StopCompleted {
-		t.Fatalf("sub error must not abort parent: %s", state.StopReason)
+		t.Fatalf("stop: %s", state.StopReason)
+	}
+	// 主历史只应看到最终答案，不含 fork 的 echo 中间结果。
+	if state.Messages[2].Content != "final answer" {
+		t.Fatalf("result should be fork final: %q", state.Messages[2].Content)
+	}
+	for _, m := range state.Messages {
+		if strings.Contains(m.Content, "echo:") {
+			t.Fatalf("fork intermediate context leaked into main: %+v", m)
+		}
+	}
+}
+
+// fork 出错不终止主循环：错误作为工具结果回传，主模型自纠。
+func TestTaskForkErrorBecomesResult(t *testing.T) {
+	state, err := withTask(&errOnSecondProvider{}).Run(context.Background(), "delegate")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if state.StopReason != types.StopCompleted {
+		t.Fatalf("fork error must not abort parent: %s", state.StopReason)
 	}
 	if !strings.Contains(state.Messages[2].Content, "task failed") {
-		t.Fatalf("result should carry sub error: %q", state.Messages[2].Content)
+		t.Fatalf("result should carry fork error: %q", state.Messages[2].Content)
 	}
 	if state.Messages[3].Content != "recovered" {
 		t.Fatalf("parent should continue: %q", state.Messages[3].Content)
 	}
 }
 
-// 子循环用量累加到父 state.Usage。
+// fork 用量累加到父 state.Usage。
 func TestTaskAccumulatesUsage(t *testing.T) {
-	h := New(usageProvider{})
-	state, err := core.NewAgent(
-		testutil.Scripted(
-			testutil.ToolCalls(testutil.Call("1", ToolName, `{"task":"go"}`)),
-			testutil.Text("done"),
-		),
-		core.WithHooks(h),
-	).Run(context.Background(), "delegate")
+	state, err := withTask(&usageProvider{}).Run(context.Background(), "delegate")
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -151,34 +175,91 @@ func TestTaskAccumulatesUsage(t *testing.T) {
 	}
 }
 
-// 空子任务描述 → 直接以提示文案作为结果，不派生子循环。
-func TestTaskEmptyDescription(t *testing.T) {
-	h := New(testutil.Scripted())
-	state, err := core.NewAgent(
-		testutil.Scripted(
-			testutil.ToolCalls(testutil.Call("1", ToolName, `{}`)),
-			testutil.Text("done"),
-		),
-		core.WithHooks(h),
+// 并发：同一轮多个 task 调用并行 fork，各自带独立 taskId。
+func TestTaskForksConcurrently(t *testing.T) {
+	var mu sync.Mutex
+	taskIDs := map[string]bool{}
+	state, err := withTask(
+		&twoForkProvider{},
+		core.WithOnEvent(func(e event.Event) {
+			if e.Type != EventStart {
+				return
+			}
+			mu.Lock()
+			taskIDs[e.TaskID] = true
+			mu.Unlock()
+		}),
 	).Run(context.Background(), "delegate")
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if !strings.Contains(state.Messages[2].Content, "empty subtask") {
+	if state.StopReason != types.StopCompleted {
+		t.Fatalf("stop: %s", state.StopReason)
+	}
+	if len(taskIDs) != 2 {
+		t.Fatalf("want 2 distinct fork taskIds, got %v", taskIDs)
+	}
+	// 两个 task 调用各自拿到结果。
+	toolMsgs := 0
+	for _, m := range state.Messages {
+		if m.Role == types.RoleTool && m.ToolCallID != "" {
+			toolMsgs++
+			if m.Content != "done" {
+				t.Fatalf("fork result: %q", m.Content)
+			}
+		}
+	}
+	if toolMsgs != 2 {
+		t.Fatalf("want 2 tool results, got %d", toolMsgs)
+	}
+}
+
+// 单层：fork 的工具集没有 task，模型再调 task 只会得到"工具不存在"，
+// 不会递归 fork。
+func TestForkCannotForkAgain(t *testing.T) {
+	p := testutil.Scripted(
+		testutil.ToolCalls(testutil.Call("1", ToolName, `{"task":"go"}`)),
+		testutil.ToolCalls(testutil.Call("s1", ToolName, `{"task":"nested"}`)), // fork 试图再 fork
+		testutil.Text("after failed nested"),
+		testutil.Text("done"),
+	)
+	state, err := withTask(p).Run(context.Background(), "delegate")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if state.StopReason != types.StopCompleted {
+		t.Fatalf("stop: %s", state.StopReason)
+	}
+	// fork 的最终答案（nested 调用被拒后继续）。
+	if state.Messages[2].Content != "after failed nested" {
+		t.Fatalf("result: %q", state.Messages[2].Content)
+	}
+}
+
+// 空任务描述 → 直接以提示文案作为结果，不 fork。
+func TestTaskEmptyDescription(t *testing.T) {
+	state, err := withTask(
+		testutil.Scripted(
+			testutil.ToolCalls(testutil.Call("1", ToolName, `{}`)),
+			testutil.Text("done"),
+		),
+	).Run(context.Background(), "delegate")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if !strings.Contains(state.Messages[2].Content, "empty task") {
 		t.Fatalf("result: %q", state.Messages[2].Content)
 	}
 }
 
 // 非目标工具直接放行。
 func TestTaskIgnoresOtherTools(t *testing.T) {
-	h := New(testutil.Scripted())
-	state, err := core.NewAgent(
+	state, err := withTask(
 		testutil.Scripted(
 			testutil.ToolCalls(testutil.Call("1", "echo", `{}`)),
 			testutil.Text("done"),
 		),
 		core.WithTools(testutil.EchoTool{}),
-		core.WithHooks(h),
 	).Run(context.Background(), "hi")
 	if err != nil {
 		t.Fatalf("err: %v", err)
@@ -195,7 +276,7 @@ func TestToolWithoutHookFails(t *testing.T) {
 	}
 }
 
-// recTool 记录被调用次数，验证子 Agent 真的走到了继承工具。
+// recTool 记录被调用次数，验证 fork 真的走到了继承工具。
 type recTool struct{ calls int }
 
 func (r *recTool) Name() string                { return "rec" }
@@ -206,18 +287,57 @@ func (r *recTool) Invoke(_ context.Context, _ json.RawMessage) (string, error) {
 	return "recorded", nil
 }
 
-// errProvider 总是返回错误，模拟子模型故障。
-type errProvider struct{}
+// errOnSecondProvider 第二次调用返回错误：父调用 → fork 出错 → 父自纠。
+type errOnSecondProvider struct{ calls int }
 
-func (errProvider) Invoke(_ context.Context, _ *types.ModelRequest) (*types.ModelResponse, error) {
-	return nil, errors.New("sub model down")
+func (p *errOnSecondProvider) Invoke(_ context.Context, _ *types.ModelRequest) (*types.ModelResponse, error) {
+	p.calls++
+	switch p.calls {
+	case 1:
+		return &types.ModelResponse{Content: "calling", ToolCalls: []types.ToolCall{
+			{ID: "1", Name: ToolName, Args: json.RawMessage(`{"task":"boom"}`)},
+		}}, nil
+	case 2:
+		return nil, errors.New("sub model down")
+	default:
+		return &types.ModelResponse{Content: "recovered"}, nil
+	}
 }
 
-// usageProvider 返回带用量的固定响应。
-type usageProvider struct{}
+// usageProvider 第一次调用发 task，第二次（fork）带用量，之后纯文本。
+type usageProvider struct{ calls int }
 
-func (usageProvider) Invoke(_ context.Context, _ *types.ModelRequest) (*types.ModelResponse, error) {
-	return &types.ModelResponse{Content: "sub", Usage: types.Usage{PromptTokens: 3, CompletionTokens: 2}}, nil
+func (p *usageProvider) Invoke(_ context.Context, _ *types.ModelRequest) (*types.ModelResponse, error) {
+	p.calls++
+	switch p.calls {
+	case 1:
+		return &types.ModelResponse{Content: "calling", ToolCalls: []types.ToolCall{
+			{ID: "1", Name: ToolName, Args: json.RawMessage(`{"task":"go"}`)},
+		}}, nil
+	case 2:
+		return &types.ModelResponse{Content: "sub", Usage: types.Usage{PromptTokens: 3, CompletionTokens: 2}}, nil
+	default:
+		return &types.ModelResponse{Content: "done"}, nil
+	}
+}
+
+// twoForkProvider 第一次调用发两个 task，之后纯文本；并发安全。
+type twoForkProvider struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (p *twoForkProvider) Invoke(_ context.Context, _ *types.ModelRequest) (*types.ModelResponse, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.calls++
+	if p.calls == 1 {
+		return &types.ModelResponse{Content: "calling", ToolCalls: []types.ToolCall{
+			{ID: "1", Name: ToolName, Args: json.RawMessage(`{"task":"a"}`)},
+			{ID: "2", Name: ToolName, Args: json.RawMessage(`{"task":"b"}`)},
+		}}, nil
+	}
+	return &types.ModelResponse{Content: "done"}, nil
 }
 
 func toolNames(tools []types.Tool) []string {

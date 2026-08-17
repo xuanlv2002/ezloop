@@ -216,7 +216,7 @@ sequenceDiagram
 | `ext/hook/approve` | hook | 工具审批：channel 决策中断（EventRequest + Decisions 回传） |
 | `ext/hook/askuser` | hook | ask_user 工具：模型提问中断等回答，回答作为工具结果入史 |
 | `ext/hook/taskplan` | hook | task_plan 工具：规划提交中断等处置（执行/否决/修订） |
-| `ext/hook/task` | hook | task 工具：委派子任务给独立子 Agent（完整 model↔tool 子循环），完成后把结果回传主循环 |
+| `ext/hook/task` | hook | task 工具：上下文隔离 fork——复刻当前 Agent 与上下文独立跑子循环，只把最终答案回传主循环（并发、单层、事件带 taskId；NewAgent 后需 `Bind(agent)`） |
 | `ext/hook/contextfix` | hook | Run 开始时修理历史：缺失的 tool 结果补占位，序列协议完整 |
 | `ext/hook/filetools` | hook | 文件工具集：read_file（行分页）、write、edit、apply_patch、grep、find、bash；按 FS 能力注册，修改走 per-path 队列 |
 | `ext/hook/localsession` | hook | 会话持久化：滚动快照到 sessions/<id>.json，Load/List 恢复续聊 |

@@ -997,17 +997,17 @@ decisions &lt;- taskplan.Decision{Kind: taskplan.Revise, Input: <span class="s">
 
     <div class="ext">
       <h3>ext/hook/task <span class="badge hook">hook</span></h3>
-      <p>task 工具：主 Agent 把可隔离的子任务委派给独立子 Agent（完整 model↔tool 子循环），
-      完成后把最终答案作为工具结果返回主循环。子 Agent 默认继承主 Agent 当前 state 的全部工具
-      （剔除 task 自身防无界递归）；task 工具由 hook 在 OnStart 自动注册，无需 WithTools。</p>
+      <p>task 工具：一个「上下文隔离」工具（fork）。模型调用 task 求解可隔离子问题时，
+      不是注入独立 subAgent，而是复刻当前 Agent（同一 provider / warp / 超参 / 系统提示词）
+      与当前上下文，在隔离的消息历史上再跑一轮 model↔tool 循环——子循环内部的过程性上下文
+      不回流主上下文，只有最终答案作为工具结果回传。多个 task 调用同轮并发 fork；
+      单层（fork 不能再 fork）；fork 内事件带 taskId 标识。</p>
       <div class="codeblock">
         <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">task.go</span></div>
-<pre>h := task.<span class="f">New</span>(subProvider,                    <span class="c">// 子 Agent 模型（可与主 Agent 相同）</span>
-    task.<span class="f">WithSystemPrompt</span>(<span class="s">"你是子任务执行器"</span>),
-    task.<span class="f">WithMaxIterations</span>(8),
-)
+<pre>h := task.<span class="f">New</span>()                           <span class="c">// 无需 provider：fork 复用当前 Agent</span>
 agent := core.<span class="f">NewAgent</span>(p, core.<span class="f">WithHooks</span>(h))
-<span class="c">// 模型调用 task 工具 → 拦截 → 子 Agent 跑完 loop → 结果回传主循环</span></pre>
+h.<span class="f">Bind</span>(agent)                             <span class="c">// 组装后绑定：hook 据此复刻 Agent 跑 fork</span>
+<span class="c">// 模型调用 task 工具 → 复刻上下文 → 隔离子循环 → 只回传最终答案</span></pre>
       </div>
     </div>
 
