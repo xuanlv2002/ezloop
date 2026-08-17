@@ -2,6 +2,8 @@
 // 用户处置——执行 / 拒绝 / 按修改意见调整后重新提交。
 // 实现与 approve 同构：OnToolStart 阻塞在 Decisions channel 上，
 // 处置意见作为工具结果进入消息历史，由模型据此继续或修订。
+// task_plan 工具由 hook 在 OnStart 自动注册，core.WithHooks(New()) 即可，
+// 无需再 core.WithTools(Tool())。
 package taskplan
 
 import (
@@ -43,7 +45,7 @@ type Hook struct {
 }
 
 // New 创建 hook 并返回决策 channel 的发送端。
-// 需同时注册 Tool() 供模型发现该工具。
+// task_plan 工具由 hook 在 OnStart 自动注册，无需再 core.WithTools(Tool())。
 // 决策必须从其他 goroutine 发送，理由同 approve.New。
 func New() (*Hook, chan<- Decision) {
 	ch := make(chan Decision)
@@ -51,6 +53,12 @@ func New() (*Hook, chan<- Decision) {
 }
 
 func (h *Hook) Name() string { return "taskplan" }
+
+// OnStart 自动注册 task_plan 工具。仍导出 Tool() 以便显式装配。
+func (h *Hook) OnStart(_ context.Context, state *types.LoopState) error {
+	state.Tools.Register(Tool())
+	return nil
+}
 
 func (h *Hook) OnToolStart(ctx context.Context, state *types.LoopState, call *types.ToolCall) (hook.Action, error) {
 	if call.Name != ToolName {
@@ -83,6 +91,7 @@ func (d Decision) formatResult() string {
 
 // Tool 返回 task_plan 壳工具：仅提供 schema 供模型发现，
 // 真正的"执行体"是 Hook 拦截后等用户处置，Invoke 不会被走到。
+// hook 已在 OnStart 自动注册本工具，通常无需手动调用。
 func Tool() types.Tool { return tool{} }
 
 type tool struct{}

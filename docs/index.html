@@ -970,14 +970,11 @@ core.<span class="f">WithOnEvent</span>(<span class="k">func</span>(e event.Even
     <div class="ext">
       <h3>ext/hook/askuser <span class="badge hook">hook</span></h3>
       <p>ask_user 工具：模型向用户提问，循环中断等待回答，回答原样作为工具结果进入历史。
-      与 approve 完全同构（事件 + channel），壳工具仅提供 schema 供模型发现。</p>
+      与 approve 完全同构（事件 + channel），壳工具由 hook 在 OnStart 自动注册，无需 WithTools。</p>
       <div class="codeblock">
         <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">askuser.go</span></div>
 <pre>h, answers := askuser.<span class="f">New</span>()
-agent := core.<span class="f">NewAgent</span>(p,
-    core.<span class="f">WithHooks</span>(h),
-    core.<span class="f">WithTools</span>(askuser.<span class="f">Tool</span>()),  <span class="c">// 注册壳工具供模型发现</span>
-)
+agent := core.<span class="f">NewAgent</span>(p, core.<span class="f">WithHooks</span>(h))
 <span class="c">// OnEvent 收到 askuser.request（Args.question）→</span>
 <span class="c">// answers &lt;- askuser.Answer{CallID: call.ID, Input: 用户的回答}</span></pre>
       </div>
@@ -992,12 +989,25 @@ agent := core.<span class="f">NewAgent</span>(p,
       <div class="codeblock">
         <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">taskplan.go</span></div>
 <pre>h, decisions := taskplan.<span class="f">New</span>()
-agent := core.<span class="f">NewAgent</span>(p,
-    core.<span class="f">WithHooks</span>(h),
-    core.<span class="f">WithTools</span>(taskplan.<span class="f">Tool</span>()),  <span class="c">// 模型提交 Args.plan</span>
-)
+agent := core.<span class="f">NewAgent</span>(p, core.<span class="f">WithHooks</span>(h))
 <span class="c">// 用户反馈 →</span>
 decisions &lt;- taskplan.Decision{Kind: taskplan.Revise, Input: <span class="s">"加一步压测"</span>}</pre>
+      </div>
+    </div>
+
+    <div class="ext">
+      <h3>ext/hook/task <span class="badge hook">hook</span></h3>
+      <p>task 工具：主 Agent 把可隔离的子任务委派给独立子 Agent（完整 model↔tool 子循环），
+      完成后把最终答案作为工具结果返回主循环。子 Agent 默认继承主 Agent 当前 state 的全部工具
+      （剔除 task 自身防无界递归）；task 工具由 hook 在 OnStart 自动注册，无需 WithTools。</p>
+      <div class="codeblock">
+        <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">task.go</span></div>
+<pre>h := task.<span class="f">New</span>(subProvider,                    <span class="c">// 子 Agent 模型（可与主 Agent 相同）</span>
+    task.<span class="f">WithSystemPrompt</span>(<span class="s">"你是子任务执行器"</span>),
+    task.<span class="f">WithMaxIterations</span>(8),
+)
+agent := core.<span class="f">NewAgent</span>(p, core.<span class="f">WithHooks</span>(h))
+<span class="c">// 模型调用 task 工具 → 拦截 → 子 Agent 跑完 loop → 结果回传主循环</span></pre>
       </div>
     </div>
 
@@ -1103,9 +1113,8 @@ agent := core.<span class="f">NewAgent</span>(p,
         filetools.<span class="f">New</span>(fsys, <span class="k">func</span>(o *filetools.Options) { o.EnableExec = <span class="k">true</span> }),
         skillHook, approver, asker, planner, summary.<span class="f">New</span>(p, <span class="s">""</span>), session,
     ),
-    core.<span class="f">WithTools</span>(askuser.<span class="f">Tool</span>(), taskplan.<span class="f">Tool</span>()),  <span class="c">// ⑨ 壳工具供模型发现</span>
     core.<span class="f">WithStreaming</span>(<span class="k">true</span>),
-    core.<span class="f">WithOnEvent</span>(<span class="k">func</span>(e event.Event) {              <span class="c">// ⑩ 流式渲染 + CLI 决策桥</span>
+    core.<span class="f">WithOnEvent</span>(<span class="k">func</span>(e event.Event) {              <span class="c">// ⑨ 流式渲染 + CLI 决策桥</span>
         <span class="k">switch</span> e.Type {
         <span class="k">case</span> event.EventModelChunk: fmt.<span class="f">Print</span>(e.Data.(<span class="t">string</span>))
         <span class="k">case</span> event.EventToolStart:  fmt.<span class="f">Printf</span>(<span class="s">"\n🔧 %s "</span>, e.Data.(*types.ToolCall).Name)

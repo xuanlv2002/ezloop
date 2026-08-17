@@ -157,7 +157,7 @@ func main() {
 			summary.New(p, ""),
 			session,
 		),
-		core.WithTools(nowTool{}, askuser.Tool(), taskplan.Tool()),
+		core.WithTools(nowTool{}),
 		core.WithHyperParams(core.HyperParams{MaxIterations: 12}),
 		core.WithStreaming(true),
 		core.WithOnEvent(func(e event.Event) {

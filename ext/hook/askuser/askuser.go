@@ -1,7 +1,8 @@
 // Package askuser 提供 ask_user 工具：模型向用户提问，循环中断等待回答，
 // 回答作为工具结果进入消息历史。
 // 实现与 approve 同构：OnToolStart 阻塞在 Answers channel 上，
-// 中断/恢复对引擎透明。
+// 中断/恢复对引擎透明。ask_user 工具由 hook 在 OnStart 自动注册，
+// core.WithHooks(New()) 即可，无需再 core.WithTools(Tool())。
 package askuser
 
 import (
@@ -32,7 +33,7 @@ type Hook struct {
 }
 
 // New 创建 hook 并返回回答 channel 的发送端。
-// 需同时注册 Tool() 供模型发现该工具。
+// ask_user 工具由 hook 在 OnStart 自动注册，无需再 core.WithTools(Tool())。
 // 回答必须从其他 goroutine 发送，理由同 approve.New。
 func New() (*Hook, chan<- Answer) {
 	ch := make(chan Answer)
@@ -40,6 +41,12 @@ func New() (*Hook, chan<- Answer) {
 }
 
 func (h *Hook) Name() string { return "askuser" }
+
+// OnStart 自动注册 ask_user 工具。仍导出 Tool() 以便显式装配。
+func (h *Hook) OnStart(_ context.Context, state *types.LoopState) error {
+	state.Tools.Register(Tool())
+	return nil
+}
 
 func (h *Hook) OnToolStart(ctx context.Context, state *types.LoopState, call *types.ToolCall) (hook.Action, error) {
 	if call.Name != ToolName {
@@ -62,6 +69,7 @@ func answerAction(a Answer) hook.Action {
 
 // Tool 返回 ask_user 壳工具：仅提供 schema 供模型发现，
 // 真正的"执行体"是 Hook 拦截后等用户回答，Invoke 不会被走到。
+// hook 已在 OnStart 自动注册本工具，通常无需手动调用。
 func Tool() types.Tool { return tool{} }
 
 type tool struct{}
