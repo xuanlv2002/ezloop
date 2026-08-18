@@ -77,6 +77,11 @@ type chatMessage struct {
 	Content    string         `json:"content"`
 	ToolCalls  []chatToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string         `json:"tool_call_id,omitempty"`
+
+	// ReasoningContent 是推理模型（DeepSeek R1 / OpenAI o 系列兼容端点）返回的
+	// 思考过程，仅出现在响应侧；toChatMessages 从 types.Message 构造请求时
+	// 不填它（协议要求请求不回传 reasoning）。
+	ReasoningContent string `json:"reasoning_content,omitempty"`
 }
 
 type chatTool struct {
@@ -112,6 +117,28 @@ type chatResponse struct {
 type chatUsage struct {
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`
+	// 缓存命中两套字段：OpenAI prompt_tokens_details.cached_tokens、
+	// DeepSeek prompt_cache_hit_tokens，取非零者。
+	PromptTokensDetails *struct {
+		CachedTokens int `json:"cached_tokens"`
+	} `json:"prompt_tokens_details,omitempty"`
+	PromptCacheHitTokens int `json:"prompt_cache_hit_tokens"`
+}
+
+// toUsage 把协议用量映射到 types.Usage。
+func toUsage(u *chatUsage) types.Usage {
+	if u == nil {
+		return types.Usage{}
+	}
+	cached := u.PromptCacheHitTokens
+	if cached == 0 && u.PromptTokensDetails != nil {
+		cached = u.PromptTokensDetails.CachedTokens
+	}
+	return types.Usage{
+		PromptTokens:     u.PromptTokens,
+		CompletionTokens: u.CompletionTokens,
+		CachedTokens:     cached,
+	}
 }
 
 type streamChunk struct {
@@ -164,7 +191,7 @@ func toChatTools(tools []types.Tool) []chatTool {
 }
 
 func fromChatMessage(msg chatMessage, usage types.Usage) *types.ModelResponse {
-	resp := &types.ModelResponse{Content: msg.Content, Usage: usage}
+	resp := &types.ModelResponse{Content: msg.Content, Reasoning: msg.ReasoningContent, Usage: usage}
 	for _, tc := range msg.ToolCalls {
 		args := json.RawMessage(tc.Function.Arguments)
 		if len(args) == 0 {
@@ -253,10 +280,7 @@ func (p *Provider) Invoke(ctx context.Context, req *types.ModelRequest) (*types.
 	if len(out.Choices) == 0 {
 		return nil, fmt.Errorf("openai: empty choices")
 	}
-	usage := types.Usage{}
-	if out.Usage != nil {
-		usage = types.Usage{PromptTokens: out.Usage.PromptTokens, CompletionTokens: out.Usage.CompletionTokens}
-	}
+	usage := toUsage(out.Usage)
 	return fromChatMessage(out.Choices[0].Message, usage), nil
 }
 
@@ -305,15 +329,20 @@ func (p *Provider) Stream(ctx context.Context, req *types.ModelRequest, onChunk 
 			return nil, fmt.Errorf("openai: decode chunk %q: %w", payload, err)
 		}
 		if chunk.Usage != nil {
-			final.Usage = types.Usage{
-				PromptTokens:     chunk.Usage.PromptTokens,
-				CompletionTokens: chunk.Usage.CompletionTokens,
-			}
+			final.Usage = toUsage(chunk.Usage)
 		}
 		if len(chunk.Choices) == 0 {
 			continue
 		}
 		delta := chunk.Choices[0].Delta
+		if delta.ReasoningContent != "" {
+			final.Reasoning += delta.ReasoningContent
+			if onChunk != nil {
+				if err := onChunk(types.ModelChunk{ReasoningDelta: delta.ReasoningContent}); err != nil {
+					return nil, err
+				}
+			}
+		}
 		if delta.Content != "" {
 			final.Content += delta.Content
 			if onChunk != nil {

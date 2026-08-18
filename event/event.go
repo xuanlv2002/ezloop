@@ -8,15 +8,18 @@ import (
 type EventType string
 
 const (
-	EventLoopStart    EventType = "loop_start"
-	EventLoopEnd      EventType = "loop_end"
-	EventModelStart   EventType = "model_start"
-	EventModelChunk   EventType = "model_chunk"
-	EventModelEnd     EventType = "model_end"
-	EventToolStart    EventType = "tool_start"
-	EventToolEnd      EventType = "tool_end"
-	EventIterationEnd EventType = "iteration_end"
-	EventError        EventType = "error"
+	EventLoopStart  EventType = "loop_start"
+	EventLoopEnd    EventType = "loop_end"
+	EventModelStart EventType = "model_start"
+	EventModelChunk EventType = "model_chunk"
+	EventModelEnd   EventType = "model_end"
+	// EventReasoningChunk 流式思考过程增量（推理模型的 reasoning_content），
+	// data 为 string，与 EventModelChunk 分开透出。
+	EventReasoningChunk EventType = "reasoning_chunk"
+	EventToolStart      EventType = "tool_start"
+	EventToolEnd        EventType = "tool_end"
+	EventIterationEnd   EventType = "iteration_end"
+	EventError          EventType = "error"
 	// EventStreamFallback 警告：WithStreaming(true) 但 Provider（或其 Warp 链）
 	// 未实现 StreamProvider，已降级为非流式调用。
 	EventStreamFallback EventType = "stream_fallback"

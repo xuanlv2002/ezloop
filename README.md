@@ -207,7 +207,8 @@ sequenceDiagram
 |---|---|---|
 | `ext/fs` | 底座 | FileSystem 核心（Read/Write/List）+ 可选能力 Modifier（Edit/ApplyPatch）、Searcher（Grep/Find）；Local 实现全部能力（root 沙箱、补丁预检+回滚） |
 | `ext/provider/openai` | model | OpenAI 兼容 Provider（Invoke + SSE 流式），兼容 DeepSeek/SiliconFlow/Ollama/vLLM |
-| `ext/warp/model/modelretry` | warp | 模型重试：指数退避，流式仅在未发出 chunk 时重试 |
+| `ext/warp/model/modelretry` | warp | 模型重试：指数退避，流式仅在未发出 chunk 时重试（裸用引擎无内置重试，生产建议挂载） |
+| `ext/warp/tool/limit` | warp | 工具并发闸：跨全部工具共享信号量，限制一轮 fan-out 的实际并发数，保护外部资源 |
 | `ext/warp/tool/safetool` | warp | 工具防护：panic 恢复 + error 附加上下文 |
 | `ext/hook/offload` | hook | 大结果卸载：超阈值写入 FS，上下文只留摘要+路径 |
 | `ext/hook/mcp` | hook | mcpRouter 单工具封装（schema 恒定、KV cache 友好、配置热加载），内置官方 go-sdk |

@@ -125,6 +125,7 @@ func (a *Agent) Run(ctx context.Context, input string, runOpts ...RunOption) (st
 			Role:      types.RoleAssistant,
 			Content:   resp.Content,
 			ToolCalls: resp.ToolCalls,
+			Reasoning: resp.Reasoning,
 		})
 		a.emit(state, event.EventModelEnd, resp)
 
@@ -334,7 +335,12 @@ func (a *Agent) callModel(ctx context.Context, model provider.ModelProvider, sta
 	if a.streaming {
 		if sp, ok := model.(provider.StreamProvider); ok {
 			return sp.Stream(ctx, req, func(c types.ModelChunk) error {
-				a.emit(state, event.EventModelChunk, c.ContentDelta)
+				if c.ReasoningDelta != "" {
+					a.emit(state, event.EventReasoningChunk, c.ReasoningDelta)
+				}
+				if c.ContentDelta != "" {
+					a.emit(state, event.EventModelChunk, c.ContentDelta)
+				}
 				return nil
 			})
 		}

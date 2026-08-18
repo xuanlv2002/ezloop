@@ -32,7 +32,7 @@ func TestTaskPlanDecisions(t *testing.T) {
 					testutil.ToolCalls(testutil.Call("1", ToolName, `{"plan":"step1; step2"}`)),
 					testutil.Text("done"),
 				),
-						core.WithHooks(h),
+				core.WithHooks(h),
 			).Run(context.Background(), "build")
 			if err != nil {
 				t.Fatalf("err: %v", err)

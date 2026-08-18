@@ -3,13 +3,16 @@
 // 能力清单：
 //
 //	Provider   openai（.env / 环境变量配置，SiliconFlow/DeepSeek/Ollama 兼容）
-//	Warp       modelretry（模型重试）· safetool（panic 防护）· offload（大结果卸载）
+//	           流式接收正文与思考过程（reasoning_content，推理模型可见）
+//	Warp       modelretry（模型重试）· limit（工具并发闸）· safetool（panic 防护）
 //	Hook       filetools（read/write/edit/grep/find + bash）
 //	           approve（工具审批）· askuser（模型提问）· taskplan（规划确认）
 //	           —— 三者同构：channel 决策中断，CLI 桥接 stdin
+//	           task（并行分身：fork 当前 Agent 干子任务，过程隔离、结果回传，
+//	             事件与 session 按 taskId 区分，分身内审批/提问照常工作）
 //	           skill（从 skills/*.md 按需注入）· summary（每轮结束自动摘要）
-//	           localsession（会话持久化，/resume 恢复）
-//	交互       流式输出 · Ctrl+C 取消当轮
+//	           localsession（会话持久化，/resume 恢复；分身写独立 session 可回放）
+//	交互       流式输出（正文+思考）· 分身输出带 ⟨task-N⟩ 标记 · Ctrl+C 取消当轮
 //	命令       /new /sessions /resume <id> /exit
 //
 // 运行：cp .env.example .env && go run ./examples/chat
@@ -38,9 +41,11 @@ import (
 	"github.com/xuanlv2002/ezloop/ext/hook/offload"
 	"github.com/xuanlv2002/ezloop/ext/hook/skill"
 	"github.com/xuanlv2002/ezloop/ext/hook/summary"
+	"github.com/xuanlv2002/ezloop/ext/hook/task"
 	"github.com/xuanlv2002/ezloop/ext/hook/taskplan"
 	"github.com/xuanlv2002/ezloop/ext/provider/openai"
 	"github.com/xuanlv2002/ezloop/ext/warp/model/modelretry"
+	"github.com/xuanlv2002/ezloop/ext/warp/tool/limit"
 	"github.com/xuanlv2002/ezloop/ext/warp/tool/safetool"
 	"github.com/xuanlv2002/ezloop/types"
 )
@@ -142,10 +147,14 @@ func main() {
 		APIKey:  os.Getenv("OPENAI_API_KEY"),
 		Model:   env("EZLOOP_MODEL", "deepseek-ai/DeepSeek-V3.2"),
 	})
+	// task 分身 hook：需在 NewAgent 之后 Bind(agent)。
+	taskHook := task.New()
 	agent := core.NewAgent(p,
-		core.WithSystemPrompt("你是 ezloop 驱动的命令行助手。能用工具就用工具，回答简洁。"),
+		core.WithSystemPrompt("你是 ezloop 驱动的命令行助手。能用工具就用工具，回答简洁。"+
+			" 可并行的子任务用 task 工具分身去做。"),
 		core.WithModelWarp(modelretry.Warp()),
-		core.WithToolWarp(safetool.Warp()),
+		// 并发闸在外（先排队再进防护），一轮 fan-out 再多也不打挂外部资源。
+		core.WithToolWarp(limit.Warp(4), safetool.Warp()),
 		core.WithHooks(
 			contextfix.New(), // 历史进入引擎前先修理（/resume 旧存档防悬空 tool_call）
 			offload.New(fsys),
@@ -154,6 +163,7 @@ func main() {
 			approver,
 			asker,
 			planner,
+			taskHook,
 			summary.New(p, ""),
 			session,
 		),
@@ -163,11 +173,17 @@ func main() {
 		core.WithOnEvent(func(e event.Event) {
 			switch e.Type {
 			case event.EventModelChunk:
-				fmt.Print(e.Data.(string))
+				fmt.Print(streamTag(e) + e.Data.(string))
+			case event.EventReasoningChunk: // 推理模型的思考过程，与正文分路透出
+				fmt.Print(streamTag(e) + e.Data.(string))
 			case event.EventToolStart:
 				fmt.Printf("\n🔧 %s ", e.Data.(*types.ToolCall).Name)
 			case event.EventIterationEnd:
 				fmt.Printf("\n── 迭代 %d ──\n", e.Iteration)
+			case task.EventStart:
+				fmt.Printf("\n🧀 分身 %s 启动", e.TaskID)
+			case task.EventEnd:
+				fmt.Printf("\n🧀 分身 %s 完成", e.TaskID)
 			case approve.EventRequest:
 				call := e.Data.(*types.ToolCall)
 				go func() { // 判定段并发，CLI 桥用 askMu 串行化提问
@@ -203,6 +219,8 @@ func main() {
 			}
 		}),
 	)
+
+	taskHook.Bind(agent) // 分身复刻主 Agent，组装完成后绑定
 
 	fmt.Println("ezloop 完整 agent 已启动（Ctrl+C 取消当轮；命令：/new /sessions /resume <id> /exit）")
 	fmt.Printf("会话 ID: %s\n", session.ID())
@@ -264,7 +282,10 @@ func main() {
 		cancelTurn()
 
 		history = state.Messages
-		fmt.Printf("\n[%s · %d 迭代 · 会话 %s]", state.StopReason, state.Iteration, session.ID())
+		fmt.Printf("\n[%s · %d 迭代 · %d→%d tokens（缓存命中 %d）· 会话 %s]",
+			state.StopReason, state.Iteration,
+			state.Usage.PromptTokens, state.Usage.CompletionTokens,
+			state.Usage.CachedTokens, session.ID())
 		if s, ok := state.Metadata["summary"].(string); ok && s != "" {
 			fmt.Printf("\n📝 摘要: %s", s)
 		}
@@ -281,6 +302,27 @@ func send[T any](ctx context.Context, ch chan<- T, v T) {
 	case ch <- v:
 	case <-ctx.Done():
 	}
+}
+
+// streamTag 在流式输出切换归属（主循环 ↔ 分身）时打一次行首标记：
+// 分身输出带 ⟨task-N⟩ 前缀，回到主循环换行分隔。事件回调可能并发
+// （多个分身同时流式），用锁保护 lastTask。
+var (
+	streamMu sync.Mutex
+	lastTask string
+)
+
+func streamTag(e event.Event) string {
+	streamMu.Lock()
+	defer streamMu.Unlock()
+	if e.TaskID == lastTask {
+		return ""
+	}
+	lastTask = e.TaskID
+	if e.TaskID == "" {
+		return "\n"
+	}
+	return "\n⟨" + e.TaskID + "⟩ "
 }
 
 // nowTool 获取当前时间。

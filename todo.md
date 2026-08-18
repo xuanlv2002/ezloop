@@ -31,50 +31,48 @@
 
 ---
 
-## 二、待办（按优先级）
+## 二、待办（按优先级，2026-08-18 评审后更新）
 
-### P0 — 会随规模真实翻车，建议优先处理
+### 已完成
 
-- [ ] **收紧 `LoopState` 的共享可变性**
-  - 现状：每个 hook 拿到 `*LoopState` 读写任意字段，`Metadata map[string]any`
-    是无类型杂物箱（`types/state.go:29`），所有权/顺序无编译期保证，并发安全
-    全靠注释约定；`OnToolStart/OnToolEnd` 并发 + 写 `Metadata` 是最大雷区。
-  - 方向（二选一或组合）：
-    1. 给 `OnToolStart/OnToolEnd` 一个只读视角（编译器可见约束），把写路径收窄；
-    2. 把 `Metadata` 换成带锁分片，或提供 `Set/Get` 方法统一并发访问。
-  - **Why**：hook 一旦变多，这里是 bug 的聚集地，也是当前架构唯一会规模化翻车的隐患。
-- [ ] **给工具 fan-out 加并发上限**
-  - 现状：`HyperParams` 注释明写「调用数即并发数，不可配」（`core/agent.go:20-21`、
-    `core/loop.go:288-298`）。模型一次吐 50 个 tool call 就是 50 个 goroutine 直接打后端。
-  - 问题：这个并发发生在**引擎里、跨多个调用**，单个 tool warp 很难优雅限这个流。
-  - **Why**：生产里 rate-limit / DB 连接耗尽 / 外呼风暴的直接来源，且不能靠换 warp 补。
+- [x] **工具 fan-out 并发闸**（原 P0-2，2026-08-18 以 `ext/warp/tool/limit` 落地）
+  - 评审更正：原判断「不能靠换 warp 补」不成立——`WithToolWarp` 的 factory 闭包
+    在每次 Run 内跨全部工具共享，信号量 warp 恰好就是全局闸。`limit.Warp(n)`
+    挂一次覆盖静态注册与 hook 运行时注入的全部工具，引擎保持零改动。
+  - 残留（不修）：warp 挡不住 hook 侧的并发弹窗（50 个审批同时到达）——那是
+    渲染层聚合问题，不是资源问题。
+- [x] **`Usage` 补 cache token**（原 P1-2，2026-08-18）
+  - `types.Usage.CachedTokens`；openai Provider 同时解析 OpenAI
+    `prompt_tokens_details.cached_tokens` 与 DeepSeek `prompt_cache_hit_tokens`。
+  - 成本字段不加：价格是外部知识，由使用方按价目表算。
+- [x] **模型错误分类**（原 P1-1，按文档路径解决）
+  - 设计本身是对的（重试留在 warp 层，`HTTPError.Retryable()` 是解耦契约），
+    引擎内置重试反而破坏「扩展不入核」。已在 README modelretry 条目写明
+    「裸用引擎无内置重试，生产建议挂载」。
+- [x] **fork 工具继承的不对称性**（原 P2-2，按文档路径解决）
+  - 机制修复不成比例（Fork 保留 toolWarps 会双重包装；task hook 拿不到主 warp 链）。
+    已在 `task.WithTools` 注释写明：注入工具不带主循环 warp，需要防护自行包装。
+- [x] **reasoning 支持**（2026-08-18 顺手补，非本表原条目）
+  - 推理模型思考过程此前被 Provider 整个丢弃。现链路：`reasoning_content` →
+    `ModelResponse.Reasoning` / 流式 `ReasoningDelta`（`EventReasoningChunk`）→
+    入史 `Message.Reasoning`（持久化回放可见）；请求侧不回传（协议要求）。
 
-### P1 — 核心韧性，裸用会踩
+### P0 — 会随规模真实翻车（当前挂起，附触发条件）
 
-- [ ] **核心 loop 的模型错误处理加区分**
-  - 现状：模型错误直接 `fail()` → `StopError`（`core/loop.go:118-120, 384-392`），
-    无 transient/permanent 区分、无内置重试，重试全推给 `modelretry` warp。
-  - **Why**：符合「扩展不入核」哲学，但裸 `NewAgent(p).Run()` 对一次抖动整体失败。
-  - 方向：要么在 `ModelProvider` 上定义错误分类（`IsRetryable` 之类），要么明确文档
-    「生产必挂 modelretry」，二选一，不要默默接受现状。
-- [ ] **`Usage` 补齐字段**
-  - 现状：只有 `PromptTokens`/`CompletionTokens`（`types/message.go:35-38`），
-    无 cache token、无成本；fork 用量靠 hook 手动 `accumulateUsage`（`task.go:204-209`）。
-  - **Why**：成本核算/配额是生产硬需求；手动累加是易忘约定。
+- [ ] **收紧 `LoopState` 的共享可变性**（挂起）
+  - 现状：hook 拿 `*LoopState` 读写任意字段，`Metadata` 并发安全全靠注释约定
+    （`types/state.go`）。**评审结论：现有 hook 无一在并发回调里写 Metadata**
+    （offload 改 result，localsession/summary 在串行 OnEnd），是「未来的雷」
+    而非「现在的雷」；只读视角方案会把 7 个小接口翻倍，违背「接口够简单」。
+  - 触发条件：第一个需要在 OnToolStart/OnToolEnd 里共享数据的 hook 出现时，
+    再做带锁 `MetaSet/MetaGet`（否决只读视角，否决全员付税的锁分片）。
 
-### P2 — 会限制长期演进，现在记录、择机处理
+### P2 — 会限制长期演进（挂起，等多模态真需求）
 
-- [ ] **工具接口去字符串化**
-  - 现状：`Invoke(ctx, json.RawMessage) (string, error)`（`types/tool.go:10-15`），
-    结果/错误/内容全部退化成 string；且 `ToolResult.Err` 是 `error`（不可序列化）
-    而 `Message.Err` 是 `string`，同一件事两个表示。
-  - **Why**：要做多模态 / 结构化输出 / typed tool result 时这个接口得重设计，
-    越晚动，波及的扩展越多。
-- [ ] **fork 工具继承的不对称性**
-  - 现状：`Fork` 清掉 `toolWarps` 是因为继承工具已包装过（`core/fork.go`），
-    但 `task.WithTools` 注入的额外工具没走主循环 warp 链（`task.go:166-174`），
-    fork 专属工具会跳过防护/审计。目前未在文档点出。
-  - 方向：要么把额外工具也过一遍主循环 warp，要么在 `WithTools` 文档里明确这个限制。
+- [ ] **工具接口去字符串化**（挂起）
+  - `Invoke` 结果退化成 string、`ToolResult.Err`(error) 与 `Message.Err`(string)
+    二元表示，都真；但只有做多模态 / 结构化输出时才值得动——波及全部扩展，
+    YAGNI。届时 Err 二元性可顺手统一。
 
 ---
 
@@ -88,9 +86,12 @@
 
 ## 四、下一步最值钱的投入
 
-不是再加 hook / warp，而是：
+2026-08-18 评审后修正：原 P0 两条中，fan-out 并发闸已以 `ext/warp/tool/limit`
+落地（不需要引擎改动）；Metadata 收敛挂起等触发条件。当前结论：
 
-1. **收紧 `LoopState` 共享可变性**（P0-1）——把正确性从注释升级成约束；
-2. **引擎层补 tool fan-out 并发闸**（P0-2）。
+1. **不是再加 hook / warp**——现有 7 个 hook 的语义与并发约束优先收敛；
+2. P0-1（Metadata）等第一个真实并发写需求的 hook 出现再动，届时做带锁
+   `MetaSet/MetaGet`，不做只读视角；
+3. 多模态需求出现时再启动工具接口去字符串化（P2）。
 
-这两点是当前架构下仅有的、会随着规模真实翻车的隐患，其余都能靠扩展层补。
+正确性从注释升级成约束的方向不变，但时机跟着真实需求走，不预支复杂度。

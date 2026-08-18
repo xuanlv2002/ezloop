@@ -57,6 +57,8 @@ type Options struct {
 type Option func(*Options)
 
 // WithTools 注入 fork 专属工具（额外工具，或 InheritTools=false 时的唯一工具集）。
+// 注意：注入的工具不经过主循环 tool warp 链（继承的工具已带 warp 壳，为避免
+// 双重包装 fork 不再包装），需要防护/审计请自行包装后再传入。
 func WithTools(t ...types.Tool) Option { return func(o *Options) { o.Tools = append(o.Tools, t...) } }
 
 // WithInheritTools 控制是否继承主 Agent 当前 state 的工具（默认 true）。
