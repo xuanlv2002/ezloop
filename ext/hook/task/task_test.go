@@ -32,14 +32,14 @@ func TestTaskForkReturnsResult(t *testing.T) {
 	)
 
 	var sawStart, sawEnd bool
-	var taskIDs []string
+	var forkIDs []string
 	state, err := withTask(
 		p,
 		core.WithOnEvent(func(e event.Event) {
 			switch e.Type {
 			case EventStart:
 				sawStart = true
-				taskIDs = append(taskIDs, e.TaskID)
+				forkIDs = append(forkIDs, e.ForkID)
 			case EventEnd:
 				sawEnd = true
 			}
@@ -54,8 +54,8 @@ func TestTaskForkReturnsResult(t *testing.T) {
 	if !sawStart || !sawEnd {
 		t.Fatalf("events start=%v end=%v", sawStart, sawEnd)
 	}
-	if len(taskIDs) != 1 || taskIDs[0] == "" {
-		t.Fatalf("task.start should carry taskId: %v", taskIDs)
+	if len(forkIDs) != 1 || forkIDs[0] == "" {
+		t.Fatalf("task.start should carry forkID: %v", forkIDs)
 	}
 	if state.Messages[2].Role != types.RoleTool || state.Messages[2].ToolCallID != "1" {
 		t.Fatalf("msg shape: %+v", state.Messages[2])
@@ -173,10 +173,10 @@ func TestTaskAccumulatesUsage(t *testing.T) {
 	}
 }
 
-// 并发：同一轮多个 task 调用并行 fork，各自带独立 taskId。
+// 并发：同一轮多个 task 调用并行 fork，各自带独立 forkID。
 func TestTaskForksConcurrently(t *testing.T) {
 	var mu sync.Mutex
-	taskIDs := map[string]bool{}
+	forkIDs := map[string]bool{}
 	state, err := withTask(
 		&twoForkProvider{},
 		core.WithOnEvent(func(e event.Event) {
@@ -184,7 +184,7 @@ func TestTaskForksConcurrently(t *testing.T) {
 				return
 			}
 			mu.Lock()
-			taskIDs[e.TaskID] = true
+			forkIDs[e.ForkID] = true
 			mu.Unlock()
 		}),
 	).Run(context.Background(), "delegate")
@@ -194,8 +194,8 @@ func TestTaskForksConcurrently(t *testing.T) {
 	if state.StopReason != types.StopCompleted {
 		t.Fatalf("stop: %s", state.StopReason)
 	}
-	if len(taskIDs) != 2 {
-		t.Fatalf("want 2 distinct fork taskIds, got %v", taskIDs)
+	if len(forkIDs) != 2 {
+		t.Fatalf("want 2 distinct forkIDs, got %v", forkIDs)
 	}
 	// 两个 task 调用各自拿到结果。
 	toolMsgs := 0

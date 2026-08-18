@@ -35,7 +35,7 @@ func (h *skipTool) OnToolStart(_ context.Context, _ *types.LoopState, call *type
 	return hook.Proceed, nil
 }
 
-// emitOnModelEnd 在子循环里经 state.EmitEvent 发自定义事件，验证 hook 事件也带 TaskID。
+// emitOnModelEnd 在子循环里经 state.EmitEvent 发自定义事件，验证 hook 事件也带 ForkID。
 type emitOnModelEnd struct{}
 
 func (emitOnModelEnd) Name() string { return "emitOnModelEnd" }
@@ -74,9 +74,9 @@ func TestForkInheritsToolStartHook(t *testing.T) {
 	}
 }
 
-// 事件带身份：主循环事件 TaskID 为空，fork 子循环内引擎事件与 hook 经
-// EmitEvent 发的事件一律带上 taskID。
-func TestForkEventsCarryTaskID(t *testing.T) {
+// 事件带身份：主循环事件 ForkID 为空，fork 子循环内引擎事件与 hook 经
+// EmitEvent 发的事件一律带上 forkID。
+func TestForkEventsCarryForkID(t *testing.T) {
 	var mu sync.Mutex
 	var events []event.Event
 	collect := func(e event.Event) {
@@ -96,8 +96,8 @@ func TestForkEventsCarryTaskID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fork: %v", err)
 	}
-	if sub.TaskID != "task-9" {
-		t.Fatalf("sub.TaskID: %q", sub.TaskID)
+	if sub.ForkID != "task-9" {
+		t.Fatalf("sub.ForkID: %q", sub.ForkID)
 	}
 
 	mu.Lock()
@@ -105,15 +105,15 @@ func TestForkEventsCarryTaskID(t *testing.T) {
 	inFork := false
 	sawCustom := false
 	for _, e := range events {
-		if e.TaskID == "task-9" {
+		if e.ForkID == "task-9" {
 			inFork = true
 			if e.Type == "forktest.custom" {
 				sawCustom = true
 			}
 			continue
 		}
-		if e.TaskID != "" {
-			t.Fatalf("unexpected taskId %q on %s", e.TaskID, e.Type)
+		if e.ForkID != "" {
+			t.Fatalf("unexpected forkID %q on %s", e.ForkID, e.Type)
 		}
 	}
 	if !inFork || !sawCustom {

@@ -60,7 +60,7 @@ func TestSessionRoundtrip(t *testing.T) {
 	}
 }
 
-// fork 分流：子循环（TaskID 非空）写独立 <主ID>-<taskID>.json，
+// fork 分流：子循环（ForkID 非空）写独立 <主ID>-<forkID>.json，
 // 与主会话互不覆盖，Load 可回放分身的完整过程。
 func TestForkSessionSplit(t *testing.T) {
 	fsys := fs.NewLocal(t.TempDir())

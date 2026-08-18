@@ -9,7 +9,7 @@
 //	           approve（工具审批）· askuser（模型提问）· taskplan（规划确认）
 //	           —— 三者同构：channel 决策中断，CLI 桥接 stdin
 //	           task（并行分身：fork 当前 Agent 干子任务，过程隔离、结果回传，
-//	             事件与 session 按 taskId 区分，分身内审批/提问照常工作）
+//	             事件与 session 按 forkID 区分，分身内审批/提问照常工作）
 //	           skill（从 skills/*.md 按需注入）
 //	           localsession（会话持久化，/resume 恢复；分身写独立 session 可回放）
 //	交互       流式输出（正文+思考）· 分身输出带 ⟨task-N⟩ 标记 · Ctrl+C 取消当轮
@@ -191,9 +191,9 @@ func main() {
 			case event.EventIterationEnd:
 				sb.now(fmt.Sprintf("\n── 迭代 %d ──\n", e.Iteration))
 			case task.EventStart:
-				sb.now(fmt.Sprintf("\n🧀 分身 %s 启动", e.TaskID))
+				sb.now(fmt.Sprintf("\n🧀 分身 %s 启动", e.ForkID))
 			case task.EventEnd:
-				sb.now(fmt.Sprintf("\n🧀 分身 %s 完成", e.TaskID))
+				sb.now(fmt.Sprintf("\n🧀 分身 %s 完成", e.ForkID))
 			case approve.EventRequest:
 				call := e.Data.(*types.ToolCall)
 				go func() { // 判定段并发，CLI 桥用 askMu 串行化提问
@@ -372,14 +372,14 @@ var (
 func streamTag(e event.Event) string {
 	streamMu.Lock()
 	defer streamMu.Unlock()
-	if e.TaskID == lastTask {
+	if e.ForkID == lastTask {
 		return ""
 	}
-	lastTask = e.TaskID
-	if e.TaskID == "" {
+	lastTask = e.ForkID
+	if e.ForkID == "" {
 		return "\n"
 	}
-	return "\n⟨" + e.TaskID + "⟩ "
+	return "\n⟨" + e.ForkID + "⟩ "
 }
 
 // nowTool 获取当前时间。

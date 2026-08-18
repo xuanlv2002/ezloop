@@ -76,17 +76,17 @@ func (h *Hook) Name() string { return "localsession" }
 func (h *Hook) Path() string { return h.dir + "/" + h.id + ".json" }
 
 // OnEnd 持久化快照；失败不阻断主流程（写入错误记入 Metadata）。
-// fork 子循环（state.TaskID 非空）写入独立文件 <主ID>-<taskID>.json：
+// fork 子循环（state.ForkID 非空）写入独立文件 <主ID>-<forkID>.json：
 // 并行分身各写各的，互不覆盖，Load/List 可回放；主循环不受影响。
 // 分身快照只存增量（剥离 seed）：seed 是主上下文的逐字节重复，主文件
 // 里本就有，全量落盘会让存储随主上下文长度 × 分身数放大。
 func (h *Hook) OnEnd(_ context.Context, state *types.LoopState) error {
 	id := h.id
-	if state.TaskID != "" {
-		id = h.id + "-" + state.TaskID
+	if state.ForkID != "" {
+		id = h.id + "-" + state.ForkID
 	}
 	msgs := state.Messages
-	if state.TaskID != "" && state.SeedLen > 0 && state.SeedLen <= len(msgs) {
+	if state.ForkID != "" && state.SeedLen > 0 && state.SeedLen <= len(msgs) {
 		msgs = msgs[state.SeedLen:]
 	}
 	snap := Session{

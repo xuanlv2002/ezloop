@@ -30,21 +30,22 @@ type Event struct {
 	Type      EventType
 	Timestamp time.Time
 	Iteration int
-	// TaskID 标识事件所属的 fork 子循环（core.Fork）；主循环事件为空串。
-	// 工具并发、fork 也并发，消费方以 TaskID 区分同一时刻多个 fork 的事件归属。
-	TaskID string
+	// ForkID 标识事件所属的 fork 子循环（core.Fork）；主循环事件为空串。
+	// 工具并发、fork 也并发，消费方以 ForkID 区分同一时刻多个 fork 的事件归属。
+	// 命名归属 fork 原语本身，发起 fork 的工具（如 task）只是使用者。
+	ForkID string
 	Data   any
 }
 
 func (e Event) String() string {
-	task := ""
-	if e.TaskID != "" {
-		task = " task=" + e.TaskID
+	fork := ""
+	if e.ForkID != "" {
+		fork = " fork=" + e.ForkID
 	}
 	if e.Data == nil {
-		return fmt.Sprintf("[%s]%s iter=%d", e.Type, task, e.Iteration)
+		return fmt.Sprintf("[%s]%s iter=%d", e.Type, fork, e.Iteration)
 	}
-	return fmt.Sprintf("[%s]%s iter=%d data=%v", e.Type, task, e.Iteration, e.Data)
+	return fmt.Sprintf("[%s]%s iter=%d data=%v", e.Type, fork, e.Iteration, e.Data)
 }
 
 type OnEvent func(Event)

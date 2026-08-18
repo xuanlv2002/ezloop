@@ -23,10 +23,10 @@ type LoopState struct {
 	LastResponse *ModelResponse
 	Usage        Usage
 
-	// TaskID 非空表示这是 fork 子循环（core.Fork）的状态：事件与持久化
+	// ForkID 非空表示这是 fork 子循环（core.Fork）的状态：事件与持久化
 	// 据此区分归属——引擎发出的事件带上它，hook（如 localsession）按它
 	// 分流；主循环为空串。
-	TaskID string
+	ForkID string
 
 	// SeedLen 是 fork 子循环携带的上下文快照长度（Messages 前 SeedLen 条
 	// 为 seed，来自主循环）。持久化层据此剥离 seed 只存分身增量（seed 与
@@ -62,7 +62,7 @@ func (s *LoopState) EmitEvent(typ event.EventType, data any) {
 		Type:      typ,
 		Timestamp: time.Now(),
 		Iteration: s.Iteration,
-		TaskID:    s.TaskID,
+		ForkID:    s.ForkID,
 		Data:      data,
 	})
 }
