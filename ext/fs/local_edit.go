@@ -52,7 +52,6 @@ func (l Local) ApplyPatch(ctx context.Context, ops []PatchOp) error {
 	if len(ops) == 0 {
 		return fmt.Errorf("fs: empty patch")
 	}
-	// 预检。
 	originals := make([][]byte, len(ops))
 	for i, op := range ops {
 		if op.Path == "" || op.OldText == "" {

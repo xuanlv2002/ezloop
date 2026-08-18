@@ -222,120 +222,13 @@
   .tip.warn { border-left-color: var(--hook); background: rgba(251,191,36,.07); color: #e8dcc0; }
   .tip.warn b { color: var(--hook); }
 
-  /* ─── 架构图卡片 ─── */
+  /* ─── mermaid 架构图 ─── */
   .diagram-card {
-    border: 1px solid var(--border-soft); border-radius: 14px; padding: 20px 12px 8px;
-    background: var(--bg-soft); margin: 18px 0 10px;
+    border: 1px solid var(--border-soft); border-radius: 14px; padding: 16px 8px 4px;
+    background: var(--bg-soft); margin: 18px 0 10px; overflow-x: auto;
   }
-  .diagram-card svg { width: 100%; height: auto; display: block; }
-
-  /* ─── 架构图：HTML 流式布局（flex 自动对齐，无绝对坐标）─── */
-  .flow { border: 1px solid var(--border-soft); border-radius: 14px; padding: 20px 18px 14px; background: var(--bg-soft); margin: 18px 0 10px; }
-  .flow-asm { border: 1px dashed #6d5bb0; background: rgba(167,139,250,.07); border-radius: 12px; padding: 14px 10px 12px; }
-  .flow-asm-title { text-align: center; font-weight: 700; color: #c4b5fd; font-size: 14.5px; margin-bottom: 12px; }
-  .flow-pills { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
-  .pill { background: rgba(167,139,250,.14); border: 1px solid #8b76d9; border-radius: 999px; padding: 5px 18px; text-align: center; }
-  .pill code { color: #ddd3fc; font-size: 12.5px; }
-  .pill span { display: block; font-size: 10.5px; color: #9d8fd0; margin-top: 1px; }
-  .fa-v { width: 1.6px; height: 24px; background: #475569; position: relative; margin: 5px auto; }
-  .fa-v::after { content: ''; position: absolute; bottom: -1px; left: -3.7px; border-top: 7px solid #64748b; border-left: 4.5px solid transparent; border-right: 4.5px solid transparent; }
-  .fa-v.dashed { background: repeating-linear-gradient(180deg, #64748b 0 4px, transparent 4px 8px); }
-  .flow-note { text-align: center; font-size: 11.5px; color: var(--muted); }
-  .flow-engine { border: 1px solid #263449; background: rgba(255,255,255,.018); border-radius: 12px; padding: 14px 12px 12px; }
-  .flow-engine-title { font-size: 13px; font-weight: 700; color: #9fb0c8; margin-bottom: 10px; padding-left: 4px; }
-  .flow-loop { border: 1.5px dashed #64748b; border-radius: 10px; padding: 18px 10px 10px; position: relative; margin-top: 8px; }
-  .flow-loop-label { position: absolute; top: -9px; left: 14px; background: var(--bg-soft); padding: 0 8px; font-size: 11.5px; color: #8b98b0; font-weight: 600; }
-  .flow-row, .branch-row { display: flex; align-items: center; gap: 8px; }
-  .flow-branches { margin-top: 12px; display: flex; flex-direction: column; gap: 10px; padding-left: 4px; }
-  .fa { flex: 1; height: 1.6px; background: #475569; position: relative; min-width: 18px; }
-  .fa::after { content: ''; position: absolute; right: -1px; top: -3.7px; border-left: 7px solid #64748b; border-top: 4.5px solid transparent; border-bottom: 4.5px solid transparent; }
-  .hpin { display: flex; flex-direction: column; align-items: center; gap: 3px; flex: none; }
-  .hpin .dot { width: 20px; height: 20px; border-radius: 50%; background: var(--hook); color: #0b1322; font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
-  .hpin .lbl { font-size: 10.5px; color: #fcd34d; font-weight: 600; white-space: nowrap; text-align: center; line-height: 1.3; }
-  .hpin .lbl small { display: block; color: #9d8460; font-weight: 500; font-size: 9.5px; }
-  .node { border-radius: 10px; padding: 9px 14px; text-align: center; font-weight: 700; font-size: 13.5px; flex: none; }
-  .node small { display: block; font-weight: 400; font-size: 10px; opacity: .85; margin-top: 2px; }
-  .node-model { background: var(--model); color: #04222b; }
-  .node-tool { background: var(--tool); color: #03291d; }
-  .node-branch { background: rgba(251,191,36,.1); border: 1px solid #ca8a04; color: #fde68a; font-size: 12.5px; padding: 7px 13px; }
-  .tag-warp { display: inline-block; font-size: 9.5px; font-weight: 600; border-radius: 5px; padding: 1px 6px; margin-top: 4px; background: rgba(167,139,250,.3); color: #ddd3fc; }
-  .node-model .tag-warp { background: rgba(12,44,58,.28); color: #d8f5fc; }
-  .node-tool .tag-warp { background: rgba(6,46,33,.3); color: #d3fae8; }
-  .btag { font-size: 11.5px; color: #9fb0c8; font-weight: 600; width: 18px; text-align: center; flex: none; }
-  .node-done { background: rgba(52,211,153,.1); border: 1px solid #34d399; color: #6ee7b7; font-size: 12px; padding: 6px 14px; }
-
-  /* ─── warp 壳：纵向包装的视觉表达（包住节点 = 在节点内部）─── */
-  .warp-shell {
-    border: 1.5px dashed #8b76d9;
-    background: rgba(167,139,250,.07);
-    border-radius: 12px;
-    padding: 8px 8px 9px;
-    flex: none;
-  }
-  .warp-shell-label {
-    font-size: 9.5px; color: #c4b5fd; font-weight: 600;
-    text-align: center; margin-bottom: 5px; white-space: nowrap;
-  }
-  .node.small { font-size: 12px; padding: 7px 10px; }
-
-  /* ─── 执行顺序图（洋葱模型：hook 外 · warp 内）─── */
-  .order-lane {
-    border: 1px solid var(--border-soft); border-radius: 12px;
-    background: var(--bg-soft); padding: 14px 12px; margin: 16px 0 20px;
-  }
-  .order-row { display: flex; align-items: stretch; gap: 8px; margin: 6px 0; }
-  .order-row .fa { align-self: center; }
-  .order-row .fa.rev::after { left: -1px; right: auto; border-right: none; border-left: 7px solid #64748b; }
-  .o-back-note { flex: 1; display: flex; align-items: center; justify-content: flex-end; font-size: 11px; color: var(--muted); padding-right: 4px; }
-  .o-h, .o-w, .o-c {
-    flex: 1; text-align: center; border-radius: 9px; padding: 8px 6px;
-    font-weight: 600; font-size: 13px;
-  }
-  .o-h small, .o-w small, .o-c small { display: block; font-weight: 400; font-size: 10.5px; margin-top: 2px; opacity: .85; }
-  .o-h { background: rgba(251,191,36,.14); border: 1px solid #ca8a04; color: #fde68a; }
-  .o-h small { color: #d9b06a; }
-  .o-w { background: rgba(167,139,250,.1); border: 1.5px dashed #8b76d9; color: #ddd3fc; }
-  .o-w small { color: #9d8fd0; }
-  .o-c { background: rgba(52,211,153,.14); border: 1px solid #059669; color: #6ee7b7; }
-  .o-c small { color: #6aa88f; }
-
-  /* ─── 多 tool 并发泳道 ─── */
-  .tools-branch {
-    margin-top: 12px; border: 1px solid #263449; border-radius: 10px;
-    padding: 10px 10px 8px; background: rgba(255,255,255,.015);
-  }
-  .tools-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-  .tools-lane { display: flex; gap: 8px; margin-top: 8px; align-items: stretch; }
-  .tools-lane .warp-shell { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-  .tools-lane .node { width: 100%; }
-  .tools-note { text-align: center; font-size: 10.5px; color: var(--muted); margin-top: 7px; }
-  .tools-tail {
-    display: flex; align-items: center; gap: 8px; margin-top: 8px;
-    border-top: 1px dashed #263449; padding-top: 7px; flex-wrap: wrap;
-  }
-  .flow-back { margin-top: 12px; border-top: 2px dashed var(--hook); padding-top: 8px; display: flex; align-items: center; gap: 10px; color: #fcd34d; font-size: 11.5px; font-weight: 600; flex-wrap: wrap; }
-  .flow-back .icon { font-size: 15px; line-height: 1; }
-  .flow-outs { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 4px; }
-  .out-card { border: 1px solid #263449; background: rgba(255,255,255,.025); border-radius: 12px; padding: 12px; text-align: center; }
-  .out-card .t { font-weight: 700; font-size: 13.5px; color: var(--text); }
-  .out-card .d { font-size: 11px; color: var(--muted); margin-top: 3px; line-height: 1.55; }
-  @media (max-width: 760px) {
-    .flow-row, .branch-row, .tools-head, .tools-tail { flex-wrap: wrap; justify-content: center; }
-    .fa { min-width: 14px; }
-    .tools-lane { flex-wrap: wrap; }
-    .tools-lane .warp-shell { flex: 1 1 45%; }
-    .flow-outs { grid-template-columns: 1fr; }
-  }
+  .diagram-card svg { max-width: 100%; height: auto; display: block; margin: 0 auto; }
   .diagram-cap { text-align: center; font-size: 13px; color: var(--muted); padding: 10px 0 12px; }
-
-  .legend { display: flex; flex-wrap: wrap; gap: 10px 22px; margin: 14px 0 6px; font-size: 13px; color: #9fb0c8; }
-  .legend span { display: inline-flex; align-items: center; gap: 7px; }
-  .legend i { width: 12px; height: 12px; border-radius: 4px; display: inline-block; }
-  .legend .l-hook { background: var(--hook); }
-  .legend .l-model { background: var(--model); }
-  .legend .l-tool { background: var(--tool); }
-  .legend .l-warp { background: rgba(167,139,250,.12); border: 1.5px dashed #8b76d9; }
-  .legend .l-back { background: transparent; border-top: 3px dashed var(--hook); height: 0; border-radius: 0; width: 20px; }
 
   /* ─── 扩展指南小节 ─── */
   .ext {
@@ -422,7 +315,6 @@
 <div class="hero">
   <canvas id="particles"></canvas>
   <div class="hero-inner">
-    <!-- 光子 logo：一颗光子沿轨道循环 —— ez 系列图腾 -->
     <svg class="logo-lg" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="ezloop logo">
       <defs>
         <linearGradient id="ringGrad" x1="0" y1="0" x2="1" y2="1">
@@ -432,7 +324,6 @@
         </linearGradient>
       </defs>
 
-      <!-- 旋转组：轨道 + 光子（光子沿轨道循环 = loop） -->
       <g>
         <circle cx="100" cy="100" r="60" fill="none" stroke="url(#ringGrad)" stroke-width="4"
                 stroke-linecap="round" stroke-dasharray="290 87" transform="rotate(-35 100 100)"/>
@@ -442,7 +333,6 @@
                           dur="16s" repeatCount="indefinite"/>
       </g>
 
-      <!-- 中心核 -->
       <circle cx="100" cy="100" r="13" fill="rgba(255,255,255,.15)"/>
       <circle cx="100" cy="100" r="7" fill="#ffffff"/>
     </svg>
@@ -491,6 +381,49 @@
       <tr><td><b>tool</b></td><td>节点本身：工具执行</td><td>实现 <code>types.Tool</code> + <code>WithToolWarp</code> 中间件</td></tr>
       <tr><td><b>hook</b></td><td>流的前后：生命周期与控制流</td><td>实现 hook 小接口 + <code>WithHooks</code> 插入</td></tr>
     </table>
+
+    <h3>一个 Loop 的解剖</h3>
+    <p class="sub">七个 hook（黄）挂在循环的节点外，按时机触发；两个节点（青 / 绿）被各自的 warp 壳（紫虚线框）包住——引擎只负责这条流转，其余全是扩展。</p>
+    <div class="diagram-card">
+<pre class="mermaid">
+flowchart TD
+    IN(["Run(input)"]):::misc --> SH
+    SH["① OnStart&lt;br/&gt;注册工具 · 修理历史&lt;br/&gt;组装期一次"]:::hook --> MS
+    EH["⑦ OnEnd&lt;br/&gt;成败都跑 · defer 语义"]:::hook --> OUT(["LoopState · Messages"]):::misc
+
+    subgraph LOOP["⭕ loop 循环 · 每轮一个 iteration"]
+        MS["② OnModelStart&lt;br/&gt;可置 Stop 提前终止"]:::hook --> MW
+        subgraph MN["model 节点 · warp 壳"]
+            MW["modelretry"]:::warp --> MC["model 调用"]:::model
+        end
+        MC --> ME["③ OnModelEnd"]:::hook
+        ME --> DEC{"发起 tool_call?"}:::misc
+        DEC -->|"无 → 完成"| EXIT["StopReason = completed"]:::misc
+        DEC -->|"有 · N 个独立并发"| TS["④ OnToolStart&lt;br/&gt;Proceed / Skip / Abort"]:::hook
+        subgraph TOOLS["工具段 · 每个调用是独立单元"]
+            TS --> TW
+            subgraph TN["tool 节点 · warp 壳"]
+                TW["limit · safetool"]:::warp --> TC["tool 执行"]:::tool
+            end
+            TC --> TE["⑤ OnToolEnd&lt;br/&gt;可改写结果入史"]:::hook
+        end
+        TE --> LH["⑥ OnLoop&lt;br/&gt;回边守卫"]:::hook
+        LH -->|"下一轮"| MS
+        EXIT --> EH
+    end
+
+    classDef hook fill:#291f06,stroke:#fbbf24,color:#fde68a,stroke-width:1.5px
+    classDef warp fill:#1d1636,stroke:#a78bfa,color:#ddd3fc,stroke-dasharray:5 3
+    classDef model fill:#072331,stroke:#00add8,color:#9be5f7
+    classDef tool fill:#07281b,stroke:#34d399,color:#a7f3d0
+    classDef misc fill:#0b1322,stroke:#33496e,color:#c4cede
+    style LOOP fill:#0a101d,stroke:#33496e,stroke-dasharray:6 4
+    style MN fill:transparent,stroke:#a78bfa,stroke-dasharray:4 3
+    style TN fill:transparent,stroke:#a78bfa,stroke-dasharray:4 3
+    style TOOLS fill:transparent,stroke:#263449
+</pre>
+    </div>
+    <div class="diagram-cap">model ↔ tool 循环：无 tool_call 即完成；每次工具调用是独立单元（判定 → warp 壳执行 → 后处理），并发跑完整链后按原序入史。</div>
 
     <div class="principles">
       <div class="p"><b>节点与流分离</b><span>model / tool 是循环的节点，用 Warp 装饰（怎么执行）；hook 是循环的切面，按时机插入（什么时候做什么）。两者互不越界。</span></div>
@@ -1005,6 +938,28 @@ agent := core.<span class="f">NewAgent</span>(p, ...) <span class="c">// 进程�
     }, { rootMargin: '-20% 0px -70% 0px' });
     document.querySelectorAll('section[id]').forEach(function (s) { observer.observe(s); });
   })();
+</script>
+
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({
+    startOnLoad: false,
+    theme: 'base',
+    themeVariables: {
+      darkMode: true,
+      background: '#0a101d',
+      primaryColor: '#0b1322',
+      primaryTextColor: '#e8edf6',
+      primaryBorderColor: '#33496e',
+      lineColor: '#64748b',
+      edgeLabelBackground: '#0a101d',
+      clusterBkg: '#0a101d',
+      clusterBorder: '#33496e',
+      fontFamily: '-apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif',
+      fontSize: '13px'
+    }
+  });
+  mermaid.run({ querySelector: '.mermaid' });
 </script>
 </body>
 </html>
