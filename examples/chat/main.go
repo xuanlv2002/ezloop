@@ -1,21 +1,11 @@
-// ezloop 完整 agent 示例：集成框架全部能力。
-//
-// 能力清单：
-//
-//	Provider   openai（.env / 环境变量配置，SiliconFlow/DeepSeek/Ollama 兼容）
-//	           流式接收正文与思考过程（reasoning_content，推理模型可见）
-//	Warp       modelretry（模型重试）· limit（工具并发闸）· safetool（panic 防护）
-//	Hook       filetools（read/write/edit/grep/find + bash）
-//	           approve（工具审批）· askuser（模型提问）· taskplan（规划确认）
-//	           —— 三者同构：channel 决策中断，CLI 桥接 stdin
-//	           task（并行分身：fork 当前 Agent 干子任务，过程隔离、结果回传，
-//	             事件与 session 按 forkID 区分，分身内审批/提问照常工作）
-//	           skill（从 skills/*.md 按需注入）
-//	           localsession（会话持久化，/resume 恢复；分身写独立 session 可回放）
-//	交互       流式输出（正文+思考）· 分身输出带 ⟨task-N⟩ 标记 · Ctrl+C 取消当轮
-//	命令       /new /sessions /resume <id> /summary（手动摘要）/exit
-//
-// 运行：cp .env.example .env && go run ./examples/chat
+/*
+ezloop 完整 agent 示例：集成框架全部能力（openai 流式 + 全部 warp/hook，
+含并行分身 task 与人机交互 approve/askuser/taskplan 的 CLI 桥接）。
+能力全景见文档站：https://xuanlv2002.github.io/ezloop/
+
+运行：cp .env.example .env && go run ./examples/chat
+命令：/new /sessions /resume <id> /summary /exit；Ctrl+C 取消当轮
+*/
 package main
 
 import (
@@ -317,7 +307,7 @@ func main() {
 	}
 }
 
-// send 向决策 channel 发送，程序退出时不悬挂。
+/* send 向决策 channel 发送，程序退出时不悬挂。 */
 func send[T any](ctx context.Context, ch chan<- T, v T) {
 	select {
 	case ch <- v:
@@ -325,10 +315,12 @@ func send[T any](ctx context.Context, ch chan<- T, v T) {
 	}
 }
 
-// streamBuf 是流式渲染的节流缓冲：碎 delta 高频小片段直写终端开销大
-// （Windows console 同步写尤其贵），攒起来定期一次写出。所有 OnEvent
-// 输出走同一把锁，保证流式内容与提示严格有序；ticker 定期 flush，
-// 提示类输出用 now 立即写出。
+/*
+streamBuf 是流式渲染的节流缓冲：碎 delta 高频小片段直写终端开销大
+（Windows console 同步写尤其贵），攒起来定期一次写出。所有 OnEvent
+输出走同一把锁，保证流式内容与提示严格有序；ticker 定期 flush，
+提示类输出用 now 立即写出。
+*/
 type streamBuf struct {
 	mu  sync.Mutex
 	buf []byte
@@ -340,7 +332,7 @@ func (b *streamBuf) write(s string) {
 	b.mu.Unlock()
 }
 
-// now 并入缓冲后立即整块写出（提示类输出，与流式内容严格有序）。
+/* now 并入缓冲后立即整块写出（提示类输出，与流式内容严格有序）。 */
 func (b *streamBuf) now(s string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -361,9 +353,11 @@ func (b *streamBuf) flushLocked() {
 	}
 }
 
-// streamTag 在流式输出切换归属（主循环 ↔ 分身）时打一次行首标记：
-// 分身输出带 ⟨task-N⟩ 前缀，回到主循环换行分隔。事件回调可能并发
-// （多个分身同时流式），用锁保护 lastTask。
+/*
+streamTag 在流式输出切换归属（主循环 ↔ 分身）时打一次行首标记：
+分身输出带 ⟨task-N⟩ 前缀，回到主循环换行分隔。事件回调可能并发
+（多个分身同时流式），用锁保护 lastTask。
+*/
 var (
 	streamMu sync.Mutex
 	lastTask string
@@ -382,7 +376,7 @@ func streamTag(e event.Event) string {
 	return "\n⟨" + e.ForkID + "⟩ "
 }
 
-// nowTool 获取当前时间。
+/* nowTool 获取当前时间。 */
 type nowTool struct{}
 
 func (nowTool) Name() string        { return "now" }

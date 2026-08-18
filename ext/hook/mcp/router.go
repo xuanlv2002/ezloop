@@ -31,7 +31,7 @@ type callError struct {
 	Hint  string `json:"hint,omitempty"`
 }
 
-// Router 实现 types.Tool：对模型暴露唯一入口，内部转发到各 MCP server。
+/* Router 实现 types.Tool：对模型暴露唯一入口，内部转发到各 MCP server。 */
 type Router struct {
 	mu      sync.RWMutex
 	servers map[string]ServerConfig
@@ -64,7 +64,7 @@ func (r *Router) ArgsSchema() json.RawMessage {
 }`)
 }
 
-// ReplaceServers 热加载 server 列表；工具 schema 不变，不影响缓存前缀。
+/* ReplaceServers 热加载 server 列表；工具 schema 不变，不影响缓存前缀。 */
 func (r *Router) ReplaceServers(servers []ServerConfig) {
 	m := make(map[string]ServerConfig, len(servers))
 	for _, s := range servers {
@@ -75,7 +75,7 @@ func (r *Router) ReplaceServers(servers []ServerConfig) {
 	r.mu.Unlock()
 }
 
-// Close 释放所有已建立的连接。
+/* Close 释放所有已建立的连接。 */
 func (r *Router) Close() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()

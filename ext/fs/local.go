@@ -8,8 +8,10 @@ import (
 	"strings"
 )
 
-// Local 是基于 os 的本地文件系统实现，所有路径被限制在 Root 内
-// （类似 chroot），路径穿越（如 ../）会被拒绝。
+/*
+Local 是基于 os 的本地文件系统实现，所有路径被限制在 Root 内
+（类似 chroot），路径穿越（如 ../）会被拒绝。
+*/
 type Local struct{ Root string }
 
 var _ FileSystem = Local{}

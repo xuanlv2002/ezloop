@@ -6,11 +6,13 @@ import (
 	"github.com/xuanlv2002/ezloop/types"
 )
 
-// Hook 是 mcp 扩展对外的唯一入口：
-//
-//	core.NewAgent(p, core.WithHooks(mcp.NewHook(cfg)))
-//
-// OnStart 注册 router，OnLoop 热加载配置，OnEnd 关闭连接。
+/*
+Hook 是 mcp 扩展对外的唯一入口：
+
+	core.NewAgent(p, core.WithHooks(mcp.NewHook(cfg)))
+
+OnStart 注册 router，OnLoop 热加载配置，OnEnd 关闭连接。
+*/
 type Hook struct {
 	router *Router
 	cfg    Config

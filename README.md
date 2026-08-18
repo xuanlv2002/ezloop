@@ -201,6 +201,25 @@ sequenceDiagram
     E-->>U: state（Messages 可恢复 · 事件流已实时输出）
 ```
 
+## 事件流
+
+事件只做观察，不用于修改状态（修改状态是 Hook 的职责）。所有事件带
+`ForkID` 字段区分归属：空串＝主循环，非空＝对应 fork 分身——消费方据此
+把分身的流式输出、审批请求路由到正确的出口。
+
+| 事件 | 时机 | Data |
+|---|---|---|
+| `loop_start` / `loop_end` | Run 起 / 止 | input / StopReason |
+| `model_start` / `model_end` | 模型调用前后 | nil / `*ModelResponse` |
+| `model_chunk` / `reasoning_chunk` | 流式正文 / 思考增量 | string |
+| `tool_start` / `tool_end` | 工具调用起 / 止（随调用即时，到达序不保证，以 CallID 关联） | `*ToolCall` / `*ToolResult` |
+| `iteration_end` | 每轮迭代结束 | int |
+| `error` | 引擎错误 | error |
+| `stream_fallback` | 声明流式但链上无 StreamProvider，已降级（不静默） | string |
+
+扩展事件自带命名空间前缀（`task.start`、`approve.request`、`askuser.request`、`taskplan.request`…），
+人机交互类事件带 CallID，供渲染层呈现并回传决策。
+
 ## 官方扩展
 
 | 扩展 | 类型 | 说明 |
@@ -231,7 +250,7 @@ sequenceDiagram
 ├── hook/       7 个 hook 小接口 + Action 短路语义
 ├── provider/   ModelProvider / StreamProvider 抽象
 ├── warp/       节点装饰器统一定义：Handler[T] + Chain + Model/Tool 两类 Handler
-└── core/       NewAgent 组装 + loop 引擎
+└── core/       NewAgent 组装 + loop 引擎 + Fork 派生原语（并行分身）
 
 扩展层（能力实现，官方 SDK 依赖放这里，不用不引入）
 ├── ext/provider/openai
@@ -246,6 +265,14 @@ sequenceDiagram
 go test ./...        # 引擎行为 / 短路语义 / 事件顺序 / MCP 全链路 / SSE 聚合
 go run ./examples/chat
 ```
+
+## 贡献者文档
+
+面向扩展开发者的深度参考（架构与文件说明 / 开发规范 / 事件与上下文管理）：
+
+- [docs/dev/architecture.md](docs/dev/architecture.md) — 基础架构 · 文件说明
+- [docs/dev/conventions.md](docs/dev/conventions.md) — 开发规范（注释 / 错误 / 并发 / 缓存 / 测试）
+- [docs/dev/lifecycle.md](docs/dev/lifecycle.md) — 事件与上下文管理（本地 / 多租户）
 
 ---
 

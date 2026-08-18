@@ -1,5 +1,7 @@
-// sdk.go 基于官方 go-sdk (modelcontextprotocol/go-sdk) 的接入封装，
-// 提供开箱即用的 ServerConfig.Factory。
+/*
+sdk.go 基于官方 go-sdk (modelcontextprotocol/go-sdk) 的接入封装，
+提供开箱即用的 ServerConfig.Factory。
+*/
 package mcp
 
 import (
@@ -19,8 +21,10 @@ const (
 	connectTimeout = 10 * time.Second
 )
 
-// StreamableHTTP 返回连接 Streamable HTTP MCP server 的 Factory。
-// headers 会附加到每个 HTTP 请求（如 Authorization）。
+/*
+StreamableHTTP 返回连接 Streamable HTTP MCP server 的 Factory。
+headers 会附加到每个 HTTP 请求（如 Authorization）。
+*/
 func StreamableHTTP(endpoint string, headers map[string]string) func(ServerConfig) (Client, error) {
 	return func(ServerConfig) (Client, error) {
 		httpClient := http.DefaultClient
@@ -38,14 +42,14 @@ func StreamableHTTP(endpoint string, headers map[string]string) func(ServerConfi
 	}
 }
 
-// Stdio 返回通过子进程 stdio 连接 MCP server 的 Factory。
+/* Stdio 返回通过子进程 stdio 连接 MCP server 的 Factory。 */
 func Stdio(name string, args ...string) func(ServerConfig) (Client, error) {
 	return func(ServerConfig) (Client, error) {
 		return connectSDK(&sdkmcp.CommandTransport{Command: exec.Command(name, args...)})
 	}
 }
 
-// WrapSession 将官方 SDK 的已连接会话包装为 mcp.Client（高级用法/测试用）。
+/* WrapSession 将官方 SDK 的已连接会话包装为 mcp.Client（高级用法/测试用）。 */
 func WrapSession(session *sdkmcp.ClientSession) Client { return &sdkClient{session: session} }
 
 func connectSDK(transport sdkmcp.Transport) (Client, error) {
@@ -59,7 +63,7 @@ func connectSDK(transport sdkmcp.Transport) (Client, error) {
 	return &sdkClient{session: session}, nil
 }
 
-// sdkClient 用官方 SDK 的 ClientSession 实现 ezloop 的 mcp.Client。
+/* sdkClient 用官方 SDK 的 ClientSession 实现 ezloop 的 mcp.Client。 */
 type sdkClient struct {
 	session *sdkmcp.ClientSession
 }
@@ -101,7 +105,7 @@ func (c *sdkClient) CallTool(ctx context.Context, name string, args json.RawMess
 
 func (c *sdkClient) Close() error { return c.session.Close() }
 
-// resultText 提取文本内容；结构化输出序列化为 JSON。
+/* resultText 提取文本内容；结构化输出序列化为 JSON。 */
 func resultText(res *sdkmcp.CallToolResult) string {
 	if res.StructuredContent != nil {
 		if b, err := json.Marshal(res.StructuredContent); err == nil {

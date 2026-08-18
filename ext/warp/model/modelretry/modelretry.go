@@ -1,6 +1,8 @@
-// Package modelretry 是 provider 装饰器：对模型调用做指数退避重试。
-// 注意它是 provider 包装而非 hook——引擎在模型节点失败即终止 loop，
-// hook 拦截不到模型调用本身，重试必须发生在 provider 内部。
+/*
+Package modelretry 是 provider 装饰器：对模型调用做指数退避重试。
+注意它是 provider 包装而非 hook——引擎在模型节点失败即终止 loop，
+hook 拦截不到模型调用本身，重试必须发生在 provider 内部。
+*/
 package modelretry
 
 import (
@@ -16,12 +18,14 @@ import (
 	"github.com/xuanlv2002/ezloop/warp"
 )
 
-// EventRetry 是重试事件：Data 为 *RetryInfo。
-// 经引擎组装时注入的 event.Emitter 流出，
-// 前端可渲染「第 N 次失败，Xms 后重试」。
+/*
+EventRetry 是重试事件：Data 为 *RetryInfo。
+经引擎组装时注入的 event.Emitter 流出，
+前端可渲染「第 N 次失败，Xms 后重试」。
+*/
 const EventRetry = event.EventType("modelretry.retry")
 
-// RetryInfo 描述一次即将进行的重试。
+/* RetryInfo 描述一次即将进行的重试。 */
 type RetryInfo struct {
 	Attempt     int // 即将开始的尝试序号（2 = 第二次尝试）
 	MaxAttempts int
@@ -48,7 +52,7 @@ type RetryProvider struct {
 	em    event.Emitter // 引擎组装时注入，可为 nil（直接 New 构造时）
 }
 
-// New 返回包装后的 provider；若 inner 支持 Stream 则包装后同样支持。
+/* New 返回包装后的 provider；若 inner 支持 Stream 则包装后同样支持。 */
 func New(p provider.ModelProvider, opts ...func(*Options)) *RetryProvider {
 	o := Options{MaxAttempts: 3, BaseDelay: 500 * time.Millisecond}
 	for _, fn := range opts {
@@ -60,8 +64,10 @@ func New(p provider.ModelProvider, opts ...func(*Options)) *RetryProvider {
 	return &RetryProvider{inner: p, opts: o}
 }
 
-// retryable 是与 openai.HTTPError 等结构化错误的解耦契约：
-// provider 层实现它，本包无需感知具体错误类型。
+/*
+retryable 是与 openai.HTTPError 等结构化错误的解耦契约：
+provider 层实现它，本包无需感知具体错误类型。
+*/
 type retryable interface{ Retryable() bool }
 
 func defaultRetryable(err error) bool {
@@ -78,8 +84,10 @@ func defaultRetryable(err error) bool {
 var _ provider.ModelProvider = (*RetryProvider)(nil)
 var _ provider.StreamProvider = (*RetryProvider)(nil)
 
-// Warp 返回可传入 core.WithModelWarp 的中间件形式，
-// 引擎组装时注入 per-Run 事件出口（重试事件经它发出）。
+/*
+Warp 返回可传入 core.WithModelWarp 的中间件形式，
+引擎组装时注入 per-Run 事件出口（重试事件经它发出）。
+*/
 func Warp(opts ...func(*Options)) warp.ModelHandler {
 	return func(em event.Emitter, p provider.ModelProvider) provider.ModelProvider {
 		r := New(p, opts...)
@@ -108,7 +116,7 @@ func (r *RetryProvider) Invoke(ctx context.Context, req *types.ModelRequest) (*t
 	return nil, fmt.Errorf("modelretry: giving up after %d attempts: %w", r.opts.MaxAttempts, lastErr)
 }
 
-// Stream 重试整个流式调用；一旦已有 chunk 透出便不再重试（避免重复输出）。
+/* Stream 重试整个流式调用；一旦已有 chunk 透出便不再重试（避免重复输出）。 */
 func (r *RetryProvider) Stream(ctx context.Context, req *types.ModelRequest, onChunk provider.ModelChunkHandler) (*types.ModelResponse, error) {
 	sp, ok := r.inner.(provider.StreamProvider)
 	if !ok {
@@ -141,7 +149,7 @@ func (r *RetryProvider) Stream(ctx context.Context, req *types.ModelRequest, onC
 	return nil, fmt.Errorf("modelretry: giving up: %w", lastErr)
 }
 
-// backoff 发出重试事件后等待退避时间；cause 是上一次尝试的失败原因。
+/* backoff 发出重试事件后等待退避时间；cause 是上一次尝试的失败原因。 */
 func (r *RetryProvider) backoff(ctx context.Context, attempt int, cause error) error {
 	delay := r.opts.BaseDelay << (attempt - 1)
 	// 加 20% 抖动，避免并发重试形成共振。

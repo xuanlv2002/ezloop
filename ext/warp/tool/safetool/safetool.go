@@ -1,5 +1,7 @@
-// Package safetool 是工具节点中间件：panic 恢复为 error、error 附带工具名，
-// 单个工具的崩溃不会炸掉整个 agent loop（工具错误由引擎回传模型自纠）。
+/*
+Package safetool 是工具节点中间件：panic 恢复为 error、error 附带工具名，
+单个工具的崩溃不会炸掉整个 agent loop（工具错误由引擎回传模型自纠）。
+*/
 package safetool
 
 import (
@@ -12,7 +14,7 @@ import (
 	"github.com/xuanlv2002/ezloop/warp"
 )
 
-// Warp 返回工具中间件（Emitter 保留给需要发事件的装饰器）。
+/* Warp 返回工具中间件（Emitter 保留给需要发事件的装饰器）。 */
 func Warp() warp.ToolHandler {
 	return func(_ event.Emitter, inner types.Tool) types.Tool {
 		return &safeTool{inner: inner}

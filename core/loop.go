@@ -13,15 +13,17 @@ import (
 	"github.com/xuanlv2002/ezloop/warp"
 )
 
-// Run 驱动整个 loop：model ↔ tool 循环，直到模型不再发起 tool call、
-// 达到 MaxIterations、hook 置 Stop 或出错。EndHook 无论成败都会执行。
-// 消息序列构造顺序：system 提示词 → WithHistory 历史 → 本次 input，
-// 随后 startHook 可继续注入（如 skill）。
+/*
+Run 驱动整个 loop：model ↔ tool 循环，直到模型不再发起 tool call、
+
+达到 MaxIterations、hook 置 Stop 或出错。EndHook 无论成败都会执行。
+消息序列构造顺序：system 提示词 → WithHistory 历史 → 本次 input，
+随后 startHook 可继续注入（如 skill）。
+*/
 func (a *Agent) Run(ctx context.Context, input string, runOpts ...RunOption) (state *types.LoopState, err error) {
 	// 把自身注入 ctx：hook 经 AgentFromContext 取回引擎能力（如 task 的 Fork）。
 	ctx = context.WithValue(ctx, agentCtxKey{}, a)
 
-	// 初始化状态
 	state = &types.LoopState{
 		Input:         input,
 		Tools:         types.NewToolRegistry(),
@@ -92,7 +94,6 @@ func (a *Agent) Run(ctx context.Context, input string, runOpts ...RunOption) (st
 
 	state.AppendMessage(types.Message{Role: types.RoleUser, Content: input})
 
-	// 运行 startHook
 	for _, h := range a.startHooks {
 		if err = a.runHook(h, "OnStart", func() error { return h.OnStart(ctx, state) }); err != nil {
 			return state, a.fail(ctx, state, err)
@@ -106,7 +107,6 @@ func (a *Agent) Run(ctx context.Context, input string, runOpts ...RunOption) (st
 		}
 		state.Iteration++
 
-		// 运行 modelStartHook
 		for _, h := range a.modelStartHooks {
 			if err = a.runHook(h, "OnModelStart", func() error { return h.OnModelStart(ctx, state) }); err != nil {
 				return state, a.fail(ctx, state, err)
@@ -116,7 +116,6 @@ func (a *Agent) Run(ctx context.Context, input string, runOpts ...RunOption) (st
 			break
 		}
 
-		// 模型call
 		resp, err := a.callModel(ctx, model, state)
 		if err != nil {
 			return state, a.fail(ctx, state, err)
@@ -132,7 +131,6 @@ func (a *Agent) Run(ctx context.Context, input string, runOpts ...RunOption) (st
 		})
 		a.emit(state, event.EventModelEnd, resp)
 
-		// 运行 modelEndHook
 		for _, h := range a.modelEndHooks {
 			if err = a.runHook(h, "OnModelEnd", func() error { return h.OnModelEnd(ctx, state) }); err != nil {
 				return state, a.fail(ctx, state, err)
@@ -148,14 +146,12 @@ func (a *Agent) Run(ctx context.Context, input string, runOpts ...RunOption) (st
 		}
 		state.PendingToolCalls = resp.ToolCalls
 
-		// 工具调用
 		if err = a.execToolCalls(ctx, state); err != nil {
 			return state, a.fail(ctx, state, err)
 		}
 		if state.Stop {
 			break
 		}
-		// 运行 loop hooks
 		for _, h := range a.loopHooks {
 			if err = a.runHook(h, "OnLoop", func() error { return h.OnLoop(ctx, state) }); err != nil {
 				return state, a.fail(ctx, state, err)
@@ -174,17 +170,18 @@ func (a *Agent) Run(ctx context.Context, input string, runOpts ...RunOption) (st
 	return state, nil
 }
 
-// execToolCalls 执行本轮全部工具调用：
-// 每个调用是独立单元——toolStart 判定 → warp 壳内执行 → toolEnd 后处理，
-// 整链跟随调用并发（SerialTools 时串行）；tool_start/tool_end 事件随调用
-// 即时发出（到达顺序不保证，消费方以 CallID 关联）；全部完成后按原始
-// 顺序汇总写入消息历史。多个人工审批同时呈现而非排队逐个等；
-// 并发数量不可配（调用数即并发数，需要限流在 tool warp 内实现）。
-//
-// 不变量：无论本轮以何种方式结束（完成/Skip/Abort/hook 报错/取消），
-// 每个已写入历史的 tool_call 都有对应的 tool 结果消息——
-// 发给模型的消息序列永远协议完整，持久化恢复无需理解断点。
-// 任一 Abort/hook 报错联动取消其余调用，未完成的按占位结果补全。
+/*
+execToolCalls 执行本轮全部工具调用：每个调用是独立单元——toolStart
+
+判定 → warp 壳内执行 → toolEnd 后处理，整链跟随调用并发（SerialTools 时
+串行）；tool_start/tool_end 事件随调用即时发出（到达顺序不保证，消费方以
+CallID 关联）；全部完成后按原始顺序汇总写入消息历史。
+
+不变量：无论本轮以何种方式结束（完成/Skip/Abort/hook 报错/取消），每个
+已写入历史的 tool_call 都有对应的 tool 结果消息——发给模型的消息序列永远
+协议完整，持久化恢复无需理解断点。任一 Abort/hook 报错联动取消其余调用，
+未完成的按占位结果补全。
+*/
 func (a *Agent) execToolCalls(ctx context.Context, state *types.LoopState) error {
 	calls := state.PendingToolCalls
 	results := make([]*types.ToolResult, len(calls))
@@ -331,6 +328,7 @@ func (a *Agent) execToolCalls(ctx context.Context, state *types.LoopState) error
 	return hookErr
 }
 
+/* callModel 发起一次模型调用：流式时 chunk 经事件实时透出（正文与思考分路）。 */
 func (a *Agent) callModel(ctx context.Context, model provider.ModelProvider, state *types.LoopState) (*types.ModelResponse, error) {
 	req := &types.ModelRequest{Messages: state.Messages, Tools: state.Tools.List()}
 	a.emit(state, event.EventModelStart, nil)
@@ -351,6 +349,7 @@ func (a *Agent) callModel(ctx context.Context, model provider.ModelProvider, sta
 	return model.Invoke(ctx, req)
 }
 
+/* runEndHooks 依次执行 EndHook，错误经事件透出后终止。 */
 func (a *Agent) runEndHooks(ctx context.Context, state *types.LoopState) error {
 	for _, h := range a.endHooks {
 		if err := a.runHook(h, "OnEnd", func() error { return h.OnEnd(ctx, state) }); err != nil {
@@ -361,8 +360,11 @@ func (a *Agent) runEndHooks(ctx context.Context, state *types.LoopState) error {
 	return nil
 }
 
-// runHook 是引擎对每次 hook 调用的标准包裹：
-// panic 恢复为 error，error 附带 hook 名，单个扩展的崩溃不会炸掉 loop。
+/*
+runHook 是引擎对每次 hook 调用的标准包裹：panic 恢复为 error，
+
+error 附带 hook 名——单个扩展的崩溃不会炸掉 loop。
+*/
 func (a *Agent) runHook(h hook.Hook, phase string, fn func() error) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -375,6 +377,7 @@ func (a *Agent) runHook(h hook.Hook, phase string, fn func() error) (err error) 
 	return nil
 }
 
+/* runToolStartHook 与 runHook 同款包裹，额外保证 panic 时不吞掉 Action（返回 Proceed 走常规错误路径）。 */
 func (a *Agent) runToolStartHook(h hook.ToolStartHook, ctx context.Context, state *types.LoopState, call *types.ToolCall) (action hook.Action, err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -388,8 +391,11 @@ func (a *Agent) runToolStartHook(h hook.ToolStartHook, ctx context.Context, stat
 	return action, err
 }
 
-// fail 是所有错误路径的统一出口：取消/超时归类 cancelled（不发错误事件），
-// 其余归类 error。hook 因 ctx 取消而报错同样走这里，归类保持一致。
+/*
+fail 是所有错误路径的统一出口：取消/超时归类 cancelled（不发错误事件），
+
+其余归类 error。hook 因 ctx 取消而报错同样走这里，归类保持一致。
+*/
 func (a *Agent) fail(ctx context.Context, state *types.LoopState, err error) error {
 	state.Stop = true
 	if ctx.Err() != nil {
@@ -401,6 +407,7 @@ func (a *Agent) fail(ctx context.Context, state *types.LoopState, err error) err
 	return err
 }
 
+/* emit 发送引擎事件，结构性带上 state.ForkID（fork 子循环事件归属）。 */
 func (a *Agent) emit(state *types.LoopState, typ event.EventType, data any) {
 	if a.onEvent == nil {
 		return

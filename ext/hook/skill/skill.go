@@ -1,6 +1,8 @@
-// Package skill 将预定义技能指令按需注入 system prompt。
-// Keywords 匹配到用户输入（或未配置 Keywords）的 skill 才会被注入，节省 token。
-// 技能源支持代码内定义（New）与文件系统目录加载（NewFromFS）。
+/*
+Package skill 将预定义技能指令按需注入 system prompt。
+Keywords 匹配到用户输入（或未配置 Keywords）的 skill 才会被注入，节省 token。
+技能源支持代码内定义（New）与文件系统目录加载（NewFromFS）。
+*/
 package skill
 
 import (
@@ -30,9 +32,11 @@ func New(skills ...Skill) *Hook {
 	return &Hook{skills: skills}
 }
 
-// NewFromFS 从文件系统加载技能：dir 下每个 *.md 文件是一个技能，
-// 文件名（去扩展名）为技能名，文件内容为 Instructions。
-// 可选同名 .keywords 文件（逗号分隔）提供关键词。
+/*
+NewFromFS 从文件系统加载技能：dir 下每个 *.md 文件是一个技能，
+文件名（去扩展名）为技能名，文件内容为 Instructions。
+可选同名 .keywords 文件（逗号分隔）提供关键词。
+*/
 func NewFromFS(ctx context.Context, fsys fs.FileSystem, dir string) (*Hook, error) {
 	skills, err := LoadDir(ctx, fsys, dir)
 	if err != nil {

@@ -400,17 +400,17 @@
     <p>简单，不简陋。</p>
   </div>
   <div class="nav-group">
-    <div class="label">框架简介</div>
-    <a class="item" href="#idea">核心理念</a>
-    <a class="item" href="#engine">Loop 引擎</a>
-    <a class="item" href="#architecture">架构全景</a>
+    <div class="label">入门</div>
+    <a class="item" href="#idea">设计理念</a>
+    <a class="item" href="#quickstart">快速开始</a>
   </div>
   <div class="nav-group">
-    <div class="label">快速开始</div>
-    <a class="item" href="#first-agent">第一个 Agent</a>
-    <a class="item" href="#ext">官方扩展指南</a>
-    <a class="item" href="#local-agent">构建本地 Agent</a>
-    <a class="item" href="#web-kernel">Web Agent 内核</a>
+    <div class="label">详细介绍</div>
+    <a class="item" href="#hooks">钩子使用</a>
+    <a class="item" href="#warp">Warp 使用</a>
+    <a class="item" href="#ext">官方扩展能力</a>
+    <a class="item" href="#local-agent">本地 Agent · 事件与上下文</a>
+    <a class="item" href="#multi-tenant">多租户 Agent · 事件与上下文</a>
   </div>
   <div class="nav-footer">
     <a href="https://github.com/xuanlv2002/ezloop" target="_blank">GitHub</a> ·
@@ -480,744 +480,328 @@
 
 <main>
 
-  <!-- ═══════════════ 01 核心理念 ═══════════════ -->
+  <!-- ═══════════════ 01 设计理念 ═══════════════ -->
   <section id="idea">
-    <h2><span class="no">01</span>核心理念</h2>
-    <p class="sub">引擎不理解任何具体能力，它只负责流转。</p>
+    <h2><span class="no">01</span>设计理念</h2>
+    <p class="sub">大多数 Agent 框架把重试、MCP、审批、日志焊死在引擎里，能力越多引擎越重。ezloop 反其道而行：<b>引擎不理解任何具体能力，它只负责流转。</b></p>
 
-    <p>大多数 Agent 框架把重试、MCP、审批、日志焊死在引擎里，能力越多，引擎越重。
-    ezloop 只保留一个 <strong>model ↔ tool 循环引擎</strong>，其余一切皆是可插拔的扩展：
-    模型重试是一个 Warp，MCP 接入是一个 Hook，工具审批是一个 Hook，会话持久化也是一个 Hook。
-    不用，就不引入。</p>
-
-    <h3>三个核心概念</h3>
     <table>
       <tr><th>概念</th><th>关注点</th><th>扩展方式</th></tr>
-      <tr>
-        <td><strong>model</strong></td>
-        <td>节点本身：模型调用</td>
-        <td>实现 <code>provider.ModelProvider</code> + <code>WithModelWarp</code> 中间件（<code>warp.ModelHandler</code>）</td>
-      </tr>
-      <tr>
-        <td><strong>tool</strong></td>
-        <td>节点本身：工具执行</td>
-        <td>实现 <code>types.Tool</code> + <code>WithToolWarp</code> 中间件（<code>warp.ToolHandler</code>）</td>
-      </tr>
-      <tr>
-        <td><strong>hook</strong></td>
-        <td>流的前后：生命周期与控制流</td>
-        <td>实现 hook 小接口 + <code>WithHooks</code> 插入</td>
-      </tr>
+      <tr><td><b>model</b></td><td>节点本身：模型调用</td><td>实现 <code>provider.ModelProvider</code> + <code>WithModelWarp</code> 中间件</td></tr>
+      <tr><td><b>tool</b></td><td>节点本身：工具执行</td><td>实现 <code>types.Tool</code> + <code>WithToolWarp</code> 中间件</td></tr>
+      <tr><td><b>hook</b></td><td>流的前后：生命周期与控制流</td><td>实现 hook 小接口 + <code>WithHooks</code> 插入</td></tr>
     </table>
 
-    <h3>三条设计原则</h3>
     <div class="principles">
-      <div class="p">
-        <span class="num">1</span>
-        <div class="t">节点与流分离</div>
-        <div class="d">model / tool 是循环的节点，用 Warp 装饰 —— 管「怎么执行」；
-        hook 是循环的切面，按时机插入 —— 管「什么时候做什么」。两者互不越界。</div>
-      </div>
-      <div class="p">
-        <span class="num">2</span>
-        <div class="t">扩展永不入核</div>
-        <div class="d">框架层零扩展依赖。官方 SDK、重试策略、审批逻辑全部收敛在 ext/ 层，
-        按需引入，引擎永远保持最小。</div>
-      </div>
-      <div class="p">
-        <span class="num">3</span>
-        <div class="t">状态即消息</div>
-        <div class="d">loop 的全部状态是 <code>LoopState</code>，其中 Messages 可序列化、
-        可恢复、可直接作为下一轮历史。没有隐藏的内存中间态。</div>
-      </div>
+      <div class="p"><b>节点与流分离</b><span>model / tool 是循环的节点，用 Warp 装饰（怎么执行）；hook 是循环的切面，按时机插入（什么时候做什么）。两者互不越界。</span></div>
+      <div class="p"><b>扩展永不入核</b><span>重试是 warp，MCP 是 hook，审批是 hook，会话持久化也是 hook。引擎零扩展依赖，不用不引入。</span></div>
+      <div class="p"><b>状态即消息</b><span>loop 的全部状态是 LoopState，其中 Messages 可序列化、可恢复、可直接作为下一轮历史。没有隐藏的内存中间态。</span></div>
     </div>
-
-    <h3>Event 与 Hook 分离</h3>
-    <p><code class="inline">OnEvent</code> 回调实时<strong>观察</strong>（含流式 chunk），只读不写；
-    <strong>修改</strong>状态是 Hook 的职责。emit 的入口按层对称：hook（横向切面）拿 state，
-    走 <code class="inline">state.EmitEvent("ns.type", data)</code>；warp（纵向装饰）在每次 Run
-    组装时由引擎注入 <code class="inline">event.Emitter</code>（观察面的最小暴露，不碰 state），
-    两层事件汇入同一个流（如 <code class="inline">modelretry.retry</code>）。</p>
-    <p><strong>并发契约：</strong>工具天然并发执行，OnEvent 回调可能被多个 goroutine 同时调用
-    （engine 自身事件仍串行且保序）——回调必须并发安全且快速返回；
-    需要免锁消费时用 <code class="inline">RunAsync</code> 的 Events 通道。</p>
 
     <div class="tip">
-      <b>KV cache 友好：</b>工具定义与 system 前缀属于 prompt 缓存前缀。mcpRouter 的 schema 恒定、
-      <code>WithHistory</code> 自动过滤历史中的 system 消息 —— 每轮对话的前缀稳定，不击穿缓存。
+      <b>并行分身（fork）：</b>需要提速与压缩上下文时，不是雇佣一个陌生 subagent，而是
+      <b>fork 同一个自我</b>——引擎原语 <code>core.Agent.Fork</code> 复刻当前 Agent（provider / warp / 超参 / 全部运行期 hook）
+      与上下文快照并行干活，过程不回流主上下文、只回传最终结果；事件与 session 按
+      <code>ForkID</code> 区分归属。官方 <code>ext/hook/task</code> 工具开箱即用。
     </div>
   </section>
 
-  <!-- ═══════════════ 02 LOOP 引擎 ═══════════════ -->
-  <section id="engine">
-    <h2><span class="no">02</span>Loop 引擎</h2>
-    <p class="sub">一次 Run 的完整生命周期：注入 → 循环 → 收尾。</p>
-
-    <h3>执行流程</h3>
-    <ol>
-      <li><strong>初始化</strong>：构造 <code>LoopState</code>（system prompt → 历史 → 本轮输入），
-        依次执行 <code class="inline">startHook</code> —— 这是注入工具（mcp router）与技能的时机。</li>
-      <li><strong>循环</strong>（≤ <code>MaxIterations</code>）：
-        <code class="inline">modelStartHook</code> → 调用模型（流式时 chunk 实时成事件）→
-        <code class="inline">modelEndHook</code> →
-        响应含 tool calls 则执行工具后回到模型；不含则循环结束。</li>
-      <li><strong>收尾</strong>：<code class="inline">endHook</code> 无论成败都执行（defer 语义）——
-        摘要、会话快照、连接清理都在这里。</li>
-    </ol>
-
-    <h3>七个 Hook 的作用点</h3>
-    <table>
-      <tr><th>#</th><th>接口</th><th>作用点</th><th>典型用途</th></tr>
-      <tr><td>1</td><td><code>StartHook</code></td><td>loop 开始</td><td>注入工具、技能指令</td></tr>
-      <tr><td>2</td><td><code>ModelStartHook</code></td><td>调用模型前</td><td>预算守卫（置 <code>Stop</code> 提前终止）</td></tr>
-      <tr><td>3</td><td><code>ModelEndHook</code></td><td>模型响应后</td><td>响应改写、审计</td></tr>
-      <tr><td>4</td><td><code>ToolStartHook</code></td><td>工具调用前</td><td>审批 / 人机中断（<code>Skip(result)</code> / <code>Abort</code> 短路，可阻塞等决策）</td></tr>
-      <tr><td>5</td><td><code>ToolEndHook</code></td><td>工具调用后（结果入史前）</td><td>审计日志、结果后处理（offload 卸载）</td></tr>
-      <tr><td>6</td><td><code>LoopHook</code></td><td>迭代回边前</td><td>上下文压缩、配置热加载</td></tr>
-      <tr><td>7</td><td><code>EndHook</code></td><td>loop 结束</td><td>摘要、资源清理、会话保存</td></tr>
-    </table>
-
-    <div class="codeblock">
-      <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">budget_hook.go — 一个插件只写业务，健壮性由引擎兜底</span></div>
-<pre><span class="k">type</span> <span class="t">BudgetHook</span> <span class="k">struct</span>{ Remaining <span class="t">int</span> }
-
-<span class="k">func</span> (h *<span class="t">BudgetHook</span>) <span class="f">Name</span>() <span class="t">string</span> { <span class="k">return</span> <span class="s">"budget"</span> }
-<span class="k">func</span> (h *<span class="t">BudgetHook</span>) <span class="f">OnModelStart</span>(_ <span class="t">context.Context</span>, s *<span class="t">types.LoopState</span>) <span class="t">error</span> {
-    <span class="k">if</span> s.Iteration &gt; h.Remaining {
-        s.Stop = <span class="k">true</span> <span class="c">// 提前终止，EndHook 仍会执行</span>
-    }
-    <span class="k">return</span> <span class="k">nil</span>
-}
-
-agent := <span class="f">core.NewAgent</span>(p, core.<span class="f">WithHooks</span>(&amp;BudgetHook{Remaining: <span class="n">10</span>}))</pre>
-    </div>
-
-    <h3>执行顺序：hook 与 warp 的层次</h3>
-    <p>每个工具调用是独立单元，一次调用的完整链路（<strong>洋葱模型：hook 在节点外，warp 在节点内</strong>）：</p>
-
-    <div class="order-lane">
-      <div class="order-row">
-        <span class="o-h">① toolStart hooks<small>注册序 · approve → asker</small></span>
-        <span class="fa"></span>
-        <span class="o-w">② ToolWarp 外层<small>先注册 · safetool</small></span>
-        <span class="fa"></span>
-        <span class="o-w">③ ToolWarp 内层<small>后注册 · limit</small></span>
-        <span class="fa"></span>
-        <span class="o-c">④ tool.Invoke<small>本体</small></span>
-      </div>
-      <div class="order-row back">
-        <span class="o-back-note">结果回程（内 → 外）</span>
-        <span class="fa rev"></span>
-        <span class="o-w">⑤' ToolWarp 外层收尾<small>safetool 补上下文</small></span>
-        <span class="fa rev"></span>
-        <span class="o-w">⑤ ToolWarp 内层收尾<small>limit 归还名额</small></span>
-        <span class="fa rev"></span>
-        <span class="o-h">⑥ toolEnd hooks<small>注册序 · 可改写结果（offload）</small></span>
-      </div>
-    </div>
-
-    <table>
-      <tr><th>维度</th><th>顺序规则</th></tr>
-      <tr><td>多个 hook（同一作用点）</td><td>按 <code>WithHooks</code> 注册序，先注册先执行</td></tr>
-      <tr><td>多个 warp</td><td>按 <code>WithToolWarp</code> / <code>WithModelWarp</code> 注册序，<strong>先注册的在外层</strong>：请求外 → 内，结果内 → 外。外层能看到内层与本体的一切（如 safetool 在外层才能捕获 limit 和本体的 panic）</td></tr>
-      <tr><td>hook 与 warp 相对位置</td><td>hook 永远在 warp 之外（节点前后）：toolStart 先于一切 warp，toolEnd 晚于一切 warp</td></tr>
-      <tr><td>同一轮多个调用</td><td>各自独立并发跑完整链（判定 → 执行 → 后处理）；tool_start / tool_end 事件随调用即时发出、到达顺序不保证——<strong>消费方以 CallID 关联</strong>；消息历史按调用原序汇总写入</td></tr>
-      <tr><td>model 侧同理</td><td>modelStart → ModelWarp 链（外 → 内）→ provider → modelEnd</td></tr>
-    </table>
-
-    <ul>
-      <li><strong>判定可短路</strong> —— <code class="inline">hook.Skip(result)</code> 跳过调用（result 作为工具结果写入历史），
-        <code class="inline">hook.Abort</code> 终止 loop（联动取消其余调用）。hook 可阻塞等待人工决策
-        （审批、ask_user、规划确认都建立在这上面），多个人工审批<strong>同时呈现</strong>而非排队，引擎对「等待」零感知。</li>
-      <li><strong>默认全并发</strong> —— 调用数即并发数，不可配（SerialTools 可选串行；需要限流在 tool warp 内包信号量），
-        每个调用独立 panic 恢复，工具错误不终止 loop。</li>
-    </ul>
-
-    <h3>健壮性语义（引擎内置）</h3>
-    <ul>
-      <li><strong>工具错误回传模型自纠</strong> —— 只有 hook 报错或 <code>hook.Abort</code> 才终止 loop；</li>
-      <li><strong>历史永不断裂</strong> —— 无论完成、Skip、Abort、hook 报错还是取消，
-        每个 tool_call 都有对应结果消息：发给模型的序列永远协议完整，持久化恢复无需理解断点
-        （进入引擎前的历史由 <code>contextfix</code> 兜底）；</li>
-      <li><strong>Hook 标准防护</strong> —— 任意 hook panic 被恢复为带 hook 名与阶段的 error，单个扩展崩溃不会炸掉 loop；</li>
-      <li><strong>ctx 取消</strong> —— 循环顶部与模型调用检查 <code class="inline">ctx.Err()</code>，归类为 <code class="inline">cancelled</code> 而非 <code class="inline">error</code>；</li>
-      <li><strong>EndHook 保证执行</strong> —— defer 语义，成败皆跑。</li>
-    </ul>
-
-    <h3>双轨 API：同步与异步</h3>
-    <div class="codeblock">
-      <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">run.go</span></div>
-<pre><span class="c">// 同步：单轮 + 实时回调</span>
-state, err := agent.<span class="f">Run</span>(ctx, <span class="s">"帮我读一下 hello.txt"</span>)
-
-<span class="c">// 多轮：上一轮的 Messages 直接作为历史（system 自动去重）</span>
-state, err = agent.<span class="f">Run</span>(ctx, <span class="s">"再总结一下"</span>, core.<span class="f">WithHistory</span>(state.Messages...))
-
-<span class="c">// 异步：事件通道 + 取消（服务端场景，与 WithOnEvent 二选一）</span>
-h := agent.<span class="f">RunAsync</span>(ctx, <span class="s">"长任务"</span>)
-<span class="k">defer</span> h.<span class="f">Cancel</span>()                     <span class="c">// 幂等</span>
-<span class="k">for</span> e := <span class="k">range</span> h.<span class="f">Events</span>() { <span class="f">render</span>(e) }  <span class="c">// loop 结束自动 close</span>
-state, err = h.<span class="f">Wait</span>()</pre>
-    </div>
-    <p>RunAsync 的事件通道缓冲 256、满时阻塞 loop（不丢事件）；
-    <code class="inline">Cancel()</code> 幂等，取消后 state 归类 <code class="inline">cancelled</code>。</p>
-  </section>
-
-  <!-- ═══════════════ 03 架构全景 ═══════════════ -->
-  <section id="architecture">
-    <h2><span class="no">03</span>架构全景</h2>
-    <p class="sub">一张图看懂各组件的作用点：组装层包装节点，Hook 插入流程，引擎只负责流转。</p>
-
-    <div class="diagram-card">
-      <div class="flow">
-
-        <!-- 组装层 -->
-        <div class="flow-asm">
-          <div class="flow-asm-title">core.NewAgent(p, opts...) — 组装层</div>
-          <div class="flow-pills">
-            <div class="pill"><code>WithModelWarp(...)</code><span>纵向：包装 model 节点</span></div>
-            <div class="pill"><code>WithToolWarp(...)</code><span>纵向：包装每个 tool</span></div>
-            <div class="pill"><code>WithHooks(...)</code><span>横向：插入流程 ①—⑦</span></div>
-          </div>
-          <div class="flow-note">warp 链每次 Run 组装：工厂注入 event.Emitter（观察出口）后再包装节点，实例 per-Run 独立</div>
-        </div>
-
-        <div class="fa-v dashed"></div>
-        <div class="flow-note">橙色圆点 = Hook（横向切面，节点前后）· 紫色虚线壳 = Warp（纵向封装，节点内部）</div>
-        <div class="fa-v"></div>
-
-        <!-- Loop 引擎 -->
-        <div class="flow-engine">
-          <div class="flow-engine-title">Loop 引擎 — input → model → tools → 回边</div>
-
-          <div class="hpin">
-            <span class="dot">1</span>
-            <span class="lbl">startHook<small>注入工具 / 技能 · contextfix 修理历史</small></span>
-          </div>
-          <div class="fa-v"></div>
-
-          <div class="flow-loop">
-            <div class="flow-loop-label">loop ≤ MaxIterations</div>
-
-            <div class="flow-row">
-              <div class="hpin"><span class="dot">2</span><span class="lbl">modelStart</span></div>
-              <div class="fa"></div>
-              <div class="warp-shell">
-                <div class="warp-shell-label">ModelWarp(modelretry)</div>
-                <div class="node node-model">model<small>Invoke / Stream</small></div>
-              </div>
-              <div class="fa"></div>
-              <div class="hpin"><span class="dot">3</span><span class="lbl">modelEnd</span></div>
-              <div class="fa"></div>
-              <div class="node node-branch">tool calls?</div>
-            </div>
-
-            <div class="flow-branches">
-              <div class="tools-branch">
-                <div class="tools-head">
-                  <span class="btag">有</span>
-                  <div class="hpin"><span class="dot">4</span><span class="lbl">toolStart<small>按调用并发判定 · 审批同时呈现</small></span></div>
-                  <div class="fa"></div>
-                  <span style="font-size:11px;color:#9fb0c8;">放行的调用进入并发泳道 ↓</span>
-                </div>
-                <div class="tools-lane">
-                  <div class="warp-shell">
-                    <div class="warp-shell-label">ToolWarp(safetool)</div>
-                    <div class="node node-tool small">bash<small>call_1</small></div>
-                  </div>
-                  <div class="warp-shell">
-                    <div class="warp-shell-label">ToolWarp(safetool)</div>
-                    <div class="node node-tool small">read_file<small>call_2</small></div>
-                  </div>
-                  <div class="warp-shell">
-                    <div class="warp-shell-label">ToolWarp(safetool)</div>
-                    <div class="node node-tool small">grep<small>call_3</small></div>
-                  </div>
-                </div>
-                <div class="tools-note">同一 ToolWarp 链应用到每个调用 · 默认全部并发（调用数即并发数，SerialTools 可选串行）· panic 各自恢复</div>
-                <div class="tools-tail">
-                  <div class="hpin"><span class="dot">5</span><span class="lbl">toolEnd<small>按原序串行 · 结果入史前可改写（offload）</small></span></div>
-                  <div class="fa"></div>
-                  <span style="font-size:11px;color:#9fb0c8;">全部结果写入消息历史 → 回边</span>
-                </div>
-              </div>
-              <div class="branch-row">
-                <span class="btag">无</span>
-                <div class="hpin"><span class="dot">7</span><span class="lbl">endHook</span></div>
-                <div class="fa"></div>
-                <div class="node node-done">最终回答</div>
-              </div>
-            </div>
-
-            <div class="flow-back">
-              <span class="icon">↺</span>
-              <span>⑥ loopHook · 上下文压缩 / 配置热加载</span>
-              <span style="color:#9d8460;font-weight:500">— 回到 modelStart，进入下一轮迭代</span>
-            </div>
-          </div>
-        </div>
-
-        <div class="fa-v"></div>
-
-        <div class="flow-outs">
-          <div class="out-card">
-            <div class="t">State</div>
-            <div class="d">LoopState · Messages 可序列化<br>多轮 WithHistory · localsession 恢复</div>
-          </div>
-          <div class="out-card">
-            <div class="t">Event 流</div>
-            <div class="d">OnEvent 回调 / RunAsync 通道<br>hook 走 state.EmitEvent · warp 走注入的 Emitter</div>
-          </div>
-        </div>
-
-      </div>
-    </div>
-
-    <div class="legend">
-      <span><i class="l-hook"></i>Hook · 横向切面（节点前后）</span>
-      <span><i class="l-warp"></i>Warp · 纵向封装（节点内部）</span>
-      <span><i class="l-model"></i>model 节点</span>
-      <span><i class="l-tool"></i>tool 节点（每调用一个）</span>
-      <span><i class="l-back"></i>迭代回边</span>
-    </div>
-  </section>
-
-  <!-- ═══════════════ 04 第一个 Agent ═══════════════ -->
-  <section id="first-agent">
-    <h2><span class="no">04</span>第一个 Agent</h2>
+  <!-- ═══════════════ 02 快速开始 ═══════════════ -->
+  <section id="quickstart">
+    <h2><span class="no">02</span>快速开始</h2>
     <p class="sub">十行代码跑起来 —— OpenAI 兼容接口（DeepSeek / SiliconFlow / vLLM / Ollama 通用）。</p>
 
     <div class="codeblock">
       <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">main.go</span></div>
-<pre><span class="k">package</span> main
-
-<span class="k">import</span> (
-    <span class="s">"context"</span>
-    <span class="s">"fmt"</span>
-    <span class="s">"os"</span>
-
-    <span class="s">"github.com/xuanlv2002/ezloop/core"</span>
-    <span class="s">"github.com/xuanlv2002/ezloop/ext/provider/openai"</span>
+<pre>agent := core.<span class="f">NewAgent</span>(p,
+    core.<span class="f">WithSystemPrompt</span>(<span class="s">"你是一个严谨的助手"</span>),
+    core.<span class="f">WithModelWarp</span>(modelretry.<span class="f">Warp</span>()),   <span class="c">// 模型节点：重试</span>
+    core.<span class="f">WithToolWarp</span>(limit.<span class="f">Warp</span>(<span class="n">4</span>), safetool.<span class="f">Warp</span>()), <span class="c">// 工具节点：并发闸 + 防护</span>
+    core.<span class="f">WithHooks</span>(filetools.<span class="f">New</span>(fsys)),      <span class="c">// 流：文件工具</span>
+    core.<span class="f">WithStreaming</span>(<span class="k">true</span>),
 )
 
-<span class="k">func</span> <span class="f">main</span>() {
-    p := openai.<span class="f">New</span>(openai.Options{
-        BaseURL: os.<span class="f">Getenv</span>(<span class="s">"OPENAI_BASE_URL"</span>),
-        APIKey:  os.<span class="f">Getenv</span>(<span class="s">"OPENAI_API_KEY"</span>),
-        Model:   <span class="s">"deepseek-ai/DeepSeek-V3.2"</span>,
-    })
-    agent := core.<span class="f">NewAgent</span>(p, core.<span class="f">WithSystemPrompt</span>(<span class="s">"你是一个严谨的助手"</span>))
+<span class="c">// 同步单轮</span>
+state, err := agent.<span class="f">Run</span>(ctx, <span class="s">"帮我读一下 hello.txt"</span>)
 
-    state, err := agent.<span class="f">Run</span>(context.<span class="f">Background</span>(), <span class="s">"用一句话介绍 loop 引擎"</span>)
-    <span class="k">if</span> err != <span class="k">nil</span> {
-        <span class="f">panic</span>(err)
-    }
-    fmt.<span class="f">Println</span>(state.Messages[<span class="f">len</span>(state.Messages)-<span class="n">1</span>].Content)
-}</pre>
+<span class="c">// 多轮：上一轮 Messages 直接作为历史（system 自动过滤，不重复注入）</span>
+state, err = agent.<span class="f">Run</span>(ctx, <span class="s">"再总结一下"</span>, core.<span class="f">WithHistory</span>(state.Messages...))</pre>
     </div>
 
-    <div class="tip">
-      <b>下一步：</b>加工具（<code>WithTools</code>）、加流式（<code>WithStreaming(true)</code> + <code>WithOnEvent</code>），
-      或者直接看 <a href="#local-agent">构建本地 Agent</a> —— 一个集成全部官方扩展的完整示例。
-    </div>
-  </section>
+    <h3>流式与异步（服务端场景）</h3>
+    <div class="codeblock">
+      <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">async.go</span></div>
+<pre>h := agent.<span class="f">RunAsync</span>(ctx, <span class="s">"长任务"</span>)
+<span class="k">defer</span> h.<span class="f">Cancel</span>()                      <span class="c">// per-request 取消传播</span>
+<span class="k">for</span> e := <span class="k">range</span> h.<span class="f">Events</span>() { render(e) } <span class="c">// loop 结束自动 close；channel 天然并发安全</span>
+state, err := h.<span class="f">Wait</span>()
 
-  <!-- ═══════════════ 05 官方扩展指南 ═══════════════ -->
-  <section id="ext">
-    <h2><span class="no">05</span>官方扩展指南</h2>
-    <p class="sub">所有能力都在 ext/ 层，按需引入 —— 不用不依赖。</p>
-
-    <h3>底座</h3>
-    <div class="ext">
-      <h3>ext/fs <span class="badge base">底座</span></h3>
-      <p>FileSystem 核心接口（Read / Write / List）+ 两个可选能力接口：
-      <code class="inline">Modifier</code>（Edit / ApplyPatch 原子补丁）、<code class="inline">Searcher</code>（Grep / Find）。
-      Local 实现全部能力，带 root 沙箱（路径穿越被拒绝）与补丁预检 + 回滚。</p>
-      <div class="codeblock">
-        <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">fs.go</span></div>
-<pre>fsys := fs.<span class="f">NewLocal</span>(<span class="s">"."</span>)              <span class="c">// 沙箱 = 当前目录</span>
-data, _  := fsys.<span class="f">Read</span>(ctx, <span class="s">"a.txt"</span>)
-_        = fsys.<span class="f">Write</span>(ctx, <span class="s">"b.txt"</span>, []<span class="t">byte</span>(<span class="s">"hi"</span>))
-entries, _ := fsys.<span class="f">List</span>(ctx, <span class="s">"."</span>)
-
-<span class="c">// 能力探测：filetools 等下游按实现注册工具</span>
-<span class="k">if</span> m, ok := fsys.(fs.<span class="t">Modifier</span>); ok  { m.<span class="f">Edit</span>(ctx, <span class="s">"a.txt"</span>, <span class="s">"old"</span>, <span class="s">"new"</span>) }
-<span class="k">if</span> s, ok := fsys.(fs.<span class="t">Searcher</span>); ok { s.<span class="f">Grep</span>(ctx, fs.GrepRequest{Pattern: <span class="s">"TODO"</span>}) }</pre>
-      </div>
-    </div>
-
-    <h3>model 节点</h3>
-    <div class="ext">
-      <h3>ext/provider/openai <span class="badge model">model</span></h3>
-      <p>OpenAI 兼容 Provider：Invoke + SSE 流式（tool call 增量聚合、usage 统计），
-      兼容 DeepSeek / SiliconFlow / vLLM / Ollama。</p>
-      <div class="codeblock">
-        <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">provider.go</span></div>
-<pre>p := openai.<span class="f">New</span>(openai.Options{
-    BaseURL: <span class="s">"https://api.siliconflow.cn/v1"</span>,
-    APIKey:  <span class="s">"sk-xxx"</span>,
-    Model:   <span class="s">"deepseek-ai/DeepSeek-V3.2"</span>,
-    Headers: <span class="k">map</span>[<span class="t">string</span>]<span class="t">string</span>{<span class="s">"X-Custom"</span>: <span class="s">"v"</span>},  <span class="c">// 可选</span>
-})
-<span class="c">// 同时实现 Invoke 与 Stream：WithStreaming(true) 时自动走流式</span></pre>
-      </div>
-    </div>
-
-    <h3>Warp：节点装饰器</h3>
-    <div class="ext">
-      <h3>ext/warp/model/modelretry <span class="badge warp">warp</span></h3>
-      <p>模型重试：指数退避 + 抖动；流式仅在尚未发出 chunk 时重试（已发出的内容不可撤回）。
-      每次重试发出 <code class="inline">modelretry.retry</code> 事件（含尝试序号、失败原因、退避时长），
-      经引擎事件流到达 OnEvent / RunAsync，前端可渲染「第 N 次失败，Xms 后重试」。
-      默认只重试可重试错误（<code class="inline">openai.HTTPError</code> 的 408/429/5xx、未知错误保守重试、取消不重试），
-      <code class="inline">Options.RetryIf</code> 可按错误信息任意自定义。</p>
-      <div class="codeblock">
-        <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">retry.go</span></div>
-<pre>agent := core.<span class="f">NewAgent</span>(p, core.<span class="f">WithModelWarp</span>(modelretry.<span class="f">Warp</span>()))
-<span class="c">// 自定义可重试判定：</span>
-core.<span class="f">WithModelWarp</span>(modelretry.<span class="f">Warp</span>(<span class="k">func</span>(o *modelretry.Options) {
-    o.RetryIf = <span class="k">func</span>(err error) <span class="t">bool</span> { <span class="k">return</span> !strings.<span class="f">Contains</span>(err.<span class="f">Error</span>(), <span class="s">"quota"</span>) }
-}))
-<span class="c">// 降级 / 多模型路由？自己写一个 warp.ModelHandler：func(ModelProvider) ModelProvider</span></pre>
-      </div>
-    </div>
-
-    <div class="ext">
-      <h3>ext/warp/tool/safetool <span class="badge warp">warp</span></h3>
-      <p>工具防护：panic 恢复为 error（附工具名），工具错误附加上下文 —— 单个工具崩溃不炸 loop。</p>
-      <div class="codeblock">
-        <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">safe.go</span></div>
-<pre>core.<span class="f">WithToolWarp</span>(safetool.<span class="f">Warp</span>())
-<span class="c">// Warp 挂载在 ToolRegistry 上：静态注册与 hook 运行时注入的工具都会被包装</span></pre>
-      </div>
-    </div>
-
-    <h3>Hook：流程插件</h3>
-
-    <div class="ext">
-      <h3>ext/hook/mcp <span class="badge hook">hook</span></h3>
-      <p>MCP 接入：mcpRouter 单工具封装。模型只看到一个 schema 恒定的 <code class="inline">mcp_router</code> 工具 ——
-      KV cache 友好、server 列表热加载、ACL / OAuth 内聚在 router 内部，模型通过
-      <code class="inline">action: list_tools</code> 自发现工具。内置官方 go-sdk。</p>
-      <div class="codeblock">
-        <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">mcp.go</span></div>
-<pre>cfg := mcp.Config{
-    Servers: []mcp.ServerConfig{{
-        Name:    <span class="s">"fs"</span>,
-        Factory: mcp.<span class="f">StreamableHTTP</span>(<span class="s">"https://mcp.example.com"</span>,
-            <span class="k">map</span>[<span class="t">string</span>]<span class="t">string</span>{<span class="s">"Authorization"</span>: <span class="s">"Bearer xxx"</span>}),
-        <span class="c">// Allow: []string{"read_*"},  // 可选 ACL 白名单</span>
-    }},
-}
-agent := core.<span class="f">NewAgent</span>(p, core.<span class="f">WithHooks</span>(mcp.<span class="f">NewHook</span>(cfg)))
-<span class="c">// 模型调用 mcp_router：action=list_tools 发现 → action=call_tool 执行</span></pre>
-      </div>
-    </div>
-
-    <div class="ext">
-      <h3>ext/hook/skill <span class="badge hook">hook</span></h3>
-      <p>技能注入：代码定义，或从 FS 目录加载 <code class="inline">*.md</code>（可选同名 <code class="inline">.keywords</code> 文件）；
-      按输入关键词匹配，命中才注入对应 system 指令。</p>
-      <div class="codeblock">
-        <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">skill.go</span></div>
-<pre><span class="c">// 方式一：代码定义</span>
-h := skill.<span class="f">New</span>(skill.Skill{
-    Name: <span class="s">"sql"</span>, Description: <span class="s">"SQL 书写规范"</span>,
-    Keywords:     []<span class="t">string</span>{<span class="s">"sql"</span>, <span class="s">"查询"</span>},
-    Instructions: <span class="s">"所有查询必须带 LIMIT ..."</span>,
-})
-
-<span class="c">// 方式二：目录加载 skills/*.md + skills/foo.keywords</span>
-h, err := skill.<span class="f">NewFromFS</span>(ctx, fsys, <span class="s">"skills"</span>)
-
-agent := core.<span class="f">NewAgent</span>(p, core.<span class="f">WithHooks</span>(h))</pre>
-      </div>
-    </div>
-
-    <div class="ext">
-      <h3>ext/hook/approve <span class="badge hook">hook</span></h3>
-      <p>工具审批：OnToolStart 发出 <code class="inline">approve.request</code> 事件后阻塞，
-      直到使用方经 Decisions channel 送回决策 —— 中断 = goroutine 阻塞，恢复 = channel 来数据。
-      拒绝理由经 <code class="inline">hook.Skip("denied: ...")</code> 成为工具结果进入历史，模型看得见为什么被拒。</p>
-      <div class="codeblock">
-        <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">approve.go</span></div>
-<pre>h, decisions := approve.<span class="f">New</span>(<span class="k">func</span>(c *types.ToolCall) <span class="t">bool</span> {
-    <span class="k">if</span> c.Name == <span class="s">"bash"</span> {                    <span class="c">// 参数值级判断：</span>
-        <span class="k">var</span> a <span class="k">struct</span>{ Command <span class="t">string</span> <span class="s">`json:"command"`</span> }
-        _ = json.<span class="f">Unmarshal</span>(c.Args, &amp;a)
-        <span class="k">return</span> !<span class="f">isReadOnly</span>(a.Command)       <span class="c">// 只读命令免审，其余中断等确认</span>
-    }
-    <span class="k">return</span> c.Name != <span class="s">"read_file"</span>           <span class="c">// false = 免审放行；nil = 全部审批</span>
-})
-agent := core.<span class="f">NewAgent</span>(p, core.<span class="f">WithHooks</span>(h))
-
-<span class="c">// 决策端：OnEvent 呈现请求，独立 goroutine 送回（同步送回会死锁）</span>
+<span class="c">// 或回调式（CLI 直渲）：实现必须并发安全且快速返回</span>
 core.<span class="f">WithOnEvent</span>(<span class="k">func</span>(e event.Event) {
-    <span class="k">if</span> e.Type != approve.EventRequest { <span class="k">return</span> }
-    call := e.Data.(*types.ToolCall)
-    <span class="k">go func</span>() {
-        decisions &lt;- approve.Decision{CallID: call.ID, Approve: <span class="f">askHuman</span>(call)}
-    }()
+    <span class="k">switch</span> e.Type {
+    <span class="k">case</span> event.EventModelChunk:     <span class="f">print</span>(e.Data.(<span class="k">string</span>)) <span class="c">// 正文增量</span>
+    <span class="k">case</span> event.EventReasoningChunk: <span class="f">print</span>(e.Data.(<span class="k">string</span>)) <span class="c">// 思考增量</span>
+    }
 })</pre>
-      </div>
-      <div class="tip">
-        <b>多租户：</b>每会话一套 hook 实例（即一套 channel），事件推给前端，前端按钮回包即送回 channel ——
-        判定段并发：多个审批请求同时呈现、各带 CallID；决策 channel 共享一个，
-        内部按 CallID 路由到正确的等待者（错配暂存，不匹配的过期决策自动忽略）。
-      </div>
     </div>
 
-    <div class="ext">
-      <h3>ext/hook/askuser <span class="badge hook">hook</span></h3>
-      <p>ask_user 工具：模型向用户提问，循环中断等待回答，回答原样作为工具结果进入历史。
-      与 approve 完全同构（事件 + channel），壳工具由 hook 在 OnStart 自动注册，无需 WithTools。</p>
-      <div class="codeblock">
-        <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">askuser.go</span></div>
-<pre>h, answers := askuser.<span class="f">New</span>()
-agent := core.<span class="f">NewAgent</span>(p, core.<span class="f">WithHooks</span>(h))
-<span class="c">// OnEvent 收到 askuser.request（Args.question）→</span>
-<span class="c">// answers &lt;- askuser.Answer{CallID: call.ID, Input: 用户的回答}</span></pre>
-      </div>
-    </div>
-
-    <div class="ext">
-      <h3>ext/hook/taskplan <span class="badge hook">hook</span></h3>
-      <p>task_plan 工具：模型提交任务规划后中断等待用户处置 ——
-      <code class="inline">Execute</code>（按规划执行）/ <code class="inline">Reject</code>（否决）/
-      <code class="inline">Revise</code>（按修改意见调整后重新提交）。处置意见作为工具结果返回，
-      模型据此继续或修订，修订后重新提交会再次进入等待 —— 天然闭环。</p>
-      <div class="codeblock">
-        <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">taskplan.go</span></div>
-<pre>h, decisions := taskplan.<span class="f">New</span>()
-agent := core.<span class="f">NewAgent</span>(p, core.<span class="f">WithHooks</span>(h))
-<span class="c">// 用户反馈 →</span>
-decisions &lt;- taskplan.Decision{Kind: taskplan.Revise, Input: <span class="s">"加一步压测"</span>}</pre>
-      </div>
-    </div>
-
-    <div class="ext">
-      <h3>ext/hook/task <span class="badge hook">hook</span></h3>
-      <p>task 工具：一个「上下文隔离」工具（fork）。模型调用 task 求解可隔离子问题时，
-      不是注入独立 subAgent，而是复刻当前 Agent（同一 provider / warp / 超参 / 系统提示词）
-      与当前上下文，在隔离的消息历史上再跑一轮 model↔tool 循环——子循环内部的过程性上下文
-      不回流主上下文，只有最终答案作为工具结果回传。多个 task 调用同轮并发 fork；
-      单层（fork 不能再 fork）；fork 内事件带 taskId 标识。</p>
-      <div class="codeblock">
-        <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">task.go</span></div>
-<pre>h := task.<span class="f">New</span>()                           <span class="c">// 无需 provider：fork 复用当前 Agent</span>
-agent := core.<span class="f">NewAgent</span>(p, core.<span class="f">WithHooks</span>(h))
-h.<span class="f">Bind</span>(agent)                             <span class="c">// 组装后绑定：hook 据此复刻 Agent 跑 fork</span>
-<span class="c">// 模型调用 task 工具 → 复刻上下文 → 隔离子循环 → 只回传最终答案</span></pre>
-      </div>
-    </div>
-
-    <div class="ext">
-      <h3>ext/hook/contextfix <span class="badge hook">hook</span></h3>
-      <p>历史修理（双向）：Run 开始时（OnStart）给缺失 tool 结果的调用补占位消息、
-      删除对应 assistant 已丢失的孤儿 tool 消息 ——
-      引擎保证本轮产生的历史完整，本 hook 保证历史进入引擎前完整
-      （外部注入的残缺历史、旧版本存档）。完整历史原样返回，零分配。</p>
-      <div class="codeblock">
-        <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">contextfix.go</span></div>
-<pre>core.<span class="f">WithHooks</span>(
-    contextfix.<span class="f">New</span>(),  <span class="c">// 建议挂 hooks 首位：历史先修理，后续 hook 再消费</span>
-    <span class="c">// ...</span>
-)</pre>
-      </div>
-    </div>
-
-    <div class="ext">
-      <h3>ext/hook/offload <span class="badge hook">hook</span></h3>
-      <p>大结果卸载（ToolEndHook）：超过阈值（默认 4KB）的工具结果写入 FS，上下文只留摘要 + 路径；
-      写失败降级透传。结果后处理不耦合工具节点本身——挂在收尾段改写 result，
-      故为 hook 而非 warp。</p>
-      <div class="codeblock">
-        <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">offload.go</span></div>
-<pre>core.<span class="f">WithHooks</span>(offload.<span class="f">New</span>(fsys))
-<span class="c">// grep 全仓 500 条命中？写进 .ezloop/offload/，模型上下文只留前 512 字节 + 文件路径</span></pre>
-      </div>
-    </div>
-
-    <div class="ext">
-      <h3>ext/hook/filetools <span class="badge hook">hook</span></h3>
-      <p>文件工具集：按传入 FS 的能力注册 —— read_file（行分页 / 50KB 上限）、write_file、list_dir，
-      + edit_file / apply_patch（需 Modifier）、grep / find（需 Searcher）、bash（需 EnableExec）。
-      修改类操作走 per-path 队列串行化，防止并发写冲突。建议配 approve。</p>
-      <div class="codeblock">
-        <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">filetools.go</span></div>
-<pre>h := filetools.<span class="f">New</span>(fsys, <span class="k">func</span>(o *filetools.Options) { o.EnableExec = <span class="k">true</span> })
-agent := core.<span class="f">NewAgent</span>(p, core.<span class="f">WithHooks</span>(h))
-<span class="c">// bash：shell 语义单命令字符串（Windows: cmd /c，Unix: sh -c），支持管道与 &&</span></pre>
-      </div>
-    </div>
-
-    <div class="ext">
-      <h3>ext/hook/summary <span class="badge hook">hook</span></h3>
-      <p>自动摘要：loop 结束时用模型生成当轮摘要写入 <code class="inline">state.Metadata["summary"]</code>；
-      失败只记 <code class="inline">summary_error</code>，永不影响主流程。</p>
-      <div class="codeblock">
-        <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">summary.go</span></div>
-<pre>core.<span class="f">WithHooks</span>(summary.<span class="f">New</span>(p, <span class="s">""</span>))  <span class="c">// 第二参数：自定义摘要 prompt</span></pre>
-      </div>
-    </div>
-
-    <div class="ext">
-      <h3>ext/hook/localsession <span class="badge hook">hook</span></h3>
-      <p>会话持久化：每轮 EndHook 滚动快照到 <code class="inline">sessions/&lt;id&gt;.json</code>；
-      Load / List 恢复续聊 —— 「状态即消息」的落地。</p>
-      <div class="codeblock">
-        <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">session.go</span></div>
-<pre>session := localsession.<span class="f">New</span>(fsys, <span class="s">""</span>)          <span class="c">// 空 id 自动生成</span>
-agent := core.<span class="f">NewAgent</span>(p, core.<span class="f">WithHooks</span>(session))
-
-<span class="c">// 恢复历史会话</span>
-s, _ := localsession.<span class="f">Load</span>(ctx, fsys, <span class="s">""</span>, id)
-state, _ := agent.<span class="f">Run</span>(ctx, <span class="s">"继续刚才的话题"</span>, core.<span class="f">WithHistory</span>(s.Messages...))</pre>
-      </div>
+    <div class="tip">
+      <b>完整示例：</b><code>examples/chat</code> 集成全部官方能力（流式渲染节流 / 工具审批 / 分身 task / 会话持久化恢复），
+      <code>cp .env.example .env && go run ./examples/chat</code> 直接体验。
     </div>
   </section>
 
-  <!-- ═══════════════ 06 构建本地 Agent ═══════════════ -->
-  <section id="local-agent">
-    <h2><span class="no">06</span>构建本地 Agent</h2>
-    <p class="sub">CLI 交互 · 文件沙箱 · 审批 / 提问 / 规划确认 · 技能 · 会话持久化 · 流式输出 —— 完整代码见 examples/chat。</p>
+  <!-- ═══════════════ 03 钩子使用 ═══════════════ -->
+  <section id="hooks">
+    <h2><span class="no">03</span>详细介绍 · 钩子（Hook）</h2>
+    <p class="sub">hook 是横向切面：挂在循环的节点前后，拿得到完整 state —— 拦截、注入、改写、收尾。</p>
 
+    <table>
+      <tr><th>接口</th><th>时机</th><th>典型用途</th></tr>
+      <tr><td><code>StartHook</code></td><td>Run 开始（组装期，一次）</td><td>注册工具（mcp/filetools/task）、修理历史（contextfix）</td></tr>
+      <tr><td><code>ModelStartHook</code></td><td>每次模型调用前</td><td>置 <code>state.Stop</code> 提前终止、上下文预压缩</td></tr>
+      <tr><td><code>ModelEndHook</code></td><td>模型调用后</td><td>响应审计、用量记账</td></tr>
+      <tr><td><code>ToolStartHook</code></td><td>每个工具调用前（跨调用并发）</td><td>审批拦截、权限判定</td></tr>
+      <tr><td><code>ToolEndHook</code></td><td>调用后、入史前（跨调用并发）</td><td>改写结果（offload 卸载大结果）</td></tr>
+      <tr><td><code>LoopHook</code></td><td>迭代回边</td><td>max-iteration 守卫、配置热加载</td></tr>
+      <tr><td><code>EndHook</code></td><td>Run 结束（defer 语义，成败都跑）</td><td>会话快照（localsession）、摘要（summary）</td></tr>
+    </table>
+
+    <h3>短路语义：Action</h3>
+    <p class="sub">ToolStartHook 返回 <code>Action</code>——<b>决策与结果是一体的</b>，不分离两处：</p>
     <div class="codeblock">
-      <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">chat.go — 组装（完整版运行：go run ./examples/chat）</span></div>
-<pre>fsys := fs.<span class="f">NewLocal</span>(<span class="s">"."</span>)                        <span class="c">// ① 沙箱 = 当前目录</span>
-session := localsession.<span class="f">New</span>(fsys, <span class="s">""</span>)            <span class="c">// ② 会话持久化</span>
-skillHook, err := skill.<span class="f">NewFromFS</span>(ctx, fsys, <span class="s">"skills"</span>)  <span class="c">// ③ 技能目录</span>
-<span class="k">if</span> err != <span class="k">nil</span> { skillHook = skill.<span class="f">New</span>() }              <span class="c">//   目录不存在则空集</span>
+      <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">action.go</span></div>
+<pre><span class="k">return</span> hook.<span class="f">Proceed</span>, <span class="k">nil</span>            <span class="c">// 正常执行</span>
+<span class="k">return</span> hook.<span class="f">Abort</span>, <span class="k">nil</span>              <span class="c">// 终止整个 loop（StopReason = aborted）</span>
+<span class="k">return</span> hook.<span class="f">Skip</span>(<span class="s">"denied by policy"</span>), <span class="k">nil</span> <span class="c">// 跳过本次调用，文案作为工具结果入史，循环继续</span></pre>
+    </div>
+    <div class="tip"><b>引擎不变量：</b>任何退出路径（完成 / skip / abort / hook 错误 / 取消）下，每个 tool_call 必有结果消息——发给模型的序列永远协议完整，持久化恢复无需理解断点。</div>
 
-<span class="c">// ④ 人机交互三件套：审批 / 提问 / 规划，同一套事件 + channel 模式</span>
-scanner := bufio.<span class="f">NewScanner</span>(os.Stdin)
-approver, approveCh := approve.<span class="f">New</span>(<span class="k">func</span>(c *types.ToolCall) <span class="t">bool</span> {
-    <span class="k">switch</span> c.Name {
-    <span class="k">case</span> <span class="s">"read_file"</span>, <span class="s">"list_dir"</span>, <span class="s">"grep"</span>, <span class="s">"find"</span>, <span class="s">"now"</span>:
-        <span class="k">return</span> <span class="k">false</span>                          <span class="c">// 只读免审</span>
-    <span class="k">case</span> askuser.ToolName, taskplan.ToolName:
-        <span class="k">return</span> <span class="k">false</span>                          <span class="c">// 人机交互工具免审，否则双重中断（先审批再等回答）</span>
-    }
-    <span class="k">return</span> <span class="k">true</span>
-})
-asker, answerCh := askuser.<span class="f">New</span>()
-planner, planCh := taskplan.<span class="f">New</span>()
+    <h3>自定义 hook：参数级审批</h3>
+    <div class="codeblock">
+      <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">guard.go</span></div>
+<pre><span class="k">type</span> Guard <span class="k">struct</span>{}
 
-agent := core.<span class="f">NewAgent</span>(p,
-    core.<span class="f">WithSystemPrompt</span>(<span class="s">"你是命令行助手，能用工具就用工具"</span>),
-    core.<span class="f">WithModelWarp</span>(modelretry.<span class="f">Warp</span>()),               <span class="c">// ⑤ 重试</span>
-    core.<span class="f">WithToolWarp</span>(safetool.<span class="f">Warp</span>()),               <span class="c">// ⑥ 工具防护</span>
-    core.<span class="f">WithHooks</span>(
-        contextfix.<span class="f">New</span>(),   <span class="c">// ⑦ 历史修理：/resume 旧存档防悬空 tool_call</span>
-        offload.<span class="f">New</span>(fsys),  <span class="c">// ⑧ 大结果卸载</span>
-        filetools.<span class="f">New</span>(fsys, <span class="k">func</span>(o *filetools.Options) { o.EnableExec = <span class="k">true</span> }),
-        skillHook, approver, asker, planner, summary.<span class="f">New</span>(p, <span class="s">""</span>), session,
-    ),
-    core.<span class="f">WithStreaming</span>(<span class="k">true</span>),
-    core.<span class="f">WithOnEvent</span>(<span class="k">func</span>(e event.Event) {              <span class="c">// ⑨ 流式渲染 + CLI 决策桥</span>
-        <span class="k">switch</span> e.Type {
-        <span class="k">case</span> event.EventModelChunk: fmt.<span class="f">Print</span>(e.Data.(<span class="t">string</span>))
-        <span class="k">case</span> event.EventToolStart:  fmt.<span class="f">Printf</span>(<span class="s">"\n🔧 %s "</span>, e.Data.(*types.ToolCall).Name)
-        <span class="k">case</span> approve.EventRequest:  <span class="c">// 其余两个桥同构，见 examples/chat</span>
-            call := e.Data.(*types.ToolCall)
-            <span class="k">go func</span>() {
-                fmt.<span class="f">Printf</span>(<span class="s">"\n⚠️  放行 %s? [y/N] "</span>, call.Name)
-                scanner.<span class="f">Scan</span>()
-                approveCh &lt;- approve.Decision{CallID: call.ID,
-                    Approve: strings.<span class="f">EqualFold</span>(strings.<span class="f">TrimSpace</span>(scanner.Text()), <span class="s">"y"</span>)}
-            }()
+<span class="k">func</span> (Guard) <span class="f">Name</span>() <span class="k">string</span> { <span class="k">return</span> <span class="s">"guard"</span> }
+
+<span class="k">func</span> (Guard) <span class="f">OnToolStart</span>(_ context.Context, _ *types.LoopState, call *types.ToolCall) (hook.Action, <span class="k">error</span>) {
+    <span class="k">if</span> call.Name == <span class="s">"bash"</span> {
+        <span class="k">var</span> a <span class="k">struct</span>{ Command <span class="k">string</span> `json:<span class="s">"command"</span>` }
+        _ = json.<span class="f">Unmarshal</span>(call.Args, &amp;a)
+        <span class="k">if</span> !isReadOnly(a.Command) {
+            <span class="k">return</span> hook.<span class="f">Skip</span>(<span class="s">"bash: read-only commands only"</span>), <span class="k">nil</span>
         }
-    }),
-)</pre>
+    }
+    <span class="k">return</span> hook.<span class="f">Proceed</span>, <span class="k">nil</span>
+}
+
+agent := core.<span class="f">NewAgent</span>(p, core.<span class="f">WithHooks</span>(Guard{})) <span class="c">// 实现了哪个接口就挂到哪个时机</span></pre>
     </div>
 
-    <h3>多轮对话主循环</h3>
+    <div class="tip">
+      <b>两条时序规则：</b>① 同一作用点多个 hook 按注册序执行，先注册先跑；② 除 OnToolStart / OnToolEnd
+      （跨调用并发，多个人工审批同时呈现）外，引擎串行调用全部回调——回调内可放心读写 state，
+      并发回调里写共享数据须自行加锁。
+      <b>fork 分身全继承运行期 hook</b>（审批无旁路、分身可问用户），组装期 hook 不重跑。
+    </div>
+  </section>
+
+  <!-- ═══════════════ 04 Warp 使用 ═══════════════ -->
+  <section id="warp">
+    <h2><span class="no">04</span>详细介绍 · Warp（节点装饰器）</h2>
+    <p class="sub">warp 是纵向封装：包住节点本身（在节点内部），管「怎么执行」——重试、防护、限流、缓存。它拿不到 state，只发出观察事件。</p>
+
+    <table>
+      <tr><th></th><th>Hook（横向切面）</th><th>Warp（纵向封装）</th></tr>
+      <tr><td><b>位置</b></td><td>节点外（前后）</td><td>节点内（包住节点）</td></tr>
+      <tr><td><b>能拿到</b></td><td>完整 LoopState</td><td>per-Run event.Emitter（只观察）</td></tr>
+      <tr><td><b>典型</b></td><td>审批、注入、持久化</td><td>重试、panic 防护、并发闸</td></tr>
+    </table>
+
     <div class="codeblock">
-      <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">loop.go</span></div>
-<pre><span class="k">var</span> history []types.Message
-<span class="k">for</span> {
-    fmt.<span class="f">Print</span>(<span class="s">"\n你: "</span>)
-    <span class="k">if</span> !scanner.<span class="f">Scan</span>() { <span class="k">return</span> }
-    input := strings.<span class="f">TrimSpace</span>(scanner.Text())
+      <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">warp.go</span></div>
+<pre><span class="c">// 装饰器签名：组装时注入 per-Run 事件出口（类比 net/http middleware）</span>
+<span class="k">type</span> Handler[T <span class="k">any</span>] <span class="k">func</span>(em event.Emitter, node T) T
 
-    <span class="c">// Ctrl+C 只取消当轮：换一个可取消的子 ctx，主循环继续</span>
-    turnCtx, cancelTurn := context.<span class="f">WithCancel</span>(ctx)
+<span class="c">// 洋葱序：先注册的在外层 —— 请求外→内，结果内→外</span>
+core.<span class="f">WithToolWarp</span>(safetool.<span class="f">Warp</span>(), limit.<span class="f">Warp</span>(<span class="n">4</span>))
+<span class="c">// safetool 在外层才能捕获 limit 与工具本体的 panic</span>
 
-    state, err := agent.<span class="f">Run</span>(turnCtx, input, core.<span class="f">WithHistory</span>(history...))
-    cancelTurn()
-    <span class="k">if</span> err != <span class="k">nil</span> { <span class="k">continue</span> }          <span class="c">// 工具错误早已回传模型自纠，这里只剩中止类</span>
-
-    history = state.Messages          <span class="c">// 下一轮直接复用（session 已自动快照）</span>
+<span class="c">// 自定义：跨全部工具共享的计时 warp（状态在工厂闭包里，per-Run 组装）</span>
+<span class="k">func</span> <span class="f">Timing</span>() warp.ToolHandler {
+    <span class="k">var</span> mu sync.Mutex
+    total := time.<span class="f">Duration</span>(<span class="n">0</span>)
+    <span class="k">return</span> <span class="k">func</span>(_ event.Emitter, inner types.Tool) types.Tool {
+        <span class="k">return</span> toolFunc(<span class="k">func</span>(ctx context.Context, args json.RawMessage) (<span class="k">string</span>, <span class="k">error</span>) {
+            start := time.<span class="f">Now</span>()
+            out, err := inner.<span class="f">Invoke</span>(ctx, args)
+            mu.<span class="f">Lock</span>(); total += time.<span class="f">Since</span>(start); mu.<span class="f">Unlock</span>()
+            <span class="k">return</span> out, err
+        }, inner)
+    }
 }</pre>
     </div>
 
     <div class="tip">
-      <b>运行：</b><code>cp .env.example .env</code> 填入 API Key，然后 <code>go run ./examples/chat</code>。
-      支持 /new、/sessions、/resume &lt;id&gt;、/exit 命令与 Ctrl+C 取消当轮。
+      <b>挂载点是 ToolRegistry：</b>静态注册（<code>WithTools</code>）与 hook 运行时注入的工具（mcp 等）都会被包装；
+      warp 实例 per-Run 独立，状态不跨 Run 共享。<code>modelretry</code> 默认裸引擎不内置——生产建议必挂。
     </div>
   </section>
 
-  <!-- ═══════════════ 07 WEB AGENT 内核 ═══════════════ -->
-  <section id="web-kernel">
-    <h2><span class="no">07</span>作为 Web Agent 内核</h2>
-    <p class="sub">ezloop 不绑定任何 Web 框架 —— RunAsync + 事件通道就是你的服务端内核。</p>
+  <!-- ═══════════════ 05 官方扩展能力 ═══════════════ -->
+  <section id="ext">
+    <h2><span class="no">05</span>详细介绍 · 官方扩展能力</h2>
+    <p class="sub">所有能力都在 ext/ 层，按需引入 —— 不用不依赖，官方 SDK 依赖不进框架层。</p>
 
-    <p>三个关键映射：</p>
-    <ul>
-      <li><strong>请求 ctx → RunAsync ctx</strong>：客户端断开自动取消，state 归类 <code class="inline">cancelled</code>；</li>
-      <li><strong>Events 通道 → SSE / WebSocket</strong>：loop 结束通道自动 close，<code class="inline">range</code> 自然退出；</li>
-      <li><strong>state.Messages → 会话存储</strong>：轮次结束 <code class="inline">Wait()</code> 拿最终 state，
-        下轮 <code class="inline">WithHistory</code> 带回（或直接用 localsession 落盘）。</li>
-    </ul>
+    <table>
+      <tr><th>扩展</th><th>类型</th><th>说明</th></tr>
+      <tr><td><code>ext/fs</code></td><td>底座</td><td>FileSystem 核心 + 可选 Modifier（Edit/ApplyPatch）/ Searcher（Grep/Find）；Local 实现（root 沙箱、补丁预检+回滚）</td></tr>
+      <tr><td><code>ext/provider/openai</code></td><td>model</td><td>OpenAI 兼容 Provider（Invoke + SSE 流式 + reasoning 思考流），兼容 DeepSeek / SiliconFlow / vLLM / Ollama；缓存命中双协议解析</td></tr>
+      <tr><td><code>ext/warp/model/modelretry</code></td><td>warp</td><td>模型重试：指数退避，流式仅在未发出 chunk 时重试（生产必挂）</td></tr>
+      <tr><td><code>ext/warp/tool/limit</code></td><td>warp</td><td>工具并发闸：跨全部工具共享信号量，限制一轮 fan-out 实际并发</td></tr>
+      <tr><td><code>ext/warp/tool/safetool</code></td><td>warp</td><td>panic 恢复 + error 附加上下文（注册在 limit 外层）</td></tr>
+      <tr><td><code>ext/hook/mcp</code></td><td>hook</td><td>mcpRouter 单工具封装：schema 恒定（KV cache 友好）、配置热加载，内置官方 go-sdk</td></tr>
+      <tr><td><code>ext/hook/skill</code></td><td>hook</td><td>技能注入：代码定义或从 FS 目录加载 *.md（全程单条 system，不滚雪球）</td></tr>
+      <tr><td><code>ext/hook/summary</code></td><td>hook</td><td>会话摘要：阈值跳过短会话；也可直接调 <code>Summarize</code> 按需触发</td></tr>
+      <tr><td><code>ext/hook/approve</code></td><td>hook</td><td>工具审批：channel 决策中断（EventRequest + Decision 回传）</td></tr>
+      <tr><td><code>ext/hook/askuser</code></td><td>hook</td><td>ask_user 工具：模型提问中断等回答</td></tr>
+      <tr><td><code>ext/hook/taskplan</code></td><td>hook</td><td>task_plan 工具：规划提交中断等处置（执行/否决/修订）</td></tr>
+      <tr><td><code>ext/hook/task</code></td><td>hook</td><td>并行分身：基于 <code>core.Fork</code> 复刻当前 Agent 独立跑子循环，只回传最终答案；事件与 session 按 ForkID 区分，单层防递归</td></tr>
+      <tr><td><code>ext/hook/contextfix</code></td><td>hook</td><td>Run 开始修理历史：补缺失 tool 结果、删孤儿 tool 消息（resume 旧存档防悬空）</td></tr>
+      <tr><td><code>ext/hook/offload</code></td><td>hook</td><td>大结果卸载：超阈值写 FS，上下文只留摘要+路径</td></tr>
+      <tr><td><code>ext/hook/filetools</code></td><td>hook</td><td>文件工具集（read/write/edit/apply_patch/grep/find/bash），按 FS 能力注册</td></tr>
+      <tr><td><code>ext/hook/localsession</code></td><td>hook</td><td>会话持久化：滚动快照，Load/List 恢复续聊；分身写独立文件只存增量</td></tr>
+    </table>
 
+    <h3>人机交互三件套：同一套 channel 决策模式</h3>
     <div class="codeblock">
-      <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">server.go — 标准库 SSE，零第三方依赖</span></div>
-<pre><span class="k">func</span> <span class="f">chatHandler</span>(agent *core.Agent, session *localsession.Hook) http.HandlerFunc {
-    <span class="k">return</span> <span class="k">func</span>(w http.ResponseWriter, r *http.Request) {
-        <span class="k">var</span> in <span class="k">struct</span> {
-            Input   <span class="t">string</span> <span class="s">`json:"input"`</span>
-            Session <span class="t">string</span> <span class="s">`json:"session"`</span>
-        }
-        _ = json.<span class="f">NewDecoder</span>(r.Body).<span class="f">Decode</span>(&amp;in)
+      <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">interrupt.go</span></div>
+<pre>approver, approveCh := approve.<span class="f">New</span>(needsFunc)  <span class="c">// 需要审批的调用返回 true</span>
+asker, answerCh   := askuser.<span class="f">New</span>()
+planner, planCh   := taskplan.<span class="f">New</span>()
 
-        <span class="k">var</span> history []types.Message
-        <span class="k">if</span> in.Session != <span class="s">""</span> {
-            <span class="k">if</span> s, err := localsession.<span class="f">Load</span>(r.Context(), fsys, <span class="s">""</span>, in.Session); err == <span class="k">nil</span> {
-                history = s.Messages        <span class="c">// 恢复历史轮次</span>
-            }
-        }
-        session.<span class="f">SetID</span>(in.Session)
+core.<span class="f">NewAgent</span>(p, core.<span class="f">WithHooks</span>(approver, asker, planner), ...)
 
-        w.Header().<span class="f">Set</span>(<span class="s">"Content-Type"</span>, <span class="s">"text/event-stream"</span>)
-        h := agent.<span class="f">RunAsync</span>(r.Context(), in.Input, core.<span class="f">WithHistory</span>(history...))
-
-        <span class="k">for</span> e := <span class="k">range</span> h.<span class="f">Events</span>() {          <span class="c">// loop 结束自动 close</span>
-            data, _ := json.<span class="f">Marshal</span>(e)
-            fmt.<span class="f">Fprintf</span>(w, <span class="s">"event: %s\ndata: %s\n\n"</span>, e.Type, data)
-            <span class="k">if</span> f, ok := w.(http.Flusher); ok { f.<span class="f">Flush</span>() }
-        }
-        state, _ := h.<span class="f">Wait</span>()               <span class="c">// StopReason / Metadata["summary"]</span>
-        _ = state
+<span class="c">// hook 在工具调用前阻塞等决策；渲染层在 OnEvent 里呈现请求、</span>
+<span class="c">// 从独立 goroutine 回传 channel（同步回传会死锁）。</span>
+core.<span class="f">WithOnEvent</span>(<span class="k">func</span>(e event.Event) {
+    <span class="k">if</span> e.Type == approve.EventRequest {
+        call := e.Data.(*types.ToolCall) <span class="c">// 带 CallID 与 ForkID（分身在问也一样工作）</span>
+        <span class="k">go</span> <span class="f">send</span>(ctx, approveCh, approve.Decision{CallID: call.ID, Approve: askHuman(call)})
     }
-}
+})</pre>
+    </div>
 
-http.<span class="f">HandleFunc</span>(<span class="s">"/chat"</span>, <span class="f">chatHandler</span>(agent, session))
-http.<span class="f">ListenAndServe</span>(<span class="s">":8080"</span>, <span class="k">nil</span>)</pre>
+    <h3>并行分身：task 工具</h3>
+    <div class="codeblock">
+      <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">fork.go</span></div>
+<pre>core.<span class="f">NewAgent</span>(p, core.<span class="f">WithHooks</span>(task.<span class="f">New</span>()), ...) <span class="c">// 一步到位，task 工具自动注册</span>
+
+<span class="c">// 主模型对可并行的子任务自动调用 task：</span>
+<span class="c">//   同一轮多个 task 并行 fork（工具本就并发）</span>
+<span class="c">//   分身复刻当前 Agent 与上下文快照，过程隔离，只回传最终答案</span>
+<span class="c">//   审批照拦、可问用户；事件带 ForkID（⟨task-N⟩），session 独立可回放</span>
+<span class="c">//   单层：分身不能再 fork</span></pre>
+    </div>
+  </section>
+
+  <!-- ═══════════════ 06 本地 Agent：事件与上下文管理 ═══════════════ -->
+  <section id="local-agent">
+    <h2><span class="no">06</span>详细介绍 · 本地 Agent 开发：事件与上下文管理</h2>
+    <p class="sub">CLI / 桌面场景：回调直渲、stdin 桥接人机中断、本地 session 文件持久化与恢复。</p>
+
+    <h3>事件全景（回调消费）</h3>
+    <table>
+      <tr><th>事件</th><th>时机</th><th>Data</th></tr>
+      <tr><td><code>model_chunk</code> / <code>reasoning_chunk</code></td><td>流式正文 / 思考增量</td><td>string</td></tr>
+      <tr><td><code>tool_start</code> / <code>tool_end</code></td><td>工具调用起止（随调用即时，以 CallID 关联）</td><td>*ToolCall / *ToolResult</td></tr>
+      <tr><td><code>iteration_end</code></td><td>每轮迭代结束</td><td>int</td></tr>
+      <tr><td><code>error</code> / <code>stream_fallback</code></td><td>引擎错误 / 流式降级警告</td><td>error / string</td></tr>
+      <tr><td><code>task.start</code> / <code>task.end</code></td><td>分身起止</td><td>*ToolCall / *LoopState</td></tr>
+      <tr><td><code>approve.request</code> 等</td><td>人机交互请求（带 CallID）</td><td>*ToolCall 等</td></tr>
+    </table>
+    <div class="tip"><b>所有事件带 <code>ForkID</code></b>：空串＝主循环，非空＝对应分身——渲染层据此打 ⟨task-N⟩ 行首标记，把分身的流式输出与提问路由到正确位置。</div>
+
+    <h3>流式渲染节流</h3>
+    <div class="codeblock">
+      <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">render.go</span></div>
+<pre><span class="c">// 碎 delta（每次一两个字符）高频直写终端开销大（Windows console 同步写尤其贵）——</span>
+<span class="c">// 攒缓冲定期整块写出：一次系统调用代替上百次。80ms tick 足够顺滑。</span>
+sb := &amp;streamBuf{}
+ticker := time.<span class="f">NewTicker</span>(<span class="n">80</span> * time.Millisecond)
+<span class="k">go</span> <span class="k">func</span>() { <span class="k">for</span> <span class="k">range</span> ticker.C { sb.<span class="f">flush</span>() } }()
+<span class="c">// 提示类输出用 sb.now(s)：并入缓冲后立即整块写出，与流式内容严格有序</span></pre>
+    </div>
+
+    <h3>上下文管理与会话恢复</h3>
+    <div class="codeblock">
+      <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">session.go</span></div>
+<pre>fsys := fs.<span class="f">NewLocal</span>(<span class="s">"."</span>)                    <span class="c">// 工作区沙箱 = 当前目录</span>
+session := localsession.<span class="f">New</span>(fsys, <span class="s">""</span>)          <span class="c">// 每轮结束滚动快照 sessions/&lt;id&gt;.json</span>
+
+<span class="c">// 恢复 = 新对话：加载历史 + 新输入，模型看历史自己重发调用。</span>
+<span class="c">// system 是 agent 属性，WithHistory 自动过滤不重复注入；</span>
+<span class="c">// 旧存档的悬空 tool_call 由 contextfix 兜底修理。</span>
+s, _ := localsession.<span class="f">Load</span>(ctx, fsys, <span class="s">""</span>, id)
+state, _ := agent.<span class="f">Run</span>(ctx, input, core.<span class="f">WithHistory</span>(s.Messages...))
+
+<span class="c">// 分身过程同样可回放：sessions/&lt;主ID&gt;-task-1.json，只存增量</span></pre>
     </div>
 
     <div class="tip">
-      <b>事件即协议：</b>前端按 <code>event.Type</code> 渲染 —— model_chunk 打字机、tool_start 显示工具卡片、
-      iteration_end 划轮次线、loop_end 收尾。人机交互 hook 的 <code class="inline">approve.request</code> /
-      <code class="inline">askuser.request</code> 等事件同样会流经这里 —— 前端弹卡片，用户操作回包即送回 channel，
-      阻塞中的 loop 自然恢复。
-    </div>
-
-    <div class="tip warn">
-      <b>注意：</b>同一 Agent 实例可并发服务多个请求（Agent 是只读配置，状态在每次 Run 的 LoopState 里）；
-      但共享的 session Hook 有 ID 概念，多会话场景建议每请求独立 SetID 或每会话一个实例。
+      <b>大结果防溢出：</b>offload hook 把超阈值工具输出卸载到 FS（文件名＝工具名+内容哈希，幂等），上下文只留摘要+路径；
+      推理过程同理——<code>reasoning</code> 持久化在消息里供回放，但不回传给模型（协议要求）。
     </div>
   </section>
 
+  <!-- ═══════════════ 07 多租户 Agent：事件与上下文管理 ═══════════════ -->
+  <section id="multi-tenant">
+    <h2><span class="no">07</span>详细介绍 · 多租户 Agent 开发：事件与上下文管理</h2>
+    <p class="sub">Web / 服务端场景：一个 Agent 定义、N 个并发会话——事件流、取消、会话按请求隔离。</p>
+
+    <h3>共享构建，按请求运行</h3>
+    <div class="codeblock">
+      <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">server.go</span></div>
+<pre><span class="c">// Agent 构建后只读是框架契约：全局单例，并发 Run 安全，</span>
+<span class="c">// 每次运行的全部状态在独立的 LoopState 里，互不可见。</span>
+agent := core.<span class="f">NewAgent</span>(p, ...) <span class="c">// 进程启动时组装一次</span>
+
+<span class="k">func</span> <span class="f">handle</span>(w http.ResponseWriter, r *http.Request) {
+    ctx, cancel := context.<span class="f">WithCancel</span>(r.Context())
+    <span class="k">defer</span> <span class="f">cancel</span>()                       <span class="c">// 客户端断连 → 只取消本次 loop</span>
+
+    <span class="c">// 按请求恢复历史（会话归属在业务层：URL/租户头 → session ID）</span>
+    h := agent.<span class="f">RunAsync</span>(ctx, input, core.<span class="f">WithHistory</span>(load(r)...))
+    <span class="k">defer</span> h.<span class="f">Cancel</span>()
+
+    <span class="k">for</span> e := <span class="k">range</span> h.<span class="f">Events</span>() {         <span class="c">// 每请求独立事件通道，天然隔离</span>
+        <span class="k">switch</span> e.Type {
+        <span class="k">case</span> event.EventModelChunk:
+            <span class="f">writeSSE</span>(w, e.ForkID, e.Data.(<span class="k">string</span>)) <span class="c">// ForkID 非空 = 分身输出，路由标记</span>
+        <span class="k">case</span> approve.EventRequest:
+            <span class="f">pushCard</span>(w, e.Data.(*types.ToolCall)) <span class="c">// 渲染审批卡片，用户点击后回传</span>
+        }
+    }
+    state, _ := h.<span class="f">Wait</span>()
+    save(r, state.Messages)
+}</pre>
+    </div>
+
+    <h3>隔离清单</h3>
+    <table>
+      <tr><th>维度</th><th>做法</th></tr>
+      <tr><td>事件流</td><td>RunAsync 的 Events() 每请求独立；全局回调式 OnEvent 只做度量，不做分发</td></tr>
+      <tr><td>取消</td><td>请求 ctx 断连 → <code>h.Cancel()</code>，只取消该 loop，共享 Agent 不受影响</td></tr>
+      <tr><td>会话存储</td><td>每租户一个 localsession 实例（或 <code>WithDir</code> 按租户分目录）；分身自动写独立文件</td></tr>
+      <tr><td>人机交互</td><td>EventRequest 带 CallID → 前端卡片 → 用户操作从任意 goroutine 回传 Decision channel（select ctx.Done 防悬挂）</td></tr>
+      <tr><td>并发边界</td><td>OnToolStart/OnToolEnd 跨调用并发——hook 写共享数据自行加锁；OnEvent 回调必须并发安全且快速返回</td></tr>
+    </table>
+
+    <div class="tip">
+      <b>分身即并发加速：</b>多租户下 task 分身照常工作——分身的流式 chunk、审批请求都带 ForkID，
+      服务端把它路由到发起请求的那条 SSE 流；分身用量自动累加回主循环，账单不漏。
+    </div>
+  </section>
 </main>
 
 <footer>
