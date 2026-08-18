@@ -44,6 +44,12 @@ const EventStart = event.EventType("task.start")
 // EventEnd 是 fork 结束事件，Data 为 *types.LoopState（子循环最终状态）。
 const EventEnd = event.EventType("task.end")
 
+// taskInputPrefix 包装任务描述。拼在 input（请求最末尾）而非 system：
+// 不动 seed 前缀，主循环 KV 缓存对分身依旧可复用。回传机制只保证取
+// 最后一条 assistant 消息，不保证其质量——这里引导分身以自包含的最终
+// 结果收尾，主循环拿到的工具结果才有内容。
+const taskInputPrefix = "以下是你独立负责的子任务，请完成它；你的最后一条回复将作为结果直接交付，须自包含、简洁：\n\n"
+
 // Options 配置 fork 的工具集。
 type Options struct {
 	// Tools 是额外注入 fork 的工具；InheritTools 为 false 时作为唯一工具集。
@@ -123,7 +129,7 @@ func (h *Hook) OnToolStart(ctx context.Context, state *types.LoopState, call *ty
 	tools := h.forkTools(state)
 
 	h.emit(state, EventStart, call, taskID)
-	sub, err := agent.Fork(ctx, taskID, seed, tools, args.Task)
+	sub, err := agent.Fork(ctx, taskID, seed, tools, taskInputPrefix+args.Task)
 	h.emit(state, EventEnd, sub, taskID)
 
 	if err != nil {
@@ -144,14 +150,20 @@ func (h *Hook) newTaskID() string {
 }
 
 // contextSnapshot 返回"当前上下文"快照：截至本轮 assistant 工具调用消息
-// 之前的全部消息。OnToolStart 阶段 state.Messages 末尾必然是那条携带
-// tool_calls 的 assistant 消息，剔除它即得到本轮之前的完整上下文
-// （含 system 提示词与历史），避免把悬空的 task tool_call 带入 fork。
+// 之前的全部消息，并剔除触发本次 task 的那条 user 指令——它面向主我，
+// 任务描述以 task 参数为准（schema 要求自包含），留在 seed 里只会让
+// 分身把主我接到的指令也当作要回应的问题。触发指令必在倒数第二位
+// （OnToolStart 时末尾是携带 tool_calls 的 assistant 消息）；若不是
+// user（多轮工具循环后直接调 task 的场景）则不动。
 func contextSnapshot(state *types.LoopState) []types.Message {
 	if len(state.Messages) == 0 {
 		return nil
 	}
-	return state.Messages[:len(state.Messages)-1]
+	msgs := state.Messages[:len(state.Messages)-1]
+	if len(msgs) > 0 && msgs[len(msgs)-1].Role == types.RoleUser {
+		msgs = msgs[:len(msgs)-1]
+	}
+	return msgs
 }
 
 // forkTools 派生 fork 的工具集：继承当前 state 工具并剔除 task 自身

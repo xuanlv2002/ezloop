@@ -37,6 +37,7 @@ func (a *Agent) Fork(ctx context.Context, taskID string, seed []types.Message, t
 
 	return sub.Run(ctx, input, func(state *types.LoopState) {
 		state.TaskID = taskID
+		state.SeedLen = len(seedCopy)
 		state.Messages = append(state.Messages, seedCopy...)
 	})
 }

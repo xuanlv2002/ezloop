@@ -102,6 +102,29 @@ func TestForkSessionSplit(t *testing.T) {
 	}
 }
 
+// 分身快照只存增量：seed 是主上下文的逐字节重复，剥离后第一条即分身 input。
+func TestForkSessionStoresIncrementOnly(t *testing.T) {
+	fsys := fs.NewLocal(t.TempDir())
+	ls := New(fsys, "chat-1")
+	seed := []types.Message{
+		{Role: types.RoleSystem, Content: "sys"},
+		{Role: types.RoleUser, Content: "background"},
+	}
+	if _, err := core.NewAgent(
+		testutil.Scripted(testutil.Text("sub out")),
+		core.WithHooks(ls),
+	).Fork(context.Background(), "task-5", seed, nil, "subtask"); err != nil {
+		t.Fatalf("fork: %v", err)
+	}
+	s, err := Load(context.Background(), fsys, "", "chat-1-task-5")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(s.Messages) != 2 || s.Messages[0].Content != "subtask" || s.Messages[1].Content != "sub out" {
+		t.Fatalf("fork session should be increment only: %+v", s.Messages)
+	}
+}
+
 func TestAutoIDAndMessageJSON(t *testing.T) {
 	h := New(fs.NewLocal(t.TempDir()), "")
 	if h.ID() == "" {

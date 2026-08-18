@@ -28,6 +28,11 @@ type LoopState struct {
 	// 分流；主循环为空串。
 	TaskID string
 
+	// SeedLen 是 fork 子循环携带的上下文快照长度（Messages 前 SeedLen 条
+	// 为 seed，来自主循环）。持久化层据此剥离 seed 只存分身增量（seed 与
+	// 主 session 重复）；主循环为 0。
+	SeedLen int
+
 	// Metadata 供 hook 之间共享任意数据。
 	// 并发契约：除 OnToolStart / OnToolEnd（跨调用并发）外，引擎串行执行
 	// hook 回调；这两个回调内写 Metadata 须自行加锁。

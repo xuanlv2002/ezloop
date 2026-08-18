@@ -301,6 +301,75 @@ func TestToolWithoutHookFails(t *testing.T) {
 	}
 }
 
+// contextSnapshot 剔除触发指令：尾部 assistant(tool_call) 与其前面的
+// 触发 user 都不进 seed。
+func TestContextSnapshotDropsTriggeringUser(t *testing.T) {
+	state := &types.LoopState{Messages: []types.Message{
+		{Role: types.RoleSystem, Content: "sys"},
+		{Role: types.RoleUser, Content: "background"},
+		{Role: types.RoleAssistant, Content: "calling"},
+		{Role: types.RoleUser, Content: "delegate this"}, // 触发指令
+		{Role: types.RoleAssistant, ToolCalls: []types.ToolCall{{ID: "1", Name: ToolName}}},
+	}}
+	got := contextSnapshot(state)
+	if len(got) != 3 || got[len(got)-1].Content != "calling" {
+		t.Fatalf("snapshot should end before triggering user: %+v", got)
+	}
+}
+
+// 多轮工具循环后直接调 task：倒数第二条是 tool 结果而非 user，不误删。
+func TestContextSnapshotKeepsToolTail(t *testing.T) {
+	state := &types.LoopState{Messages: []types.Message{
+		{Role: types.RoleSystem, Content: "sys"},
+		{Role: types.RoleUser, Content: "q"},
+		{Role: types.RoleAssistant, ToolCalls: []types.ToolCall{{ID: "a", Name: "echo"}}},
+		{Role: types.RoleTool, ToolCallID: "a", Content: "r"},
+		{Role: types.RoleAssistant, ToolCalls: []types.ToolCall{{ID: "1", Name: ToolName}}},
+	}}
+	got := contextSnapshot(state)
+	if len(got) != 4 || got[len(got)-1].Role != types.RoleTool {
+		t.Fatalf("tool tail must survive: %+v", got)
+	}
+}
+
+// fork 的运行时上下文不含触发指令：分身只看到背景 + task 描述，
+// 不把主我接到的原始请求也当作要回应的问题。
+func TestForkSeedExcludesTriggeringUser(t *testing.T) {
+	var subMsgs []types.Message
+	state, err := withTask(
+		testutil.Scripted(
+			testutil.ToolCalls(testutil.Call("1", ToolName, `{"task":"go"}`)),
+			testutil.Text("sub"),
+			testutil.Text("done"),
+		),
+		core.WithOnEvent(func(e event.Event) {
+			if e.Type == EventEnd {
+				subMsgs = e.Data.(*types.LoopState).Messages
+			}
+		}),
+	).Run(context.Background(), "delegate")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if state.StopReason != types.StopCompleted {
+		t.Fatalf("stop: %s", state.StopReason)
+	}
+	for _, m := range subMsgs {
+		if m.Content == "delegate" {
+			t.Fatal("triggering user leaked into fork seed")
+		}
+	}
+	// input 带包装前缀：分身以自包含的最终结果收尾（引导回传质量）。
+	wantInput := taskInputPrefix + "go"
+	if subMsgs[0].Role != types.RoleUser || subMsgs[0].Content != wantInput {
+		t.Fatalf("fork input should carry prefix: %q", subMsgs[0].Content)
+	}
+	last := subMsgs[len(subMsgs)-1]
+	if last.Role != types.RoleAssistant || last.Content != "sub" {
+		t.Fatalf("sub final: %+v", last)
+	}
+}
+
 // recTool 记录被调用次数，验证 fork 真的走到了继承工具。
 type recTool struct{ calls int }
 

@@ -173,3 +173,23 @@ func TestForkSeedIsolation(t *testing.T) {
 		}
 	}
 }
+
+// SeedLen 标记 seed 边界：持久化层据此剥离，分身只存增量。
+func TestForkSetsSeedLen(t *testing.T) {
+	a := NewAgent(testutil.Scripted(testutil.Text("ok")))
+	seed := []types.Message{
+		{Role: types.RoleSystem, Content: "SEED"},
+		{Role: types.RoleUser, Content: "q"},
+	}
+	sub, err := a.Fork(context.Background(), "t", seed, nil, "go")
+	if err != nil {
+		t.Fatalf("fork: %v", err)
+	}
+	if sub.SeedLen != len(seed) {
+		t.Fatalf("SeedLen: want %d got %d", len(seed), sub.SeedLen)
+	}
+	// 边界后第一条是分身自己的 input，不是 seed。
+	if sub.Messages[sub.SeedLen].Content != "go" {
+		t.Fatalf("first message after seed: %+v", sub.Messages[sub.SeedLen])
+	}
+}
