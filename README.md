@@ -213,11 +213,11 @@ sequenceDiagram
 | `ext/hook/offload` | hook | 大结果卸载：超阈值写入 FS，上下文只留摘要+路径 |
 | `ext/hook/mcp` | hook | mcpRouter 单工具封装（schema 恒定、KV cache 友好、配置热加载），内置官方 go-sdk |
 | `ext/hook/skill` | hook | 技能注入：代码定义或从 FS 目录加载 *.md（可选 .keywords） |
-| `ext/hook/summary` | hook | loop 结束自动生成摘要写入 Metadata |
+| `ext/hook/summary` | hook | loop 结束生成摘要写入 Metadata（一次全量历史的模型调用，MinMessages 设阈值跳过短会话；也可不挂 hook 直接调 Summarize 按需触发） |
 | `ext/hook/approve` | hook | 工具审批：channel 决策中断（EventRequest + Decisions 回传） |
 | `ext/hook/askuser` | hook | ask_user 工具：模型提问中断等回答，回答作为工具结果入史 |
 | `ext/hook/taskplan` | hook | task_plan 工具：规划提交中断等处置（执行/否决/修订） |
-| `ext/hook/task` | hook | task 工具：并行分身——fork 当前 Agent（provider/超参/全部运行期 hook）与上下文快照独立跑子循环，只把最终答案回传主循环（并发、单层；事件与 session 均按 taskId 区分归属，分身写 sessions/<主ID>-<taskID>.json 可回放；NewAgent 后需 `Bind(agent)`） |
+| `ext/hook/task` | hook | task 工具：并行分身——fork 当前 Agent（provider/超参/全部运行期 hook）与上下文快照独立跑子循环，只把最终答案回传主循环（并发、单层；事件与 session 均按 taskId 区分归属，分身写 sessions/<主ID>-<taskID>.json 可回放；主 Agent 经 ctx 自动注入，`WithHooks(task.New())` 即可） |
 | `ext/hook/contextfix` | hook | Run 开始时修理历史：缺失的 tool 结果补占位，序列协议完整 |
 | `ext/hook/filetools` | hook | 文件工具集：read_file（行分页）、write、edit、apply_patch、grep、find、bash；按 FS 能力注册，修改走 per-path 队列 |
 | `ext/hook/localsession` | hook | 会话持久化：滚动快照到 sessions/<id>.json，Load/List 恢复续聊 |

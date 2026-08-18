@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"sync"
 )
 
@@ -14,14 +15,18 @@ type Tool interface {
 	Invoke(ctx context.Context, args json.RawMessage) (string, error)
 }
 
+// ToolRegistry 持有已注册工具。List 按工具名排序返回——排序是工具集的
+// 确定函数，与注册顺序、组装路径无关（resume 恢复、重新 New、hook 注册
+// 时机变化都不会打散），tools 序列化顺序因此跨请求稳定，前缀缓存
+// （KV cache）才可能命中。工具量级是个位数到十几个，线性查找即可。
 type ToolRegistry struct {
 	mu    sync.RWMutex
-	tools map[string]Tool
+	tools []Tool
 	warp  func(Tool) Tool
 }
 
 func NewToolRegistry(tools ...Tool) *ToolRegistry {
-	r := &ToolRegistry{tools: make(map[string]Tool)}
+	r := &ToolRegistry{}
 	for _, t := range tools {
 		r.Register(t)
 	}
@@ -42,25 +47,30 @@ func (r *ToolRegistry) Register(t Tool) {
 	if r.warp != nil {
 		t = r.warp(t)
 	}
-	r.tools[t.Name()] = t
+	for i, old := range r.tools {
+		if old.Name() == t.Name() {
+			r.tools[i] = t // 同名覆盖：原位替换，保序
+			return
+		}
+	}
+	r.tools = append(r.tools, t)
 }
 
 func (r *ToolRegistry) Lookup(name string) (Tool, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	t, ok := r.tools[name]
-	if !ok {
-		return nil, fmt.Errorf("tool %q not found", name)
+	for _, t := range r.tools {
+		if t.Name() == name {
+			return t, nil
+		}
 	}
-	return t, nil
+	return nil, fmt.Errorf("tool %q not found", name)
 }
 
 func (r *ToolRegistry) List() []Tool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	list := make([]Tool, 0, len(r.tools))
-	for _, t := range r.tools {
-		list = append(list, t)
-	}
-	return list
+	out := append([]Tool(nil), r.tools...)
+	sort.Slice(out, func(i, j int) bool { return out[i].Name() < out[j].Name() })
+	return out
 }

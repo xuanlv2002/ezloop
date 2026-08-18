@@ -66,16 +66,13 @@ func WithInheritTools(b bool) Option { return func(o *Options) { o.InheritTools 
 
 // Hook 拦截 task 工具调用，复刻当前 Agent 与上下文跑一次隔离子循环。
 type Hook struct {
-	opts  Options
-	agent *core.Agent   // Bind 后持有主 Agent，供 fork 复刻
-	mu    sync.Mutex    // 保护 state.Usage 累加（同一轮多个 task 调用并发）
-	seq   atomic.Uint64 // taskId 序号
+	opts Options
+	mu   sync.Mutex    // 保护 state.Usage 累加（同一轮多个 task 调用并发）
+	seq  atomic.Uint64 // taskId 序号
 }
 
-// New 创建 task hook。fork 复用主 Agent 的模型（provider / warp / 超参 /
-// 系统提示词），因此 NewAgent 之后需调用 Bind(agent) 绑定主 Agent。
-// task 工具由 hook 在 OnStart 自动注册，core.WithHooks(New()) 即可，
-// 无需再 core.WithTools(Tool())。
+// New 创建 task hook。fork 复刻的主 Agent 从 ctx 取（引擎每次 Run 注入，
+// 见 core.AgentFromContext），无需组装期绑定：core.WithHooks(New()) 一步到位。
 func New(opts ...Option) *Hook {
 	o := Options{InheritTools: true}
 	for _, fn := range opts {
@@ -83,15 +80,6 @@ func New(opts ...Option) *Hook {
 	}
 	return &Hook{opts: o}
 }
-
-// Bind 绑定主 Agent，使 hook 能复刻它来跑 fork。必须在 NewAgent 之后调用：
-//
-//	agent := core.NewAgent(p, core.WithHooks(taskHook), ...)
-//	taskHook.Bind(agent)
-//
-// 之所以不在 New 时传入：NewAgent 是组装入口，构造期 agent 尚未返回，
-// 无法提前持有引用；Bind 把这一步延后到组装完成之后。
-func (h *Hook) Bind(a *core.Agent) { h.agent = a }
 
 func (h *Hook) Name() string { return "task" }
 
@@ -120,9 +108,10 @@ func (h *Hook) OnToolStart(ctx context.Context, state *types.LoopState, call *ty
 	if args.Task == "" {
 		return hook.Skip("task: empty task description"), nil
 	}
-	if h.agent == nil {
-		// 防呆：未调用 Bind(agent) 时没有可复刻的主 Agent。
-		return hook.Skip("task: agent not bound (call taskHook.Bind(agent))"), nil
+	agent, ok := core.AgentFromContext(ctx)
+	if !ok {
+		// 防呆：不在引擎 Run 内运行（裸调 hook 的测试等场景）。
+		return hook.Skip("task: no agent in ctx (must run via core.Agent.Run)"), nil
 	}
 
 	taskID := h.newTaskID()
@@ -134,7 +123,7 @@ func (h *Hook) OnToolStart(ctx context.Context, state *types.LoopState, call *ty
 	tools := h.forkTools(state)
 
 	h.emit(state, EventStart, call, taskID)
-	sub, err := h.agent.Fork(ctx, taskID, seed, tools, args.Task)
+	sub, err := agent.Fork(ctx, taskID, seed, tools, args.Task)
 	h.emit(state, EventEnd, sub, taskID)
 
 	if err != nil {

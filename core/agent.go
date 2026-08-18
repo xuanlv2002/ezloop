@@ -3,6 +3,8 @@
 package core
 
 import (
+	"context"
+
 	"github.com/xuanlv2002/ezloop/event"
 	"github.com/xuanlv2002/ezloop/hook"
 	"github.com/xuanlv2002/ezloop/provider"
@@ -162,4 +164,14 @@ func NewAgent(p provider.ModelProvider, opts ...Option) *Agent {
 	}
 	a.hyper = a.hyper.withDefaults()
 	return a
+}
+
+type agentCtxKey struct{}
+
+// AgentFromContext 取回当前 Run 的 Agent。引擎在每次 Run 开始时把自身
+// 注入 ctx——hook 需要复刻引擎能力时用它（如 task hook 的并行分身），
+// 无需在组装期反向持有 Agent 引用。
+func AgentFromContext(ctx context.Context) (*Agent, bool) {
+	a, ok := ctx.Value(agentCtxKey{}).(*Agent)
+	return a, ok
 }

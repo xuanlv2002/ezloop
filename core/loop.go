@@ -18,6 +18,9 @@ import (
 // 消息序列构造顺序：system 提示词 → WithHistory 历史 → 本次 input，
 // 随后 startHook 可继续注入（如 skill）。
 func (a *Agent) Run(ctx context.Context, input string, runOpts ...RunOption) (state *types.LoopState, err error) {
+	// 把自身注入 ctx：hook 经 AgentFromContext 取回引擎能力（如 task 的 Fork）。
+	ctx = context.WithValue(ctx, agentCtxKey{}, a)
+
 	// 初始化状态
 	state = &types.LoopState{
 		Input:         input,

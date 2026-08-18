@@ -16,13 +16,10 @@ import (
 	"github.com/xuanlv2002/ezloop/types"
 )
 
-// withTask 构建一个已绑定 task hook 的 Agent，并附加 opts。
-// task hook 需在 NewAgent 之后 Bind，本辅助函数把两步合为一次调用。
+// withTask 构建一个挂了 task hook 的 Agent，并附加 opts。
+// 主 Agent 经 ctx 自动注入（core.AgentFromContext），无需组装期绑定。
 func withTask(p provider.ModelProvider, opts ...core.Option) *core.Agent {
-	h := New()
-	a := core.NewAgent(p, append([]core.Option{core.WithHooks(h)}, opts...)...)
-	h.Bind(a)
-	return a
+	return core.NewAgent(p, append([]core.Option{core.WithHooks(New())}, opts...)...)
 }
 
 // fork → 子循环完成 → 最终答案作为工具结果进入主历史，主循环继续。
@@ -241,15 +238,13 @@ func TestForkCannotForkAgain(t *testing.T) {
 // 照常生效（审批无旁路）。
 func TestTaskForkRunsParentToolStartHooks(t *testing.T) {
 	guard := &guardTool{}
-	h := New()
 	p := testutil.Scripted(
 		testutil.ToolCalls(testutil.Call("1", ToolName, `{"task":"go"}`)),
 		testutil.ToolCalls(testutil.Call("s1", "echo", `{"v":"x"}`)), // 分身内调 echo，被父 hook 拦
 		testutil.Text("sub done"),
 		testutil.Text("final"),
 	)
-	a := core.NewAgent(p, core.WithHooks(h, guard), core.WithTools(testutil.EchoTool{}))
-	h.Bind(a)
+	a := core.NewAgent(p, core.WithHooks(New(), guard), core.WithTools(testutil.EchoTool{}))
 
 	state, err := a.Run(context.Background(), "delegate")
 	if err != nil {
