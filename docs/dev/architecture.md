@@ -77,7 +77,7 @@ sequenceDiagram
 
 ### 工具执行模型
 
-每个调用是独立单元：toolStart 判定 → warp 壳内执行 → toolEnd 后处理，整链跟调用走。同一轮多个调用**默认全并发**（调用数即并发数，限流自己做 warp 信号量如 ext/warp/tool/limit）；`HyperParams.SerialTools` 可选串行。
+每个调用是独立单元：toolStart 判定 → warp 壳内执行 → toolEnd 后处理，整链跟调用走。同一轮多个调用**默认全并发**（调用数即并发数，限流自己做 warp 信号量如 ext/warp/tool/limit）；`LoopParams.SerialTools` 可选串行。
 
 - tool_start / tool_end 事件随调用即时发出，到达顺序不保证——顺序不是可靠性，CallID 才是；消息历史按原序汇总
 - OnToolStart / OnToolEnd 跨调用并发（单调用内多个 hook 仍按注册序串行）——多个人工审批同时呈现

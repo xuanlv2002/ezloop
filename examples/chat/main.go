@@ -168,7 +168,7 @@ func main() {
 			session,
 		),
 		core.WithTools(nowTool{}),
-		core.WithHyperParams(core.HyperParams{MaxIterations: 12}),
+		core.WithLoopParams(core.LoopParams{MaxIterations: 12}),
 		core.WithStreaming(true),
 		core.WithOnEvent(func(e event.Event) {
 			switch e.Type {
