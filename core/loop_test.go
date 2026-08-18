@@ -99,7 +99,7 @@ func TestSerialTools(t *testing.T) {
 			testutil.Text("done"),
 		),
 		WithTools(tool),
-		WithHyperParams(HyperParams{SerialTools: true}),
+		WithLoopParams(LoopParams{SerialTools: true}),
 	)
 	if _, err := a.Run(context.Background(), "hi"); err != nil {
 		t.Fatalf("err: %v", err)

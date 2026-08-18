@@ -50,12 +50,13 @@ type Action struct {
 	Result string // Kind == KindSkip 时作为工具结果写入消息历史，空则用引擎默认文案
 }
 
-type ActionKind int
+/* ActionKind 用字符串：与 StopReason 对称，失败 loop 的短路决策直接可读。 */
+type ActionKind string
 
 const (
-	KindProceed ActionKind = iota
-	KindSkip
-	KindAbort
+	KindProceed ActionKind = "proceed"
+	KindSkip    ActionKind = "skip"
+	KindAbort   ActionKind = "abort"
 )
 
 /* Proceed 正常执行工具。 */

@@ -27,7 +27,7 @@ func (a *Agent) Run(ctx context.Context, input string, runOpts ...RunOption) (st
 	state = &types.LoopState{
 		Input:         input,
 		Tools:         types.NewToolRegistry(),
-		MaxIterations: a.hyper.MaxIterations,
+		MaxIterations: a.params.MaxIterations,
 		Metadata:      make(map[string]any),
 		StartedAt:     time.Now(),
 		Emitter:       a.onEvent,
@@ -279,7 +279,7 @@ func (a *Agent) execToolCalls(ctx context.Context, state *types.LoopState) error
 		finish()
 	}
 
-	if a.hyper.SerialTools {
+	if a.params.SerialTools {
 		for i := range calls {
 			process(i)
 			if hookErr != nil || aborted {
