@@ -23,6 +23,11 @@ type LoopState struct {
 	LastResponse *ModelResponse
 	Usage        Usage
 
+	// TaskID 非空表示这是 fork 子循环（core.Fork）的状态：事件与持久化
+	// 据此区分归属——引擎发出的事件带上它，hook（如 localsession）按它
+	// 分流；主循环为空串。
+	TaskID string
+
 	// Metadata 供 hook 之间共享任意数据。
 	// 并发契约：除 OnToolStart / OnToolEnd（跨调用并发）外，引擎串行执行
 	// hook 回调；这两个回调内写 Metadata 须自行加锁。
@@ -52,6 +57,7 @@ func (s *LoopState) EmitEvent(typ event.EventType, data any) {
 		Type:      typ,
 		Timestamp: time.Now(),
 		Iteration: s.Iteration,
+		TaskID:    s.TaskID,
 		Data:      data,
 	})
 }

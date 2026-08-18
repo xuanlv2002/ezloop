@@ -1,17 +1,19 @@
-// Package task 提供 task 工具：一个"上下文隔离"工具（fork）。
+// Package task 提供 task 工具：一个"并行分身"工具（fork）。
 //
-// 主模型调用 task 求解某个可隔离的子问题（某段任务 / 某次 skill）时，不是
-// 注入一个独立 subAgent，而是复刻当前 Agent（同一 provider / model warp /
-// 超参 / 系统提示词）与当前上下文（截至本轮之前的消息快照），在隔离的消息
-// 历史上再跑一轮 model↔tool 循环：子循环内部的过程性上下文（中间的工具调用、
-// 思考步骤）不回流主上下文，只有最终答案作为工具结果回传主循环。
+// 主模型调用 task 干某个可并行的活时，不是注入一个独立 subAgent，而是
+// fork 当前 Agent（同一 provider / model warp / 超参 / 全部运行期 hook）
+// 与当前上下文（截至本轮之前的消息快照），在隔离的消息历史上再跑一轮
+// model↔tool 循环：子循环内部的过程性上下文（中间的工具调用、思考步骤）
+// 不回流主上下文，只有最终答案作为工具结果回传主循环。
 //
 // 特性：
 //   - 并发：工具本就并发，多个 task 调用在同一轮内并行 fork；
-//   - 单层：fork 的工具集剔除 task 自身，且 Agent.Fork 清空 hook 链、
+//   - 一致：分身继承全部运行期 hook——审批照拦、可问用户（approve/askuser
+//     的事件带 TaskID，渲染层据此区分是哪个分身在问）、session 照存
+//     （localsession 按 TaskID 分流到独立文件，可回放）；
+//   - 单层：fork 的工具集剔除 task 自身，且 Agent.Fork 不重跑 startHooks、
 //     子循环内不再注册 task，fork 不能再 fork；
-//   - 标识：fork 内所有事件（task.start / task.end 及子循环的 engine 事件）
-//     都带上 TaskID，渲染层据此区分并行 fork 的事件归属。
+//   - 标识：子循环所有事件（引擎事件与 hook 事件）由引擎统一打上 TaskID。
 //
 // 与 approve/askuser/taskplan 同构：OnToolStart 拦截 task 调用，等待的不是人，
 // 而是 fork 子循环的完整运行。task 工具由 hook 在 OnStart 自动注册
@@ -104,6 +106,11 @@ func (h *Hook) OnToolStart(ctx context.Context, state *types.LoopState, call *ty
 	if call.Name != ToolName {
 		return hook.Proceed, nil
 	}
+	// 单层：分身继承本 hook，子循环内若模型再调 task（工具集已剔除，
+	// 这里防幻觉调用）直接拒绝，不再嵌套 fork。
+	if state.TaskID != "" {
+		return hook.Skip("task: nested fork is not allowed (single level)"), nil
+	}
 	var args struct {
 		Task string `json:"task"`
 	}
@@ -117,13 +124,6 @@ func (h *Hook) OnToolStart(ctx context.Context, state *types.LoopState, call *ty
 	}
 
 	taskID := h.newTaskID()
-	// 事件出口：给子循环所有事件打上 taskId，再转发给主事件流。
-	onEvent := func(e event.Event) {
-		e.TaskID = taskID
-		if state.Emitter != nil {
-			state.Emitter(e)
-		}
-	}
 
 	// seed：截至本轮之前的主上下文（剔除本轮 assistant 工具调用消息），
 	// fork 从同一上下文继续，追加任务描述作为用户输入。
@@ -132,7 +132,7 @@ func (h *Hook) OnToolStart(ctx context.Context, state *types.LoopState, call *ty
 	tools := h.forkTools(state)
 
 	h.emit(state, EventStart, call, taskID)
-	sub, err := h.agent.Fork(ctx, seed, tools, args.Task, onEvent)
+	sub, err := h.agent.Fork(ctx, taskID, seed, tools, args.Task)
 	h.emit(state, EventEnd, sub, taskID)
 
 	if err != nil {

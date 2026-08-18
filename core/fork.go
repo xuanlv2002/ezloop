@@ -3,42 +3,40 @@ package core
 import (
 	"context"
 
-	"github.com/xuanlv2002/ezloop/event"
 	"github.com/xuanlv2002/ezloop/types"
 )
 
-// Fork 在隔离的消息历史上运行一次子循环（上下文隔离 fork）：复刻当前 Agent
-// 的 provider / model warp / 流式 / 超参，从 seed 消息快照 + input 继续。
+// Fork 以"并行分身"语义运行一次子循环：复刻当前 Agent 的一切——provider /
+// model warp / 流式 / 超参 / 全部运行期 hook（审批、交互、摘要、持久化……），
+// 从 seed 消息快照 + input 继续，taskID 是子循环的身份标识。
 //
-// 与 Run 的区别：
-//   - 不注入 system prompt——seed 已含完整 system（含 skill 等动态注入内容），
-//     再次注入会重复；
-//   - 不跑任何生命周期 hook——隔离执行是纯计算，审批 / 摘要 / 会话快照等
-//     横切 hook 归主循环，子循环内不递归触发；
-//   - 工具由调用方传入并原样注册——继承自 state 的工具已含主循环的 tool
-//     warp 链，故清空 toolWarps，不再二次包装；
-//   - 事件出口走调用方给定的 onEvent，用于给子循环事件打标识（如 taskId）。
+// 与 Run 的区别仅两处：
+//   - startHooks 不重跑（置 nil）：它们是组装期 hook（skill 注 system、
+//     mcp/task 注册工具），产物已在 seed 与传入工具中，重跑必重复注入；
+//     运行期 hook（model/tool/loop/end）全部继承——分身与本体行为一致，
+//     审批照拦、可问用户、session 照存。
+//   - systemPrompt 置空、toolWarps 置 nil：seed 已含完整 system（含 skill
+//     等动态注入内容），传入工具已含主循环 warp 壳，注入或包装都会重复。
 //
-// 通过浅拷贝 Agent 并清空 hook 链实现：Agent 构建后只读是框架契约，拷贝
-// 安全；并发调用安全——每次调用都在独立的局部拷贝上运行，不共享可变状态。
-// 子循环内不再暴露 Fork 入口，单层由调用方（如 task 剔除自身工具）保证。
-func (a *Agent) Fork(ctx context.Context, seed []types.Message, tools []types.Tool, input string, onEvent event.OnEvent) (*types.LoopState, error) {
+// 单层保证：startHooks 不重跑，task 工具不会在子循环注册，且 task hook
+// 对 TaskID 非空的子循环拒绝再次 fork（见 ext/hook/task）。
+//
+// 通过浅拷贝 Agent 实现复刻：Agent 构建后只读是框架契约，拷贝安全；并发
+// 调用安全——每次调用在独立的局部拷贝上运行。已知限制：继承工具的 warp
+// 壳持有主循环 emitter，壳内部事件（重试、降级）不带 taskID（引擎级事件
+// 经子 state 发出，全部带标）。
+func (a *Agent) Fork(ctx context.Context, taskID string, seed []types.Message, tools []types.Tool, input string) (*types.LoopState, error) {
 	sub := *a
 	sub.startHooks = nil
-	sub.modelStartHooks = nil
-	sub.modelEndHooks = nil
-	sub.toolStartHooks = nil
-	sub.toolEndHooks = nil
-	sub.loopHooks = nil
-	sub.endHooks = nil
 	sub.tools = tools
-	sub.toolWarps = nil // 传入工具已含主循环 warp 链，不再二次包装
-	if onEvent != nil {
-		sub.onEvent = onEvent
-	}
-	sub.systemPrompt = "" // seed 已含完整 system（含 skill 注入），不再重复注入
+	sub.toolWarps = nil
+	sub.systemPrompt = ""
+
+	// seed 深拷贝：子循环 append 不改写父消息底层数组（并行 fork 安全）。
+	seedCopy := append(make([]types.Message, 0, len(seed)), seed...)
 
 	return sub.Run(ctx, input, func(state *types.LoopState) {
-		state.Messages = append(state.Messages, seed...)
+		state.TaskID = taskID
+		state.Messages = append(state.Messages, seedCopy...)
 	})
 }

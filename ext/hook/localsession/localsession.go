@@ -76,9 +76,15 @@ func (h *Hook) Name() string { return "localsession" }
 func (h *Hook) Path() string { return h.dir + "/" + h.id + ".json" }
 
 // OnEnd 持久化快照；失败不阻断主流程（写入错误记入 Metadata）。
+// fork 子循环（state.TaskID 非空）写入独立文件 <主ID>-<taskID>.json：
+// 并行分身各写各的，互不覆盖，Load/List 可回放；主循环不受影响。
 func (h *Hook) OnEnd(_ context.Context, state *types.LoopState) error {
+	id := h.id
+	if state.TaskID != "" {
+		id = h.id + "-" + state.TaskID
+	}
 	snap := Session{
-		ID:         h.id,
+		ID:         id,
 		Input:      state.Input,
 		Messages:   state.Messages,
 		Iterations: state.Iteration,
@@ -91,7 +97,7 @@ func (h *Hook) OnEnd(_ context.Context, state *types.LoopState) error {
 		state.Metadata["localsession_error"] = err.Error()
 		return nil
 	}
-	if err := h.fsys.Write(context.Background(), h.Path(), data); err != nil {
+	if err := h.fsys.Write(context.Background(), h.dir+"/"+id+".json", data); err != nil {
 		state.Metadata["localsession_error"] = err.Error()
 	}
 	return nil

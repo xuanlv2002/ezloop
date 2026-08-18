@@ -27,7 +27,7 @@ type Event struct {
 	Type      EventType
 	Timestamp time.Time
 	Iteration int
-	// TaskID 标识事件所属的上下文隔离 fork（ext/hook/task）；主循环事件为空串。
+	// TaskID 标识事件所属的 fork 子循环（core.Fork）；主循环事件为空串。
 	// 工具并发、fork 也并发，消费方以 TaskID 区分同一时刻多个 fork 的事件归属。
 	TaskID string
 	Data   any

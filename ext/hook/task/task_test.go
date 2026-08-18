@@ -10,6 +10,7 @@ import (
 
 	"github.com/xuanlv2002/ezloop/core"
 	"github.com/xuanlv2002/ezloop/event"
+	"github.com/xuanlv2002/ezloop/hook"
 	"github.com/xuanlv2002/ezloop/internal/testutil"
 	"github.com/xuanlv2002/ezloop/provider"
 	"github.com/xuanlv2002/ezloop/types"
@@ -236,6 +237,35 @@ func TestForkCannotForkAgain(t *testing.T) {
 	}
 }
 
+// 分身继承父 Agent 的全部运行期 hook：父的 toolStart 拦截在 fork 子循环内
+// 照常生效（审批无旁路）。
+func TestTaskForkRunsParentToolStartHooks(t *testing.T) {
+	guard := &guardTool{}
+	h := New()
+	p := testutil.Scripted(
+		testutil.ToolCalls(testutil.Call("1", ToolName, `{"task":"go"}`)),
+		testutil.ToolCalls(testutil.Call("s1", "echo", `{"v":"x"}`)), // 分身内调 echo，被父 hook 拦
+		testutil.Text("sub done"),
+		testutil.Text("final"),
+	)
+	a := core.NewAgent(p, core.WithHooks(h, guard), core.WithTools(testutil.EchoTool{}))
+	h.Bind(a)
+
+	state, err := a.Run(context.Background(), "delegate")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if state.StopReason != types.StopCompleted {
+		t.Fatalf("stop: %s", state.StopReason)
+	}
+	if guard.skipped != 1 {
+		t.Fatalf("parent toolStart hook should run inside fork, got %d", guard.skipped)
+	}
+	if state.Messages[2].Content != "sub done" {
+		t.Fatalf("result: %q", state.Messages[2].Content)
+	}
+}
+
 // 空任务描述 → 直接以提示文案作为结果，不 fork。
 func TestTaskEmptyDescription(t *testing.T) {
 	state, err := withTask(
@@ -285,6 +315,18 @@ func (r *recTool) ArgsSchema() json.RawMessage { return json.RawMessage(`{"type"
 func (r *recTool) Invoke(_ context.Context, _ json.RawMessage) (string, error) {
 	r.calls++
 	return "recorded", nil
+}
+
+// guardTool 模拟审批类 hook：Skip 掉 echo，验证分身不旁路父的拦截。
+type guardTool struct{ skipped int }
+
+func (g *guardTool) Name() string { return "guardTool" }
+func (g *guardTool) OnToolStart(_ context.Context, _ *types.LoopState, call *types.ToolCall) (hook.Action, error) {
+	if call.Name == "echo" {
+		g.skipped++
+		return hook.Skip("blocked by parent guard"), nil
+	}
+	return hook.Proceed, nil
 }
 
 // errOnSecondProvider 第二次调用返回错误：父调用 → fork 出错 → 父自纠。

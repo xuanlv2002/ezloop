@@ -400,6 +400,7 @@ func (a *Agent) emit(state *types.LoopState, typ event.EventType, data any) {
 		Type:      typ,
 		Timestamp: time.Now(),
 		Iteration: state.Iteration,
+		TaskID:    state.TaskID,
 		Data:      data,
 	})
 }
