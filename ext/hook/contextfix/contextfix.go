@@ -1,8 +1,10 @@
-// Package contextfix 在每次 Run 开始时修理消息历史，双向修补：
-// 补缺 —— assistant 的 tool_call 缺少对应 tool 结果时补占位消息；
-// 删孤 —— tool 结果消息对应的 assistant 调用已丢失时删除（保留会被 API 拒绝）。
-// 与引擎收尾段的不变量互补：引擎保证本轮产生的历史完整，
-// 本 hook 保证历史进入引擎前完整（外部注入的残缺历史、旧存档、异常中断等）。
+/*
+Package contextfix 在每次 Run 开始时修理消息历史，双向修补：
+补缺 —— assistant 的 tool_call 缺少对应 tool 结果时补占位消息；
+删孤 —— tool 结果消息对应的 assistant 调用已丢失时删除（保留会被 API 拒绝）。
+与引擎收尾段的不变量互补：引擎保证本轮产生的历史完整，
+本 hook 保证历史进入引擎前完整（外部注入的残缺历史、旧存档、异常中断等）。
+*/
 package contextfix
 
 import (
@@ -11,7 +13,7 @@ import (
 	"github.com/xuanlv2002/ezloop/types"
 )
 
-// Placeholder 是缺失结果的占位文案，模型据此得知该调用没有可用的执行结果。
+/* Placeholder 是缺失结果的占位文案，模型据此得知该调用没有可用的执行结果。 */
 const Placeholder = "(missing tool result)"
 
 type Hook struct{}
@@ -25,7 +27,7 @@ func (Hook) OnStart(_ context.Context, state *types.LoopState) error {
 	return nil
 }
 
-// Fix 双向修理历史；历史完整时原样返回（不新建切片）。
+/* Fix 双向修理历史；历史完整时原样返回（不新建切片）。 */
 func Fix(msgs []types.Message) []types.Message {
 	called := make(map[string]bool, len(msgs)) // assistant 发起过的调用
 	answered := make(map[string]bool, len(msgs))

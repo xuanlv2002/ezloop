@@ -1,8 +1,13 @@
-// Package core 实现 loop 引擎：NewAgent 组装 Provider、Hook 与工具，
-// Run 驱动 "model → tool → model" 循环直到完成或终止。
+/*
+Package core 实现 loop 引擎：NewAgent 组装 Provider、Hook 与工具，
+
+Run 驱动 "model → tool → model" 循环直到完成或终止。
+*/
 package core
 
 import (
+	"context"
+
 	"github.com/xuanlv2002/ezloop/event"
 	"github.com/xuanlv2002/ezloop/hook"
 	"github.com/xuanlv2002/ezloop/provider"
@@ -12,7 +17,7 @@ import (
 
 const DefaultMaxIterations = 16
 
-// HyperParams 是 Agent 的运行超参数。
+/* HyperParams 是 Agent 的运行超参数。 */
 type HyperParams struct {
 	// MaxIterations 最大迭代次数，0 取默认 16。
 	MaxIterations int
@@ -48,10 +53,14 @@ type Agent struct {
 	systemPrompt string
 }
 
+/* Option 配置 Agent（组装期）。 */
 type Option func(*Agent)
 
-// WithHooks 传入任意扩展（mcp、skill、异常捕获等），
-// 每个扩展只需实现 hook 包中它关心的小接口。
+/*
+WithHooks 传入任意扩展（mcp、skill、异常捕获等），
+
+每个扩展只需实现 hook 包中它关心的小接口。
+*/
 func WithHooks(hooks ...hook.Hook) Option {
 	return func(a *Agent) {
 		for _, h := range hooks {
@@ -83,40 +92,51 @@ func WithHooks(hooks ...hook.Hook) Option {
 	}
 }
 
+/* WithTools 注册静态工具（hook 运行时注入的工具另走 ToolRegistry.Register）。 */
 func WithTools(tools ...types.Tool) Option {
 	return func(a *Agent) { a.tools = append(a.tools, tools...) }
 }
 
+/* WithMaxIterations 设置最大迭代次数。 */
 func WithMaxIterations(n int) Option {
 	return func(a *Agent) { a.hyper.MaxIterations = n }
 }
 
-// WithHyperParams 设置运行超参数（迭代上限、工具并发量等）。
+/* WithHyperParams 设置运行超参数（迭代上限、工具串行等）。 */
 func WithHyperParams(hp HyperParams) Option {
 	return func(a *Agent) { a.hyper = hp }
 }
 
-// WithOnEvent 设置事件回调。
-// 并发契约：工具并发执行时（含 tool warp 的事件），回调可能被多个
-// goroutine 同时调用——实现必须并发安全且快速返回；
-// 需要免锁消费时用 RunAsync 的 Events 通道（channel 天然并发安全）。
+/*
+WithOnEvent 设置事件回调。
+
+并发契约：工具并发执行时（含 tool warp 的事件），回调可能被多个
+goroutine 同时调用——实现必须并发安全且快速返回；
+需要免锁消费时用 RunAsync 的 Events 通道（channel 天然并发安全）。
+*/
 func WithOnEvent(fn event.OnEvent) Option {
 	return func(a *Agent) { a.onEvent = fn }
 }
 
-// WithSystemPrompt 设置 agent 级系统提示词（人格、规则等），
-// 位于消息序列最前。会话级动态注入用 skill hook 或 WithHistory。
+/*
+WithSystemPrompt 设置 agent 级系统提示词（人格、规则等），位于消息序列
+
+最前，全程唯一一条。会话级动态注入用 skill hook 或 WithHistory。
+*/
 func WithSystemPrompt(prompt string) Option {
 	return func(a *Agent) { a.systemPrompt = prompt }
 }
 
-// RunOption 是单次 Run 的定制项。
+/* RunOption 是单次 Run 的定制项。 */
 type RunOption func(*types.LoopState)
 
-// WithHistory 携带历史对话消息（多轮会话延续），
-// 历史位于本次 input 之前、system 提示词之后。
-// system 消息会被过滤：它们是 agent 的属性（WithSystemPrompt、skill hook），
-// 每轮由引擎重新注入，历史快照中的 system 不应重复带入。
+/*
+WithHistory 携带历史对话消息（多轮会话延续），历史位于本次 input 之前、
+
+system 提示词之后。system 消息会被过滤：它们是 agent 的属性
+（WithSystemPrompt、skill hook），每轮由引擎重新注入，历史快照中的
+system 不应重复带入。
+*/
 func WithHistory(messages ...types.Message) RunOption {
 	return func(state *types.LoopState) {
 		for _, m := range messages {
@@ -128,30 +148,44 @@ func WithHistory(messages ...types.Message) RunOption {
 	}
 }
 
-// WithStreaming 启用后，Provider 若实现 StreamProvider 则走流式，
-// chunk 通过 EventModelChunk 实时发出。
+/*
+WithStreaming 启用后，Provider 若实现 StreamProvider 则走流式，
+
+chunk 通过 EventModelChunk / EventReasoningChunk 实时发出。
+*/
 func WithStreaming(enabled bool) Option {
 	return func(a *Agent) { a.streaming = enabled }
 }
 
-// WithModelWarp 传入模型节点中间件（类型定义见 warp 包）。
-// 组装延迟到每次 Run：引擎注入 per-Run 事件出口后才包装，
-// 先注册的位于最外层，warp 实例 per-Run 独立。
+/*
+WithModelWarp 传入模型节点中间件（类型定义见 warp 包）。
+
+组装延迟到每次 Run：引擎注入 per-Run 事件出口后才包装，
+先注册的位于最外层，warp 实例 per-Run 独立。
+*/
 func WithModelWarp(warps ...warp.ModelHandler) Option {
 	return func(a *Agent) {
 		a.modelWarps = append(a.modelWarps, warps...)
 	}
 }
 
-// WithToolWarp 传入工具节点中间件（引擎标准能力，类型定义见 warp 包）。
-// 挂载在 ToolRegistry 上：静态注册（WithTools）与 hook 运行时注入的工具
-// 都会被包装。先注册的位于最外层。
+/*
+WithToolWarp 传入工具节点中间件（类型定义见 warp 包）。
+
+挂载在 ToolRegistry 上：静态注册（WithTools）与 hook 运行时注入的工具
+都会被包装。先注册的位于最外层。
+*/
 func WithToolWarp(warps ...warp.ToolHandler) Option {
 	return func(a *Agent) {
 		a.toolWarps = append(a.toolWarps, warps...)
 	}
 }
 
+/*
+NewAgent 组装 Agent。构建后只读是框架契约（并发 Run 共享安全、
+
+Fork 浅拷贝复刻安全），全部定制经 Option 完成。
+*/
 func NewAgent(p provider.ModelProvider, opts ...Option) *Agent {
 	a := &Agent{
 		provider: p,
@@ -162,4 +196,17 @@ func NewAgent(p provider.ModelProvider, opts ...Option) *Agent {
 	}
 	a.hyper = a.hyper.withDefaults()
 	return a
+}
+
+type agentCtxKey struct{}
+
+/*
+AgentFromContext 取回当前 Run 的 Agent。引擎在每次 Run 开始时把自身
+
+注入 ctx——hook 需要复刻引擎能力时用它（如 task hook 的并行分身），
+无需在组装期反向持有 Agent 引用。
+*/
+func AgentFromContext(ctx context.Context) (*Agent, bool) {
+	a, ok := ctx.Value(agentCtxKey{}).(*Agent)
+	return a, ok
 }

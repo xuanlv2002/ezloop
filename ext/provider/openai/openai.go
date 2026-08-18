@@ -1,6 +1,8 @@
-// Package openai 实现 OpenAI 兼容协议的 Provider，
-// 任何兼容 /chat/completions 的端点（OpenAI/DeepSeek/vLLM/Ollama 等）
-// 只需替换 BaseURL 即可接入。
+/*
+Package openai 实现 OpenAI 兼容协议的 Provider，
+任何兼容 /chat/completions 的端点（OpenAI/DeepSeek/vLLM/Ollama 等）
+只需替换 BaseURL 即可接入。
+*/
 package openai
 
 import (
@@ -19,7 +21,7 @@ import (
 
 const DefaultBaseURL = "https://api.openai.com/v1"
 
-// DefaultTimeout 是单次请求（含流式全程）的默认超时。
+/* DefaultTimeout 是单次请求（含流式全程）的默认超时。 */
 const DefaultTimeout = 5 * time.Minute
 
 type Options struct {
@@ -77,6 +79,11 @@ type chatMessage struct {
 	Content    string         `json:"content"`
 	ToolCalls  []chatToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string         `json:"tool_call_id,omitempty"`
+
+	// ReasoningContent 是推理模型（DeepSeek R1 / OpenAI o 系列兼容端点）返回的
+	// 思考过程，仅出现在响应侧；toChatMessages 从 types.Message 构造请求时
+	// 不填它（协议要求请求不回传 reasoning）。
+	ReasoningContent string `json:"reasoning_content,omitempty"`
 }
 
 type chatTool struct {
@@ -112,6 +119,28 @@ type chatResponse struct {
 type chatUsage struct {
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`
+	// 缓存命中两套字段：OpenAI prompt_tokens_details.cached_tokens、
+	// DeepSeek prompt_cache_hit_tokens，取非零者。
+	PromptTokensDetails *struct {
+		CachedTokens int `json:"cached_tokens"`
+	} `json:"prompt_tokens_details,omitempty"`
+	PromptCacheHitTokens int `json:"prompt_cache_hit_tokens"`
+}
+
+/* toUsage 把协议用量映射到 types.Usage。 */
+func toUsage(u *chatUsage) types.Usage {
+	if u == nil {
+		return types.Usage{}
+	}
+	cached := u.PromptCacheHitTokens
+	if cached == 0 && u.PromptTokensDetails != nil {
+		cached = u.PromptTokensDetails.CachedTokens
+	}
+	return types.Usage{
+		PromptTokens:     u.PromptTokens,
+		CompletionTokens: u.CompletionTokens,
+		CachedTokens:     cached,
+	}
 }
 
 type streamChunk struct {
@@ -164,7 +193,7 @@ func toChatTools(tools []types.Tool) []chatTool {
 }
 
 func fromChatMessage(msg chatMessage, usage types.Usage) *types.ModelResponse {
-	resp := &types.ModelResponse{Content: msg.Content, Usage: usage}
+	resp := &types.ModelResponse{Content: msg.Content, Reasoning: msg.ReasoningContent, Usage: usage}
 	for _, tc := range msg.ToolCalls {
 		args := json.RawMessage(tc.Function.Arguments)
 		if len(args) == 0 {
@@ -199,8 +228,10 @@ func (p *Provider) post(ctx context.Context, req *chatRequest) (*http.Response, 
 	return p.client.Do(httpReq)
 }
 
-// HTTPError 是非 2xx 响应的结构化错误，实现 Retryable() bool：
-// modelretry 等装饰器按此判断可重试性，无需解析错误文本。
+/*
+HTTPError 是非 2xx 响应的结构化错误，实现 Retryable() bool：
+modelretry 等装饰器按此判断可重试性，无需解析错误文本。
+*/
 type HTTPError struct {
 	Status int
 	Body   string
@@ -210,8 +241,10 @@ func (e *HTTPError) Error() string {
 	return fmt.Sprintf("openai: http %d: %s", e.Status, e.Body)
 }
 
-// Retryable：408（请求超时）、429（限流）与 5xx 可安全重试；
-// 其余 4xx（鉴权错误、请求格式错误等）重试无意义。
+/*
+Retryable：408（请求超时）、429（限流）与 5xx 可安全重试；
+其余 4xx（鉴权错误、请求格式错误等）重试无意义。
+*/
 func (e *HTTPError) Retryable() bool {
 	return e.Status == http.StatusRequestTimeout ||
 		e.Status == http.StatusTooManyRequests ||
@@ -226,7 +259,7 @@ func checkStatus(resp *http.Response) error {
 	return nil
 }
 
-// Invoke 非流式调用。
+/* Invoke 非流式调用。 */
 func (p *Provider) Invoke(ctx context.Context, req *types.ModelRequest) (*types.ModelResponse, error) {
 	// 超时包住整个调用（含读 body）；不用 http.Client.Timeout 是因为它对
 	// 流式不友好，这里 Invoke / Stream 统一用 context 控制。
@@ -253,15 +286,14 @@ func (p *Provider) Invoke(ctx context.Context, req *types.ModelRequest) (*types.
 	if len(out.Choices) == 0 {
 		return nil, fmt.Errorf("openai: empty choices")
 	}
-	usage := types.Usage{}
-	if out.Usage != nil {
-		usage = types.Usage{PromptTokens: out.Usage.PromptTokens, CompletionTokens: out.Usage.CompletionTokens}
-	}
+	usage := toUsage(out.Usage)
 	return fromChatMessage(out.Choices[0].Message, usage), nil
 }
 
-// Stream 流式调用：content 增量经 onChunk 实时透出，
-// tool call 参数分片在内部聚合，最终返回完整响应。
+/*
+Stream 流式调用：content 增量经 onChunk 实时透出，
+tool call 参数分片在内部聚合，最终返回完整响应。
+*/
 func (p *Provider) Stream(ctx context.Context, req *types.ModelRequest, onChunk provider.ModelChunkHandler) (*types.ModelResponse, error) {
 	// 超时覆盖流式全程（建连 + SSE 读到 [DONE]），防服务端挂起拖死 loop。
 	ctx, cancel := context.WithTimeout(ctx, p.opts.Timeout)
@@ -305,15 +337,20 @@ func (p *Provider) Stream(ctx context.Context, req *types.ModelRequest, onChunk 
 			return nil, fmt.Errorf("openai: decode chunk %q: %w", payload, err)
 		}
 		if chunk.Usage != nil {
-			final.Usage = types.Usage{
-				PromptTokens:     chunk.Usage.PromptTokens,
-				CompletionTokens: chunk.Usage.CompletionTokens,
-			}
+			final.Usage = toUsage(chunk.Usage)
 		}
 		if len(chunk.Choices) == 0 {
 			continue
 		}
 		delta := chunk.Choices[0].Delta
+		if delta.ReasoningContent != "" {
+			final.Reasoning += delta.ReasoningContent
+			if onChunk != nil {
+				if err := onChunk(types.ModelChunk{ReasoningDelta: delta.ReasoningContent}); err != nil {
+					return nil, err
+				}
+			}
+		}
 		if delta.Content != "" {
 			final.Content += delta.Content
 			if onChunk != nil {

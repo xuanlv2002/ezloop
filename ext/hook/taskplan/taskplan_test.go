@@ -32,7 +32,6 @@ func TestTaskPlanDecisions(t *testing.T) {
 					testutil.ToolCalls(testutil.Call("1", ToolName, `{"plan":"step1; step2"}`)),
 					testutil.Text("done"),
 				),
-				core.WithTools(Tool()),
 				core.WithHooks(h),
 			).Run(context.Background(), "build")
 			if err != nil {
@@ -62,7 +61,6 @@ func TestTaskPlanResubmitLoop(t *testing.T) {
 			testutil.ToolCalls(testutil.Call("2", ToolName, `{"plan":"v2 加压测"}`)),
 			testutil.Text("done"),
 		),
-		core.WithTools(Tool()),
 		core.WithHooks(h),
 	).Run(context.Background(), "build")
 	if err != nil {
@@ -70,6 +68,18 @@ func TestTaskPlanResubmitLoop(t *testing.T) {
 	}
 	if state.Iteration != 3 {
 		t.Fatalf("iterations: %d", state.Iteration)
+	}
+}
+
+// WithHooks 即可：task_plan 工具由 OnStart 自动注册，无需 core.WithTools(Tool())。
+func TestHookRegistersToolOnStart(t *testing.T) {
+	h, _ := New()
+	state := &types.LoopState{Tools: types.NewToolRegistry()}
+	if err := h.OnStart(context.Background(), state); err != nil {
+		t.Fatalf("OnStart: %v", err)
+	}
+	if _, err := state.Tools.Lookup(ToolName); err != nil {
+		t.Fatalf("task_plan tool not auto-registered: %v", err)
 	}
 }
 

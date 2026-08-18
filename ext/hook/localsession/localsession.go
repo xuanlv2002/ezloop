@@ -1,7 +1,9 @@
-// Package localsession 将 session 以文件形式持久化到本地文件系统：
-// EndHook 时把完整可恢复状态（消息历史、用量、停止原因）写入
-// sessions/<id>.json，同一 ID 每轮滚动覆盖为最新快照。
-// 恢复用 Load 取出历史，经 core.WithHistory 继续对话。
+/*
+Package localsession 将 session 以文件形式持久化到本地文件系统：
+EndHook 时把完整可恢复状态（消息历史、用量、停止原因）写入
+sessions/<id>.json，同一 ID 每轮滚动覆盖为最新快照。
+恢复用 Load 取出历史，经 core.WithHistory 继续对话。
+*/
 package localsession
 
 import (
@@ -17,10 +19,10 @@ import (
 	"github.com/xuanlv2002/ezloop/types"
 )
 
-// DefaultDir 是会话文件在 FS 内的默认目录。
+/* DefaultDir 是会话文件在 FS 内的默认目录。 */
 const DefaultDir = "sessions"
 
-// Session 是一次会话的可持久化快照。
+/* Session 是一次会话的可持久化快照。 */
 type Session struct {
 	ID         string          `json:"id"`
 	Input      string          `json:"input"`
@@ -31,15 +33,17 @@ type Session struct {
 	EndedAt    time.Time       `json:"ended_at"`
 }
 
-// Hook 在 EndHook 时持久化会话快照。
+/* Hook 在 EndHook 时持久化会话快照。 */
 type Hook struct {
 	fsys fs.FileSystem
 	dir  string
 	id   string
 }
 
-// New 创建会话持久化 hook。id 为空时自动生成；
-// 每轮结束后调用 SetID 可切换到已有会话继续（滚动覆盖同一文件）。
+/*
+New 创建会话持久化 hook。id 为空时自动生成；
+每轮结束后调用 SetID 可切换到已有会话继续（滚动覆盖同一文件）。
+*/
 func New(fsys fs.FileSystem, id string, opts ...func(*Hook)) *Hook {
 	if id == "" {
 		id = NewID()
@@ -51,7 +55,7 @@ func New(fsys fs.FileSystem, id string, opts ...func(*Hook)) *Hook {
 	return h
 }
 
-// WithDir 自定义会话目录（FS 内路径）。
+/* WithDir 自定义会话目录（FS 内路径）。 */
 func WithDir(dir string) func(*Hook) {
 	return func(h *Hook) {
 		if dir != "" {
@@ -60,10 +64,10 @@ func WithDir(dir string) func(*Hook) {
 	}
 }
 
-// ID 返回当前会话 ID。
+/* ID 返回当前会话 ID。 */
 func (h *Hook) ID() string { return h.id }
 
-// SetID 切换会话（后续轮次写入新 ID 的文件）。
+/* SetID 切换会话（后续轮次写入新 ID 的文件）。 */
 func (h *Hook) SetID(id string) {
 	if id != "" {
 		h.id = id
@@ -72,15 +76,29 @@ func (h *Hook) SetID(id string) {
 
 func (h *Hook) Name() string { return "localsession" }
 
-// Path 返回当前会话的存储路径。
+/* Path 返回当前会话的存储路径。 */
 func (h *Hook) Path() string { return h.dir + "/" + h.id + ".json" }
 
-// OnEnd 持久化快照；失败不阻断主流程（写入错误记入 Metadata）。
+/*
+OnEnd 持久化快照；失败不阻断主流程（写入错误记入 Metadata）。
+fork 子循环（state.ForkID 非空）写入独立文件 <主ID>-<forkID>.json：
+并行分身各写各的，互不覆盖，Load/List 可回放；主循环不受影响。
+分身快照只存增量（剥离 seed）：seed 是主上下文的逐字节重复，主文件
+里本就有，全量落盘会让存储随主上下文长度 × 分身数放大。
+*/
 func (h *Hook) OnEnd(_ context.Context, state *types.LoopState) error {
+	id := h.id
+	if state.ForkID != "" {
+		id = h.id + "-" + state.ForkID
+	}
+	msgs := state.Messages
+	if state.ForkID != "" && state.SeedLen > 0 && state.SeedLen <= len(msgs) {
+		msgs = msgs[state.SeedLen:]
+	}
 	snap := Session{
-		ID:         h.id,
+		ID:         id,
 		Input:      state.Input,
-		Messages:   state.Messages,
+		Messages:   msgs,
 		Iterations: state.Iteration,
 		StopReason: string(state.StopReason),
 		StartedAt:  state.StartedAt,
@@ -91,20 +109,20 @@ func (h *Hook) OnEnd(_ context.Context, state *types.LoopState) error {
 		state.Metadata["localsession_error"] = err.Error()
 		return nil
 	}
-	if err := h.fsys.Write(context.Background(), h.Path(), data); err != nil {
+	if err := h.fsys.Write(context.Background(), h.dir+"/"+id+".json", data); err != nil {
 		state.Metadata["localsession_error"] = err.Error()
 	}
 	return nil
 }
 
-// NewID 生成短随机会话 ID。
+/* NewID 生成短随机会话 ID。 */
 func NewID() string {
 	b := make([]byte, 4)
 	_, _ = rand.Read(b)
 	return time.Now().Format("20060102-150405") + "-" + hex.EncodeToString(b)
 }
 
-// Load 读取指定会话。
+/* Load 读取指定会话。 */
 func Load(ctx context.Context, fsys fs.FileSystem, dir, id string) (*Session, error) {
 	if dir == "" {
 		dir = DefaultDir
@@ -120,7 +138,7 @@ func Load(ctx context.Context, fsys fs.FileSystem, dir, id string) (*Session, er
 	return &s, nil
 }
 
-// List 返回全部会话 ID（按文件名排序）。
+/* List 返回全部会话 ID（按文件名排序）。 */
 func List(ctx context.Context, fsys fs.FileSystem, dir string) ([]string, error) {
 	if dir == "" {
 		dir = DefaultDir

@@ -27,7 +27,7 @@ const (
 	MaxFindResults = 500
 )
 
-// Edit 单文件查找替换：全部命中都替换，返回次数。
+/* Edit 单文件查找替换：全部命中都替换，返回次数。 */
 func (l Local) Edit(ctx context.Context, p, oldText, newText string) (int, error) {
 	data, err := l.Read(ctx, p)
 	if err != nil {
@@ -44,13 +44,14 @@ func (l Local) Edit(ctx context.Context, p, oldText, newText string) (int, error
 	return n, l.Write(ctx, p, []byte(replaced))
 }
 
-// ApplyPatch 原子多文件修改：先全量预检（可读 + old 命中），
-// 任一失败则什么都不写；应用过程中若发生错误，回滚已应用的文件。
+/*
+ApplyPatch 原子多文件修改：先全量预检（可读 + old 命中），
+任一失败则什么都不写；应用过程中若发生错误，回滚已应用的文件。
+*/
 func (l Local) ApplyPatch(ctx context.Context, ops []PatchOp) error {
 	if len(ops) == 0 {
 		return fmt.Errorf("fs: empty patch")
 	}
-	// 预检。
 	originals := make([][]byte, len(ops))
 	for i, op := range ops {
 		if op.Path == "" || op.OldText == "" {
@@ -79,7 +80,7 @@ func (l Local) ApplyPatch(ctx context.Context, ops []PatchOp) error {
 	return nil
 }
 
-// Grep 按正则搜索文件内容。
+/* Grep 按正则搜索文件内容。 */
 func (l Local) Grep(ctx context.Context, req GrepRequest) ([]GrepMatch, error) {
 	if req.Pattern == "" {
 		return nil, fmt.Errorf("fs: empty pattern")
@@ -112,7 +113,7 @@ func (l Local) Grep(ctx context.Context, req GrepRequest) ([]GrepMatch, error) {
 	return matches, nil
 }
 
-// Find 按文件名 glob 模式查找。
+/* Find 按文件名 glob 模式查找。 */
 func (l Local) Find(ctx context.Context, root, pattern string) ([]string, error) {
 	if pattern == "" {
 		return nil, fmt.Errorf("fs: empty pattern")
@@ -133,8 +134,10 @@ func (l Local) Find(ctx context.Context, root, pattern string) ([]string, error)
 	return found, nil
 }
 
-// walk 遍历 root（文件或目录），对每个文件以 FS 相对路径调用 fn；
-// fn 返回 false 时停止。自动跳过二进制文件与常见噪声目录。
+/*
+walk 遍历 root（文件或目录），对每个文件以 FS 相对路径调用 fn；
+fn 返回 false 时停止。自动跳过二进制文件与常见噪声目录。
+*/
 func (l Local) walk(ctx context.Context, root string, fn func(rel string, data []byte) bool) error {
 	abs, err := l.resolve(root)
 	if err != nil {
@@ -182,8 +185,10 @@ func globMatch(pattern, name string) bool {
 	return err == nil && ok
 }
 
-// readFileLimited 读取文件内容，超大文件（>2MB）或疑似二进制（含 NUL 字节）
-// 返回错误，由调用方跳过。
+/*
+readFileLimited 读取文件内容，超大文件（>2MB）或疑似二进制（含 NUL 字节）
+返回错误，由调用方跳过。
+*/
 func readFileLimited(p string) ([]byte, error) {
 	info, err := os.Stat(p)
 	if err != nil {

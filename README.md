@@ -201,21 +201,42 @@ sequenceDiagram
     E-->>U: state（Messages 可恢复 · 事件流已实时输出）
 ```
 
+## 事件流
+
+事件只做观察，不用于修改状态（修改状态是 Hook 的职责）。所有事件带
+`ForkID` 字段区分归属：空串＝主循环，非空＝对应 fork 分身——消费方据此
+把分身的流式输出、审批请求路由到正确的出口。
+
+| 事件 | 时机 | Data |
+|---|---|---|
+| `loop_start` / `loop_end` | Run 起 / 止 | input / StopReason |
+| `model_start` / `model_end` | 模型调用前后 | nil / `*ModelResponse` |
+| `model_chunk` / `reasoning_chunk` | 流式正文 / 思考增量 | string |
+| `tool_start` / `tool_end` | 工具调用起 / 止（随调用即时，到达序不保证，以 CallID 关联） | `*ToolCall` / `*ToolResult` |
+| `iteration_end` | 每轮迭代结束 | int |
+| `error` | 引擎错误 | error |
+| `stream_fallback` | 声明流式但链上无 StreamProvider，已降级（不静默） | string |
+
+扩展事件自带命名空间前缀（`task.start`、`approve.request`、`askuser.request`、`taskplan.request`…），
+人机交互类事件带 CallID，供渲染层呈现并回传决策。
+
 ## 官方扩展
 
 | 扩展 | 类型 | 说明 |
 |---|---|---|
 | `ext/fs` | 底座 | FileSystem 核心（Read/Write/List）+ 可选能力 Modifier（Edit/ApplyPatch）、Searcher（Grep/Find）；Local 实现全部能力（root 沙箱、补丁预检+回滚） |
 | `ext/provider/openai` | model | OpenAI 兼容 Provider（Invoke + SSE 流式），兼容 DeepSeek/SiliconFlow/Ollama/vLLM |
-| `ext/warp/model/modelretry` | warp | 模型重试：指数退避，流式仅在未发出 chunk 时重试 |
+| `ext/warp/model/modelretry` | warp | 模型重试：指数退避，流式仅在未发出 chunk 时重试（裸用引擎无内置重试，生产建议挂载） |
+| `ext/warp/tool/limit` | warp | 工具并发闸：跨全部工具共享信号量，限制一轮 fan-out 的实际并发数，保护外部资源 |
 | `ext/warp/tool/safetool` | warp | 工具防护：panic 恢复 + error 附加上下文 |
 | `ext/hook/offload` | hook | 大结果卸载：超阈值写入 FS，上下文只留摘要+路径 |
 | `ext/hook/mcp` | hook | mcpRouter 单工具封装（schema 恒定、KV cache 友好、配置热加载），内置官方 go-sdk |
 | `ext/hook/skill` | hook | 技能注入：代码定义或从 FS 目录加载 *.md（可选 .keywords） |
-| `ext/hook/summary` | hook | loop 结束自动生成摘要写入 Metadata |
+| `ext/hook/summary` | hook | loop 结束生成摘要写入 Metadata（一次全量历史的模型调用，MinMessages 设阈值跳过短会话；也可不挂 hook 直接调 Summarize 按需触发） |
 | `ext/hook/approve` | hook | 工具审批：channel 决策中断（EventRequest + Decisions 回传） |
 | `ext/hook/askuser` | hook | ask_user 工具：模型提问中断等回答，回答作为工具结果入史 |
 | `ext/hook/taskplan` | hook | task_plan 工具：规划提交中断等处置（执行/否决/修订） |
+| `ext/hook/task` | hook | task 工具：并行分身——基于引擎原语 `core.Agent.Fork` 复刻当前 Agent（provider/超参/全部运行期 hook）与上下文快照独立跑子循环，只把最终答案回传主循环（并发、单层；事件与 session 均按 forkID 区分归属，分身写 sessions/<主ID>-<forkID>.json 只存增量（seed 与主 session 重复，剥离）可回放；主 Agent 经 ctx 自动注入，`WithHooks(task.New())` 即可） |
 | `ext/hook/contextfix` | hook | Run 开始时修理历史：缺失的 tool 结果补占位，序列协议完整 |
 | `ext/hook/filetools` | hook | 文件工具集：read_file（行分页）、write、edit、apply_patch、grep、find、bash；按 FS 能力注册，修改走 per-path 队列 |
 | `ext/hook/localsession` | hook | 会话持久化：滚动快照到 sessions/<id>.json，Load/List 恢复续聊 |
@@ -229,12 +250,12 @@ sequenceDiagram
 ├── hook/       7 个 hook 小接口 + Action 短路语义
 ├── provider/   ModelProvider / StreamProvider 抽象
 ├── warp/       节点装饰器统一定义：Handler[T] + Chain + Model/Tool 两类 Handler
-└── core/       NewAgent 组装 + loop 引擎
+└── core/       NewAgent 组装 + loop 引擎 + Fork 派生原语（并行分身）
 
 扩展层（能力实现，官方 SDK 依赖放这里，不用不引入）
 ├── ext/provider/openai
 ├── ext/warp/{model/modelretry, tool/safetool}
-├── ext/hook/{mcp,skill,summary,approve,askuser,taskplan,contextfix,offload,filetools,localsession}
+├── ext/hook/{mcp,skill,summary,approve,askuser,taskplan,task,contextfix,offload,filetools,localsession}
 └── examples/chat        # 完整 agent：集成全部能力
 ```
 
@@ -244,6 +265,14 @@ sequenceDiagram
 go test ./...        # 引擎行为 / 短路语义 / 事件顺序 / MCP 全链路 / SSE 聚合
 go run ./examples/chat
 ```
+
+## 贡献者文档
+
+面向扩展开发者的深度参考（架构与文件说明 / 开发规范 / 事件与上下文管理）：
+
+- [docs/dev/architecture.md](docs/dev/architecture.md) — 基础架构 · 文件说明
+- [docs/dev/conventions.md](docs/dev/conventions.md) — 开发规范（注释 / 错误 / 并发 / 缓存 / 测试）
+- [docs/dev/lifecycle.md](docs/dev/lifecycle.md) — 事件与上下文管理（本地 / 多租户）
 
 ---
 

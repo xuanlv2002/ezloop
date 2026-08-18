@@ -1,7 +1,9 @@
-// Package offload 是 ToolEndHook：超大工具结果卸载到文件系统，
-// 上下文里只保留头部摘要与文件路径，防止大输出（日志、转储、目录遍历）
-// 撑爆上下文。写入失败时降级透传原文，绝不阻断工具执行。
-// 结果后处理不耦合工具节点本身，故为 hook 而非 warp。
+/*
+Package offload 是 ToolEndHook：超大工具结果卸载到文件系统，
+上下文里只保留头部摘要与文件路径，防止大输出（日志、转储、目录遍历）
+撑爆上下文。写入失败时降级透传原文，绝不阻断工具执行。
+结果后处理不耦合工具节点本身，故为 hook 而非 warp。
+*/
 package offload
 
 import (
@@ -15,7 +17,7 @@ import (
 	"github.com/xuanlv2002/ezloop/types"
 )
 
-// DefaultThreshold 超过此字节数的结果触发卸载。
+/* DefaultThreshold 超过此字节数的结果触发卸载。 */
 const DefaultThreshold = 4096
 
 type Options struct {
@@ -32,7 +34,7 @@ type Hook struct {
 	opts Options
 }
 
-// New 创建卸载 hook，挂载后自动处理所有工具的大结果。
+/* New 创建卸载 hook，挂载后自动处理所有工具的大结果。 */
 func New(fsys fs.FileSystem, opts ...func(*Options)) *Hook {
 	o := Options{Threshold: DefaultThreshold, Dir: ".ezloop/offload", Head: 512}
 	for _, fn := range opts {

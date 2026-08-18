@@ -1,13 +1,15 @@
-// Package filetools 提供基于 FileSystem 接口的核心文件工具集与终端执行工具，
-// 通过 StartHook 注入，工具能力由传入文件系统实现的能力接口决定：
-//
-//	FileSystem（必须） read_file（分页）/ write_file / list_dir
-//	Modifier（可选）   edit_file（原子查找替换）/ apply_patch（多文件原子修改）
-//	Searcher（可选）   grep（正则搜内容）/ find（glob 查文件名）
-//	EnableExec 选项    bash（shell 执行，默认关闭，建议配 approve）
-//
-// 所有修改类操作（write/edit/patch）经 per-path 修改队列串行化，
-// 防止并发工具执行时对同一文件的写冲突。
+/*
+Package filetools 提供基于 FileSystem 接口的核心文件工具集与终端执行工具，
+通过 StartHook 注入，工具能力由传入文件系统实现的能力接口决定：
+
+	FileSystem（必须） read_file（分页）/ write_file / list_dir
+	Modifier（可选）   edit_file（原子查找替换）/ apply_patch（多文件原子修改）
+	Searcher（可选）   grep（正则搜内容）/ find（glob 查文件名）
+	EnableExec 选项    bash（shell 执行，默认关闭，建议配 approve）
+
+所有修改类操作（write/edit/patch）经 per-path 修改队列串行化，
+防止并发工具执行时对同一文件的写冲突。
+*/
 package filetools
 
 import (
@@ -67,7 +69,7 @@ func (h *Hook) OnStart(_ context.Context, state *types.LoopState) error {
 	return nil
 }
 
-// lockPath 返回路径级修改队列锁：同一文件的修改串行，不同文件并行。
+/* lockPath 返回路径级修改队列锁：同一文件的修改串行，不同文件并行。 */
 func (h *Hook) lockPath(path string) func() {
 	h.mu.Lock()
 	l, ok := h.locks[path]
@@ -356,9 +358,11 @@ func (t findTool) Invoke(ctx context.Context, args json.RawMessage) (string, err
 
 // ---- bash（EnableExec）----
 
-// bashTool 以 shell 语义执行单条命令字符串（Windows: cmd /c，其他: sh -c），
-// 支持管道、重定向与 && 组合。输出为 stdout+stderr 合并；退出码非零时
-// 返回输出与错误（供模型自纠）。
+/*
+bashTool 以 shell 语义执行单条命令字符串（Windows: cmd /c，其他: sh -c），
+支持管道、重定向与 && 组合。输出为 stdout+stderr 合并；退出码非零时
+返回输出与错误（供模型自纠）。
+*/
 type bashTool struct{}
 
 func (bashTool) Name() string { return "bash" }

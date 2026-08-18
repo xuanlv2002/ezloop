@@ -23,7 +23,6 @@ func TestAskUserAnswerBecomesResult(t *testing.T) {
 			testutil.ToolCalls(testutil.Call("1", ToolName, `{"question":"用哪个端口?"}`)),
 			testutil.Text("done"),
 		),
-		core.WithTools(Tool()),
 		core.WithHooks(h),
 		core.WithOnEvent(func(e event.Event) {
 			if e.Type != EventRequest {
@@ -47,6 +46,18 @@ func TestAskUserAnswerBecomesResult(t *testing.T) {
 	}
 	if state.Messages[2].Content != "8080" {
 		t.Fatalf("answer msg: %q", state.Messages[2].Content)
+	}
+}
+
+// WithHooks 即可：ask_user 工具由 OnStart 自动注册，无需 core.WithTools(Tool())。
+func TestHookRegistersToolOnStart(t *testing.T) {
+	h, _ := New()
+	state := &types.LoopState{Tools: types.NewToolRegistry()}
+	if err := h.OnStart(context.Background(), state); err != nil {
+		t.Fatalf("OnStart: %v", err)
+	}
+	if _, err := state.Tools.Lookup(ToolName); err != nil {
+		t.Fatalf("ask_user tool not auto-registered: %v", err)
 	}
 }
 

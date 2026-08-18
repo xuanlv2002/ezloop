@@ -1,18 +1,11 @@
-// ezloop 完整 agent 示例：集成框架全部能力。
-//
-// 能力清单：
-//
-//	Provider   openai（.env / 环境变量配置，SiliconFlow/DeepSeek/Ollama 兼容）
-//	Warp       modelretry（模型重试）· safetool（panic 防护）· offload（大结果卸载）
-//	Hook       filetools（read/write/edit/grep/find + bash）
-//	           approve（工具审批）· askuser（模型提问）· taskplan（规划确认）
-//	           —— 三者同构：channel 决策中断，CLI 桥接 stdin
-//	           skill（从 skills/*.md 按需注入）· summary（每轮结束自动摘要）
-//	           localsession（会话持久化，/resume 恢复）
-//	交互       流式输出 · Ctrl+C 取消当轮
-//	命令       /new /sessions /resume <id> /exit
-//
-// 运行：cp .env.example .env && go run ./examples/chat
+/*
+ezloop 完整 agent 示例：集成框架全部能力（openai 流式 + 全部 warp/hook，
+含并行分身 task 与人机交互 approve/askuser/taskplan 的 CLI 桥接）。
+能力全景见文档站：https://xuanlv2002.github.io/ezloop/
+
+运行：cp .env.example .env && go run ./examples/chat
+命令：/new /sessions /resume <id> /summary /exit；Ctrl+C 取消当轮
+*/
 package main
 
 import (
@@ -38,9 +31,11 @@ import (
 	"github.com/xuanlv2002/ezloop/ext/hook/offload"
 	"github.com/xuanlv2002/ezloop/ext/hook/skill"
 	"github.com/xuanlv2002/ezloop/ext/hook/summary"
+	"github.com/xuanlv2002/ezloop/ext/hook/task"
 	"github.com/xuanlv2002/ezloop/ext/hook/taskplan"
 	"github.com/xuanlv2002/ezloop/ext/provider/openai"
 	"github.com/xuanlv2002/ezloop/ext/warp/model/modelretry"
+	"github.com/xuanlv2002/ezloop/ext/warp/tool/limit"
 	"github.com/xuanlv2002/ezloop/ext/warp/tool/safetool"
 	"github.com/xuanlv2002/ezloop/types"
 )
@@ -123,12 +118,25 @@ func main() {
 	asker, answerCh := askuser.New()
 	planner, planCh := taskplan.New()
 
+	// ── 流式渲染节流 ──
+	// 碎 delta（常常每次一两个字符）高频直写终端的开销很大（Windows
+	// console 同步写尤其贵），攒缓冲定期整块写出：一次系统调用代替上百次。
+	sb := &streamBuf{}
+	renderTick := time.NewTicker(80 * time.Millisecond)
+	defer renderTick.Stop()
+	go func() {
+		for range renderTick.C {
+			sb.flush()
+		}
+	}()
+
 	// 判定段并发：多个审批请求会同时到达，CLI 桥用锁串行化提问
 	// （Web 场景则是并发展示卡片、批量点击后各自回传）。
 	var askMu sync.Mutex
 	ask := func(prompt string) string {
 		askMu.Lock()
 		defer askMu.Unlock()
+		sb.flush() // 先把缓冲里的流式内容吐完，提示再压上去，顺序不乱
 		fmt.Print(prompt)
 		if !scanner.Scan() {
 			return ""
@@ -143,9 +151,11 @@ func main() {
 		Model:   env("EZLOOP_MODEL", "deepseek-ai/DeepSeek-V3.2"),
 	})
 	agent := core.NewAgent(p,
-		core.WithSystemPrompt("你是 ezloop 驱动的命令行助手。能用工具就用工具，回答简洁。"),
+		core.WithSystemPrompt("你是 ezloop 驱动的命令行助手。能用工具就用工具，回答简洁。"+
+			" 可并行的子任务用 task 工具分身去做。"),
 		core.WithModelWarp(modelretry.Warp()),
-		core.WithToolWarp(safetool.Warp()),
+		// 并发闸在外（先排队再进防护），一轮 fan-out 再多也不打挂外部资源。
+		core.WithToolWarp(limit.Warp(4), safetool.Warp()),
 		core.WithHooks(
 			contextfix.New(), // 历史进入引擎前先修理（/resume 旧存档防悬空 tool_call）
 			offload.New(fsys),
@@ -154,20 +164,26 @@ func main() {
 			approver,
 			asker,
 			planner,
-			summary.New(p, ""),
+			task.New(),
 			session,
 		),
-		core.WithTools(nowTool{}, askuser.Tool(), taskplan.Tool()),
+		core.WithTools(nowTool{}),
 		core.WithHyperParams(core.HyperParams{MaxIterations: 12}),
 		core.WithStreaming(true),
 		core.WithOnEvent(func(e event.Event) {
 			switch e.Type {
 			case event.EventModelChunk:
-				fmt.Print(e.Data.(string))
+				sb.write(streamTag(e) + e.Data.(string))
+			case event.EventReasoningChunk: // 推理模型的思考过程，与正文分路透出
+				sb.write(streamTag(e) + e.Data.(string))
 			case event.EventToolStart:
-				fmt.Printf("\n🔧 %s ", e.Data.(*types.ToolCall).Name)
+				sb.now(fmt.Sprintf("\n🔧 %s ", e.Data.(*types.ToolCall).Name))
 			case event.EventIterationEnd:
-				fmt.Printf("\n── 迭代 %d ──\n", e.Iteration)
+				sb.now(fmt.Sprintf("\n── 迭代 %d ──\n", e.Iteration))
+			case task.EventStart:
+				sb.now(fmt.Sprintf("\n🧀 分身 %s 启动", e.ForkID))
+			case task.EventEnd:
+				sb.now(fmt.Sprintf("\n🧀 分身 %s 完成", e.ForkID))
 			case approve.EventRequest:
 				call := e.Data.(*types.ToolCall)
 				go func() { // 判定段并发，CLI 桥用 askMu 串行化提问
@@ -204,7 +220,7 @@ func main() {
 		}),
 	)
 
-	fmt.Println("ezloop 完整 agent 已启动（Ctrl+C 取消当轮；命令：/new /sessions /resume <id> /exit）")
+	fmt.Println("ezloop 完整 agent 已启动（Ctrl+C 取消当轮；命令：/new /sessions /resume <id> /summary /exit）")
 	fmt.Printf("会话 ID: %s\n", session.ID())
 	var history []types.Message
 
@@ -242,6 +258,21 @@ func main() {
 			history = s.Messages
 			fmt.Printf("已恢复会话 %s（%d 条消息）\n", id, len(s.Messages))
 			continue
+		case input == "/summary":
+			// 按需摘要：摘要是一次全量历史的模型调用，不做每轮自动
+			// （那会让每轮结束都干等一次），需要时手动触发。
+			if len(history) == 0 {
+				fmt.Println("当前会话为空")
+				continue
+			}
+			fmt.Println("摘要中…")
+			s, err := summary.Summarize(ctx, p, history, "")
+			if err != nil {
+				fmt.Println("摘要失败:", err)
+				continue
+			}
+			fmt.Println("📝", s)
+			continue
 		}
 
 		// Ctrl+C 只取消当轮：换一个可取消的子 ctx，主循环继续。
@@ -251,8 +282,9 @@ func main() {
 			cancelTurn()
 		}()
 
-		fmt.Print("助手: ")
+		sb.now("助手: ")
 		state, err := agent.Run(turnCtx, input, core.WithHistory(history...))
+		sb.flush() // 轮结束立即吐掉尾部残留，不等下一个 tick
 		if err != nil {
 			fmt.Printf("\n[本轮结束: %v]\n", err)
 			cancelTurn()
@@ -264,10 +296,10 @@ func main() {
 		cancelTurn()
 
 		history = state.Messages
-		fmt.Printf("\n[%s · %d 迭代 · 会话 %s]", state.StopReason, state.Iteration, session.ID())
-		if s, ok := state.Metadata["summary"].(string); ok && s != "" {
-			fmt.Printf("\n📝 摘要: %s", s)
-		}
+		fmt.Printf("\n[%s · %d 迭代 · %d→%d tokens（缓存命中 %d）· 会话 %s]",
+			state.StopReason, state.Iteration,
+			state.Usage.PromptTokens, state.Usage.CompletionTokens,
+			state.Usage.CachedTokens, session.ID())
 		if e := state.Metadata["localsession_error"]; e != nil {
 			fmt.Printf("\n[会话保存失败: %v]", e)
 		}
@@ -275,7 +307,7 @@ func main() {
 	}
 }
 
-// send 向决策 channel 发送，程序退出时不悬挂。
+/* send 向决策 channel 发送，程序退出时不悬挂。 */
 func send[T any](ctx context.Context, ch chan<- T, v T) {
 	select {
 	case ch <- v:
@@ -283,7 +315,68 @@ func send[T any](ctx context.Context, ch chan<- T, v T) {
 	}
 }
 
-// nowTool 获取当前时间。
+/*
+streamBuf 是流式渲染的节流缓冲：碎 delta 高频小片段直写终端开销大
+（Windows console 同步写尤其贵），攒起来定期一次写出。所有 OnEvent
+输出走同一把锁，保证流式内容与提示严格有序；ticker 定期 flush，
+提示类输出用 now 立即写出。
+*/
+type streamBuf struct {
+	mu  sync.Mutex
+	buf []byte
+}
+
+func (b *streamBuf) write(s string) {
+	b.mu.Lock()
+	b.buf = append(b.buf, s...)
+	b.mu.Unlock()
+}
+
+/* now 并入缓冲后立即整块写出（提示类输出，与流式内容严格有序）。 */
+func (b *streamBuf) now(s string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.buf = append(b.buf, s...)
+	b.flushLocked()
+}
+
+func (b *streamBuf) flush() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.flushLocked()
+}
+
+func (b *streamBuf) flushLocked() {
+	if len(b.buf) > 0 {
+		_, _ = os.Stdout.Write(b.buf) // 一次系统调用整块写出
+		b.buf = b.buf[:0]
+	}
+}
+
+/*
+streamTag 在流式输出切换归属（主循环 ↔ 分身）时打一次行首标记：
+分身输出带 ⟨task-N⟩ 前缀，回到主循环换行分隔。事件回调可能并发
+（多个分身同时流式），用锁保护 lastTask。
+*/
+var (
+	streamMu sync.Mutex
+	lastTask string
+)
+
+func streamTag(e event.Event) string {
+	streamMu.Lock()
+	defer streamMu.Unlock()
+	if e.ForkID == lastTask {
+		return ""
+	}
+	lastTask = e.ForkID
+	if e.ForkID == "" {
+		return "\n"
+	}
+	return "\n⟨" + e.ForkID + "⟩ "
+}
+
+/* nowTool 获取当前时间。 */
 type nowTool struct{}
 
 func (nowTool) Name() string        { return "now" }
