@@ -183,7 +183,7 @@ sequenceDiagram
 
         alt 含 tool calls
             E->>T: ④ toolStart 判定（并发 · 审批批量呈现）
-            par 调用 1（bash）
+            par 调用 1（terminal）
                 T->>T: warp 壳内执行（panic 各自恢复）
                 T->>T: ⑤ toolEnd（offload 可改写结果）
             and 调用 2（read_file）

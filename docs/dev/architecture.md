@@ -100,7 +100,7 @@ sequenceDiagram
 
 | 包 | 类型 | 职责要点 |
 |---|---|---|
-| ext/fs | 底座 | FileSystem/Modifier/Searcher 能力接口 + Local 实现（root 沙箱、补丁预检+回滚） |
+| ext/fs | 底座 | 唯一 FileSystem 接口（Read/Write/List/Edit）；Local 实现（root 沙箱、查找替换） |
 | ext/provider/openai | model | OpenAI 兼容协议；双缓存字段解析（cached_tokens/prompt_cache_hit_tokens）、reasoning 仅响应侧、HTTPError.Retryable 与 modelretry 解耦契约 |
 | ext/warp/model/modelretry | warp | 指数退避；流式仅未发出 chunk 时可重试；RetryIf 可定制 |
 | ext/warp/tool/limit | warp | 跨全部工具共享的信号量并发闸 |
@@ -114,7 +114,7 @@ sequenceDiagram
 | ext/hook/task | hook | 并行分身：拦截 task 调用 → core.Fork 隔离子循环 → Skip 回传最终答案 |
 | ext/hook/contextfix | hook | OnStart 修理历史：补缺失 tool 结果、删孤儿 tool 消息 |
 | ext/hook/offload | hook | 大结果卸载：超阈值写 FS，上下文只留摘要+路径（文件名＝工具名+内容联合哈希） |
-| ext/hook/filetools | hook | 文件工具集：按 FS 能力注册，修改走 per-path 队列 |
+| ext/hook/filetools | hook | 文件四件套：read_file/write_file/edit_file/terminal（系统原生终端+OS 提示注入）；搜索浏览走 terminal，写操作走 per-path 队列 |
 | ext/hook/localsession | hook | 会话持久化：滚动快照；分身（ForkID 非空）写独立文件且只存增量（SeedLen 剥离） |
 | ext/hook/internal/await | 内部 | 决策 Router：按 CallID 路由 + 错配暂存 + close 广播重查（共享决策 channel 并发等待的正解） |
 
