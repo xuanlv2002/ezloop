@@ -1,24 +1,21 @@
 /*
-Package filetools 提供基于 FileSystem 接口的核心文件工具集与终端执行工具，
-通过 StartHook 注入，工具能力由传入文件系统实现的能力接口决定：
+Package filetools 提供四个原子工具：read_file / write_file / edit_file /
+terminal，通过 StartHook 注入，依赖 fs.FileSystem 最小接口。
 
-	FileSystem（必须） read_file（分页）/ write_file / list_dir
-	Modifier（可选）   edit_file（原子查找替换）/ apply_patch（多文件原子修改）
-	Searcher（可选）   grep（正则搜内容）/ find（glob 查文件名）
-	EnableExec 选项    bash（shell 执行，默认关闭，建议配 approve）
-
-所有修改类操作（write/edit/patch）经 per-path 修改队列串行化，
-防止并发工具执行时对同一文件的写冲突。
+目录浏览与内容搜索不单独做工具——terminal 直接承担（dir/ls、
+grep/findstr），避免工具层重复实现。写类操作经 per-path 修改队列
+串行化，防止并发工具执行时对同一文件的写冲突。终端执行有真实
+副作用，生产组装建议配 approve 审批。
 */
 package filetools
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
 	"runtime"
-	"sort"
 	"strings"
 	"sync"
 
@@ -26,25 +23,16 @@ import (
 	"github.com/xuanlv2002/ezloop/types"
 )
 
-type Options struct {
-	// EnableExec 启用 bash 终端执行工具，默认关闭。
-	EnableExec bool
-}
-
 type Hook struct {
 	fsys fs.FileSystem
-	opts Options
 
 	mu    sync.Mutex
 	locks map[string]*sync.Mutex // per-path 修改队列
 }
 
-func New(fsys fs.FileSystem, opts ...func(*Options)) *Hook {
-	h := &Hook{fsys: fsys, locks: make(map[string]*sync.Mutex)}
-	for _, fn := range opts {
-		fn(&h.opts)
-	}
-	return h
+/* New 创建文件与终端工具 hook。 */
+func New(fsys fs.FileSystem) *Hook {
+	return &Hook{fsys: fsys, locks: make(map[string]*sync.Mutex)}
 }
 
 func (h *Hook) Name() string { return "filetools" }
@@ -52,21 +40,29 @@ func (h *Hook) Name() string { return "filetools" }
 func (h *Hook) OnStart(_ context.Context, state *types.LoopState) error {
 	state.Tools.Register(readFileTool{fsys: h.fsys})
 	state.Tools.Register(writeFileTool{h: h})
-	state.Tools.Register(listDirTool{fsys: h.fsys})
-
-	// 能力探测：实现了哪个接口，注册哪组工具。
-	if m, ok := h.fsys.(fs.Modifier); ok {
-		state.Tools.Register(editFileTool{h: h, mod: m})
-		state.Tools.Register(applyPatchTool{h: h, mod: m})
-	}
-	if s, ok := h.fsys.(fs.Searcher); ok {
-		state.Tools.Register(grepTool{s: s})
-		state.Tools.Register(findTool{s: s})
-	}
-	if h.opts.EnableExec {
-		state.Tools.Register(bashTool{})
-	}
+	state.Tools.Register(editFileTool{h: h})
+	state.Tools.Register(terminalTool{})
+	injectOSHint(state)
 	return nil
+}
+
+/*
+injectOSHint 把当前系统信息拼进 system（单条 system 政策，与 skill 同
+拼接模式）：terminal 工具执行于原生 shell，模型据此书写对应语法。
+GOOS 进程内恒定，注入内容每轮一致，不影响前缀缓存。
+*/
+func injectOSHint(state *types.LoopState) {
+	hint := "# 系统环境\n当前操作系统：" + runtime.GOOS +
+		"（terminal 工具用系统原生 shell 执行，Windows 请写 cmd 语法 dir/type/findstr，" +
+		"类 Unix 请写 POSIX 语法 ls/cat/grep）"
+	if len(state.Messages) > 0 && state.Messages[0].Role == types.RoleSystem {
+		state.Messages[0].Content += "\n\n" + hint
+		return
+	}
+	state.Messages = append([]types.Message{{
+		Role:    types.RoleSystem,
+		Content: hint,
+	}}, state.Messages...)
 }
 
 /* lockPath 返回路径级修改队列锁：同一文件的修改串行，不同文件并行。 */
@@ -82,63 +78,35 @@ func (h *Hook) lockPath(path string) func() {
 	return l.Unlock
 }
 
-// ---- read_file：行分页 + 字节上限，防上下文溢出 ----
+// ---- read_file ----
 
-const (
-	readDefaultLines = 2000
-	readMaxBytes     = 50 << 10 // 50KB
-)
+const readMaxBytes = 50 << 10 // 50KB，防超大文件撑爆上下文
 
 type readFileTool struct{ fsys fs.FileSystem }
 
-func (readFileTool) Name() string { return "read_file" }
-func (readFileTool) Description() string {
-	return "读取文本文件，支持 offset/limit 行分页（默认前 2000 行，50KB 上限）"
-}
+func (readFileTool) Name() string        { return "read_file" }
+func (readFileTool) Description() string { return "读取文件内容（50KB 截断）" }
 func (readFileTool) ArgsSchema() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{
-		"path":{"type":"string","description":"文件路径"},
-		"offset":{"type":"integer","description":"起始行（0 起，默认 0）"},
-		"limit":{"type":"integer","description":"行数（默认 2000）"}
+		"path":{"type":"string","description":"文件路径"}
 	},"required":["path"]}`)
 }
 
 func (t readFileTool) Invoke(ctx context.Context, args json.RawMessage) (string, error) {
 	var in struct {
-		Path   string `json:"path"`
-		Offset int    `json:"offset"`
-		Limit  int    `json:"limit"`
+		Path string `json:"path"`
 	}
-	if err := json.Unmarshal(args, &in); err != nil {
-		return "", fmt.Errorf("invalid args: %w", err)
-	}
-	if in.Path == "" {
-		return "", fmt.Errorf("path is required")
-	}
-	if in.Limit <= 0 {
-		in.Limit = readDefaultLines
+	if err := json.Unmarshal(args, &in); err != nil || in.Path == "" {
+		return "", errors.New("path is required")
 	}
 	data, err := t.fsys.Read(ctx, in.Path)
 	if err != nil {
 		return "", err
 	}
-	lines := strings.Split(string(data), "\n")
-	total := len(lines)
-	if in.Offset >= total {
-		return fmt.Sprintf("[offset=%d 超出总行数 %d]", in.Offset, total), nil
+	if len(data) > readMaxBytes {
+		return string(data[:readMaxBytes]) + "\n[已达 50KB 上限，已截断]", nil
 	}
-	end := in.Offset + in.Limit
-	if end > total {
-		end = total
-	}
-	page := strings.Join(lines[in.Offset:end], "\n")
-	if len(page) > readMaxBytes {
-		page = page[:readMaxBytes] + fmt.Sprintf("\n[已达 50KB 上限，剩余内容请用 offset 继续分页读取]")
-	}
-	if end < total {
-		page += fmt.Sprintf("\n[显示 %d-%d 行，共 %d 行，继续读取请设 offset=%d]", in.Offset+1, end, total, end)
-	}
-	return page, nil
+	return string(data), nil
 }
 
 // ---- write_file ----
@@ -148,16 +116,18 @@ type writeFileTool struct{ h *Hook }
 func (writeFileTool) Name() string        { return "write_file" }
 func (writeFileTool) Description() string { return "写入文件（覆盖），自动创建目录" }
 func (writeFileTool) ArgsSchema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"]}`)
+	return json.RawMessage(`{"type":"object","properties":{
+		"path":{"type":"string"},"content":{"type":"string"}
+	},"required":["path","content"]}`)
 }
 
 func (t writeFileTool) Invoke(ctx context.Context, args json.RawMessage) (string, error) {
-	var in struct{ Path, Content string }
-	if err := json.Unmarshal(args, &in); err != nil {
-		return "", fmt.Errorf("invalid args: %w", err)
+	var in struct {
+		Path    string `json:"path"`
+		Content string `json:"content"`
 	}
-	if in.Path == "" {
-		return "", fmt.Errorf("path is required")
+	if err := json.Unmarshal(args, &in); err != nil || in.Path == "" {
+		return "", errors.New("path is required")
 	}
 	unlock := t.h.lockPath(in.Path)
 	defer unlock()
@@ -167,19 +137,18 @@ func (t writeFileTool) Invoke(ctx context.Context, args json.RawMessage) (string
 	return fmt.Sprintf("written %d bytes to %s", len(in.Content), in.Path), nil
 }
 
-// ---- edit_file（Modifier）----
+// ---- edit_file ----
 
-type editFileTool struct {
-	h   *Hook
-	mod fs.Modifier
-}
+type editFileTool struct{ h *Hook }
 
 func (editFileTool) Name() string { return "edit_file" }
 func (editFileTool) Description() string {
-	return "对现有文件做查找替换（原子）：old_text 必须存在于文件中"
+	return "对现有文件做查找替换（全部命中，原子）：old_text 必须存在于文件中"
 }
 func (editFileTool) ArgsSchema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"},"old_text":{"type":"string"},"new_text":{"type":"string"}},"required":["path","old_text","new_text"]}`)
+	return json.RawMessage(`{"type":"object","properties":{
+		"path":{"type":"string"},"old_text":{"type":"string"},"new_text":{"type":"string"}
+	},"required":["path","old_text","new_text"]}`)
 }
 
 func (t editFileTool) Invoke(ctx context.Context, args json.RawMessage) (string, error) {
@@ -188,212 +157,65 @@ func (t editFileTool) Invoke(ctx context.Context, args json.RawMessage) (string,
 		OldText string `json:"old_text"`
 		NewText string `json:"new_text"`
 	}
-	if err := json.Unmarshal(args, &in); err != nil {
-		return "", fmt.Errorf("invalid args: %w", err)
+	if err := json.Unmarshal(args, &in); err != nil || in.Path == "" || in.OldText == "" {
+		return "", errors.New("path and old_text are required")
 	}
 	unlock := t.h.lockPath(in.Path)
 	defer unlock()
-	n, err := t.mod.Edit(ctx, in.Path, in.OldText, in.NewText)
+	n, err := t.h.fsys.Edit(ctx, in.Path, in.OldText, in.NewText)
 	if err != nil {
 		return "", err
 	}
 	return fmt.Sprintf("replaced %d occurrence(s) in %s", n, in.Path), nil
 }
 
-// ---- apply_patch（Modifier，多文件原子修改）----
-
-type applyPatchTool struct {
-	h   *Hook
-	mod fs.Modifier
-}
-
-func (applyPatchTool) Name() string { return "apply_patch" }
-func (applyPatchTool) Description() string {
-	return "一次原子修改多个文件：每个操作为查找替换，任一失败全部不生效"
-}
-func (applyPatchTool) ArgsSchema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{
-		"ops":{"type":"array","items":{"type":"object","properties":{
-			"path":{"type":"string"},"old_text":{"type":"string"},"new_text":{"type":"string"}
-		},"required":["path","old_text","new_text"]}}
-	},"required":["ops"]}`)
-}
-
-func (t applyPatchTool) Invoke(ctx context.Context, args json.RawMessage) (string, error) {
-	var in struct {
-		Ops []fs.PatchOp `json:"ops"`
-	}
-	if err := json.Unmarshal(args, &in); err != nil {
-		return "", fmt.Errorf("invalid args: %w", err)
-	}
-	if len(in.Ops) == 0 {
-		return "", fmt.Errorf("ops is empty")
-	}
-	// 同一批补丁内可能含同文件多 op：按路径加锁后整体应用。
-	paths := make([]string, 0, len(in.Ops))
-	seen := map[string]bool{}
-	for _, op := range in.Ops {
-		if !seen[op.Path] {
-			seen[op.Path] = true
-			paths = append(paths, op.Path)
-		}
-	}
-	sort.Strings(paths)
-	unlocks := make([]func(), 0, len(paths))
-	for _, p := range paths {
-		unlocks = append(unlocks, t.h.lockPath(p))
-	}
-	defer func() {
-		for i := len(unlocks) - 1; i >= 0; i-- {
-			unlocks[i]()
-		}
-	}()
-	if err := t.mod.ApplyPatch(ctx, in.Ops); err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("patched %d file(s)", len(in.Ops)), nil
-}
-
-// ---- list_dir ----
-
-type listDirTool struct{ fsys fs.FileSystem }
-
-func (listDirTool) Name() string        { return "list_dir" }
-func (listDirTool) Description() string { return "列出目录内容" }
-func (listDirTool) ArgsSchema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"目录路径，默认 ."}}}`)
-}
-
-func (t listDirTool) Invoke(ctx context.Context, args json.RawMessage) (string, error) {
-	var in struct{ Path string }
-	_ = json.Unmarshal(args, &in)
-	if in.Path == "" {
-		in.Path = "."
-	}
-	entries, err := t.fsys.List(ctx, in.Path)
-	if err != nil {
-		return "", err
-	}
-	sort.Slice(entries, func(i, j int) bool { return entries[i].Name < entries[j].Name })
-	lines := make([]string, 0, len(entries))
-	for _, e := range entries {
-		tag := "file"
-		if e.IsDir {
-			tag = "dir "
-		}
-		lines = append(lines, fmt.Sprintf("%s %8d %s", tag, e.Size, e.Name))
-	}
-	if len(lines) == 0 {
-		return "(empty directory)", nil
-	}
-	return strings.Join(lines, "\n"), nil
-}
-
-// ---- grep（Searcher）----
-
-type grepTool struct{ s fs.Searcher }
-
-func (grepTool) Name() string        { return "grep" }
-func (grepTool) Description() string { return "按正则表达式搜索文件内容" }
-func (grepTool) ArgsSchema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{
-		"pattern":{"type":"string","description":"正则表达式"},
-		"path":{"type":"string","description":"搜索起点，默认 ."},
-		"glob":{"type":"string","description":"文件名过滤，如 *.go"}
-	},"required":["pattern"]}`)
-}
-
-func (t grepTool) Invoke(ctx context.Context, args json.RawMessage) (string, error) {
-	var in struct{ Pattern, Path, Glob string }
-	if err := json.Unmarshal(args, &in); err != nil {
-		return "", fmt.Errorf("invalid args: %w", err)
-	}
-	if in.Path == "" {
-		in.Path = "."
-	}
-	matches, err := t.s.Grep(ctx, fs.GrepRequest{Pattern: in.Pattern, Path: in.Path, Glob: in.Glob})
-	if err != nil {
-		return "", err
-	}
-	if len(matches) == 0 {
-		return "no matches", nil
-	}
-	lines := make([]string, 0, len(matches))
-	for _, m := range matches {
-		lines = append(lines, fmt.Sprintf("%s:%d: %s", m.Path, m.Line, m.Text))
-	}
-	return strings.Join(lines, "\n"), nil
-}
-
-// ---- find（Searcher）----
-
-type findTool struct{ s fs.Searcher }
-
-func (findTool) Name() string        { return "find" }
-func (findTool) Description() string { return "按文件名 glob 模式查找文件" }
-func (findTool) ArgsSchema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{
-		"pattern":{"type":"string","description":"文件名 glob，如 *.go"},
-		"root":{"type":"string","description":"查找根目录，默认 ."}
-	},"required":["pattern"]}`)
-}
-
-func (t findTool) Invoke(ctx context.Context, args json.RawMessage) (string, error) {
-	var in struct{ Pattern, Root string }
-	if err := json.Unmarshal(args, &in); err != nil {
-		return "", fmt.Errorf("invalid args: %w", err)
-	}
-	if in.Root == "" {
-		in.Root = "."
-	}
-	found, err := t.s.Find(ctx, in.Root, in.Pattern)
-	if err != nil {
-		return "", err
-	}
-	if len(found) == 0 {
-		return "no matches", nil
-	}
-	return strings.Join(found, "\n"), nil
-}
-
-// ---- bash（EnableExec）----
+// ---- terminal（EnableExec）----
 
 /*
-bashTool 以 shell 语义执行单条命令字符串（Windows: cmd /c，其他: sh -c），
-支持管道、重定向与 && 组合。输出为 stdout+stderr 合并；退出码非零时
-返回输出与错误（供模型自纠）。
+terminalTool 在系统原生终端执行单条命令：Windows 是 cmd，类 Unix 是 sh。
+不做 shell 探测与切换——设计立场是"模型适配环境"：工具描述与 system
+注入都标明当前系统，模型据此书写对应语法（Windows 写 dir/type/findstr，
+类 Unix 写 ls/cat/grep）。
+输出为 stdout+stderr 合并；退出码非零时输出与退出码一并作为正常结果
+返回（不报工具错误）——真实报错信息是模型自纠的依据，仅执行失败
+（无法启动/取消）才是 error。
 */
-type bashTool struct{}
+type terminalTool struct{}
 
-func (bashTool) Name() string { return "bash" }
-func (bashTool) Description() string {
-	return "执行 shell 命令并返回合并输出（支持管道、重定向、&& 组合）"
+func (terminalTool) Name() string { return "terminal" }
+func (terminalTool) Description() string {
+	if runtime.GOOS == "windows" {
+		return "在系统终端执行命令（当前系统 Windows，cmd 语法：dir、type、findstr、&、&&、|）；" +
+			"非零退出码时输出与错误码一并返回，据此修正命令"
+	}
+	return "在系统终端执行命令（当前系统 " + runtime.GOOS + "，POSIX sh 语法：ls、cat、grep、管道与 &&）；" +
+		"非零退出码时输出与错误码一并返回，据此修正命令"
 }
-func (bashTool) ArgsSchema() json.RawMessage {
+func (terminalTool) ArgsSchema() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{
-		"command":{"type":"string","description":"完整 shell 命令，如 ls -la | grep go"}
+		"command":{"type":"string","description":"完整终端命令，语法须与当前系统一致"}
 	},"required":["command"]}`)
 }
 
-func (bashTool) Invoke(ctx context.Context, args json.RawMessage) (string, error) {
+func (terminalTool) Invoke(ctx context.Context, args json.RawMessage) (string, error) {
 	var in struct {
 		Command string `json:"command"`
 	}
-	if err := json.Unmarshal(args, &in); err != nil {
-		return "", fmt.Errorf("invalid args: %w", err)
+	if err := json.Unmarshal(args, &in); err != nil || strings.TrimSpace(in.Command) == "" {
+		return "", errors.New("command is required")
 	}
-	if strings.TrimSpace(in.Command) == "" {
-		return "", fmt.Errorf("command is required")
-	}
-	var cmd *exec.Cmd
+	name, flag := "sh", "-c"
 	if runtime.GOOS == "windows" {
-		cmd = exec.CommandContext(ctx, "cmd", "/c", in.Command)
-	} else {
-		cmd = exec.CommandContext(ctx, "sh", "-c", in.Command)
+		name, flag = "cmd", "/c"
 	}
-	out, err := cmd.CombinedOutput()
+	out, err := exec.CommandContext(ctx, name, flag, in.Command).CombinedOutput()
+	text := strings.TrimSpace(strings.ToValidUTF8(string(out), ""))
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return text + fmt.Sprintf("\n[exit code %d]", exitErr.ExitCode()), nil
+	}
 	if err != nil {
-		return string(out), fmt.Errorf("exit: %w", err)
+		return text, fmt.Errorf("run: %w", err)
 	}
-	return string(out), nil
+	return text, nil
 }

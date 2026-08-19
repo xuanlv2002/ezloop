@@ -99,15 +99,19 @@ func main() {
 	scanner := bufio.NewScanner(os.Stdin)
 	approver, approveCh := approve.New(func(c *types.ToolCall) bool {
 		switch c.Name {
-		case "read_file", "list_dir", "grep", "find", "now", askuser.ToolName, taskplan.ToolName:
+		case "read_file", "now", askuser.ToolName, taskplan.ToolName:
 			return false // 只读工具与人机交互工具免审
-		case "bash":
-			// 参数值级判断：白名单只读命令免审，其余（写/删/网络）需确认
+		case "terminal":
+			// 参数值级判断：白名单只读命令免审（POSIX 与 cmd 各一套前缀），其余需确认
 			var a struct {
 				Command string `json:"command"`
 			}
 			_ = json.Unmarshal(c.Args, &a)
-			for _, p := range []string{"ls", "cat", "head", "tail", "pwd", "git status", "git diff", "git log", "go test"} {
+			for _, p := range []string{
+				"ls", "cat", "head", "tail", "pwd", // POSIX 只读
+				"dir", "type", "cd", "ver", // cmd 只读
+				"git status", "git diff", "git log", "go test",
+			} {
 				if a.Command == p || strings.HasPrefix(a.Command, p+" ") {
 					return false
 				}
@@ -159,7 +163,7 @@ func main() {
 		core.WithHooks(
 			contextfix.New(), // 历史进入引擎前先修理（/resume 旧存档防悬空 tool_call）
 			offload.New(fsys),
-			filetools.New(fsys, func(o *filetools.Options) { o.EnableExec = true }),
+			filetools.New(fsys),
 			skillHook,
 			approver,
 			asker,
