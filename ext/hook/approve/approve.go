@@ -43,7 +43,7 @@ needs 拿到完整 ToolCall（含 Args），支持参数值级判断——
 如 bash 只放行白名单命令、write_file 只审计特定路径外写操作：
 
 	approve.New(func(c *types.ToolCall) bool {
-	    if c.Name == "bash" {
+	    if c.Name == "terminal" {
 	        var a struct{ Command string `json:"command"` }
 	        _ = json.Unmarshal(c.Args, &a)
 	        return !isReadOnlyCommand(a.Command) // 按命令内容决定是否中断

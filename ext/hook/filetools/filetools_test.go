@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -11,6 +12,7 @@ import (
 	"github.com/xuanlv2002/ezloop/core"
 	"github.com/xuanlv2002/ezloop/ext/fs"
 	"github.com/xuanlv2002/ezloop/internal/testutil"
+	"github.com/xuanlv2002/ezloop/types"
 )
 
 func runTool(t *testing.T, hook *Hook, name, args string) string {
@@ -25,93 +27,108 @@ func runTool(t *testing.T, hook *Hook, name, args string) string {
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	msg := state.Messages[2]
-	if msg.Err != "" {
-		t.Fatalf("tool %s: %s", name, msg.Err)
+	for _, m := range state.Messages {
+		if m.Role == types.RoleTool {
+			if m.Err != "" {
+				t.Fatalf("tool %s: %s", name, m.Err)
+			}
+			return m.Content
+		}
 	}
-	return msg.Content
+	t.Fatal("no tool result message")
+	return ""
 }
 
-// 核心链路：分页读取 + 全套文件操作。
+// 核心链路：write → read → edit。
 func TestFileToolsCore(t *testing.T) {
 	fsys := fs.NewLocal(t.TempDir())
 	hook := New(fsys)
 
-	lines := make([]string, 20)
-	for i := range lines {
-		lines[i] = fmt.Sprintf("line %d", i)
-	}
-	_ = fsys.Write(context.Background(), "big.txt", []byte(strings.Join(lines, "\n")))
-
-	page := runTool(t, hook, "read_file", `{"path":"big.txt","limit":5}`)
-	if !strings.Contains(page, "line 4") || !strings.Contains(page, "[显示 1-5 行，共 20 行") {
-		t.Fatalf("pagination: %q", page)
-	}
-
-	if out := runTool(t, hook, "write_file", `{"path":"app.go","content":"package main // TODO"}`); !strings.Contains(out, "written") {
+	if out := runTool(t, hook, "write_file",
+		`{"path":"app.go","content":"package main // TODO"}`); !strings.Contains(out, "written") {
 		t.Fatalf("write: %q", out)
 	}
-	if out := runTool(t, hook, "edit_file", `{"path":"app.go","old_text":"TODO","new_text":"DONE"}`); !strings.Contains(out, "replaced 1") {
+	if out := runTool(t, hook, "read_file", `{"path":"app.go"}`); !strings.Contains(out, "TODO") {
+		t.Fatalf("read: %q", out)
+	}
+	if out := runTool(t, hook, "edit_file",
+		`{"path":"app.go","old_text":"TODO","new_text":"DONE"}`); !strings.Contains(out, "replaced 1") {
 		t.Fatalf("edit: %q", out)
 	}
-	if out := runTool(t, hook, "grep", `{"pattern":"DONE"}`); !strings.Contains(out, "app.go:1") {
-		t.Fatalf("grep: %q", out)
-	}
-	if out := runTool(t, hook, "find", `{"pattern":"*.go"}`); !strings.Contains(out, "app.go") {
-		t.Fatalf("find: %q", out)
+	if out := runTool(t, hook, "read_file", `{"path":"app.go"}`); !strings.Contains(out, "DONE") {
+		t.Fatalf("after edit: %q", out)
 	}
 }
 
-// 能力探测：bare FileSystem 不解锁 edit/grep/find/patch/exec。
-type bareFS struct{ inner fs.FileSystem }
-
-func (b bareFS) Read(ctx context.Context, p string) ([]byte, error) { return b.inner.Read(ctx, p) }
-func (b bareFS) Write(ctx context.Context, p string, d []byte) error {
-	return b.inner.Write(ctx, p, d)
-}
-func (b bareFS) List(ctx context.Context, dir string) ([]fs.Entry, error) {
-	return b.inner.List(ctx, dir)
-}
-
-func TestCapabilityDetection(t *testing.T) {
+// 四件套恒注册：read_file / write_file / edit_file / terminal。
+func TestRegistersAllTools(t *testing.T) {
 	state, err := core.NewAgent(
 		testutil.Scripted(testutil.Text("x")),
-		core.WithHooks(New(bareFS{inner: fs.NewLocal(t.TempDir())})),
+		core.WithHooks(New(fs.NewLocal(t.TempDir()))),
 	).Run(context.Background(), "hi")
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	for _, name := range []string{"edit_file", "apply_patch", "grep", "find", "bash"} {
-		if _, lerr := state.Tools.Lookup(name); lerr == nil {
-			t.Fatalf("%s must not register on bare FileSystem", name)
+	for _, name := range []string{"read_file", "write_file", "edit_file", "terminal"} {
+		if _, lerr := state.Tools.Lookup(name); lerr != nil {
+			t.Fatalf("%s must register: %v", name, lerr)
 		}
-	}
-	if _, lerr := state.Tools.Lookup("read_file"); lerr != nil {
-		t.Fatalf("read_file must register: %v", lerr)
 	}
 }
 
-// bash：shell 语义执行（Windows: cmd /c，Unix: sh -c），退出码非零报错。
-func TestBashTool(t *testing.T) {
+// terminal：系统原生 shell 执行（Windows: cmd，类 Unix: sh）；
+// 退出码非零时输出与退出码作为正常结果回传模型自纠。
+func TestTerminalTool(t *testing.T) {
 	fsys := fs.NewLocal(t.TempDir())
-	hook := New(fsys, func(o *Options) { o.EnableExec = true })
+	hook := New(fsys)
 
-	out := runTool(t, hook, "bash", `{"command":"echo ezloop-bash"}`)
-	if !strings.Contains(out, "ezloop-bash") {
-		t.Fatalf("bash output: %q", out)
+	// injectOSHint 会插入 system 消息，按 role 取 tool 结果而非硬索引。
+	run := func(command string) types.Message {
+		t.Helper()
+		p := testutil.Scripted(
+			testutil.ToolCalls(testutil.Call("1", "terminal", `{"command":"`+command+`"}`)),
+			testutil.Text("done"),
+		)
+		state, err := core.NewAgent(p, core.WithHooks(hook)).Run(context.Background(), "hi")
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		// 系统信息注入断言：单条 system 打头，含 GOOS。
+		if state.Messages[0].Role != types.RoleSystem ||
+			!strings.Contains(state.Messages[0].Content, "当前操作系统："+runtime.GOOS) {
+			t.Fatalf("os hint not injected: %+v", state.Messages[0])
+		}
+		for _, m := range state.Messages {
+			if m.Role == types.RoleTool {
+				return m
+			}
+		}
+		t.Fatal("no tool result message")
+		return types.Message{}
 	}
 
-	// 失败命令：输出 + 错误回传模型自纠。
-	p := testutil.Scripted(
-		testutil.ToolCalls(testutil.Call("1", "bash", `{"command":"definitely_missing_cmd_xyz"}`)),
-		testutil.Text("done"),
-	)
-	state, err := core.NewAgent(p, core.WithHooks(hook)).Run(context.Background(), "hi")
-	if err != nil {
-		t.Fatalf("err: %v", err)
+	if out := run("echo ezloop-terminal"); !strings.Contains(out.Content, "ezloop-terminal") || out.Err != "" {
+		t.Fatalf("terminal output: %+v", out)
 	}
-	if state.Messages[2].Err == "" {
-		t.Fatal("failed command should produce tool error")
+
+	// 各系统原生语法可用。
+	native := "ls > /dev/null && echo ok"
+	failing := "echo boom 1>&2; exit 3"
+	if runtime.GOOS == "windows" {
+		native = "ver > NUL & echo ok"
+		failing = "echo boom 1>&2 & exit 3"
+	}
+	if out := run(native); !strings.Contains(out.Content, "ok") || out.Err != "" {
+		t.Fatalf("native syntax output: %+v", out)
+	}
+
+	// 失败命令：输出 + [exit code N] 一并作为正常结果（不是工具错误）。
+	out := run(failing)
+	if out.Err != "" {
+		t.Fatalf("non-zero exit must not be tool error: %q", out.Err)
+	}
+	if !strings.Contains(out.Content, "boom") || !strings.Contains(out.Content, "[exit code 3]") {
+		t.Fatalf("output should contain stderr and exit code: %q", out.Content)
 	}
 }
 
@@ -119,7 +136,7 @@ func TestBashTool(t *testing.T) {
 func TestMutationQueue(t *testing.T) {
 	hook := New(fs.NewLocal(t.TempDir()))
 	var wg sync.WaitGroup
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		wg.Add(1)
 		go func(n int) {
 			defer wg.Done()

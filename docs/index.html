@@ -518,11 +518,11 @@ core.<span class="f">WithOnEvent</span>(<span class="k">func</span>(e event.Even
 <span class="k">func</span> (Guard) <span class="f">Name</span>() <span class="k">string</span> { <span class="k">return</span> <span class="s">"guard"</span> }
 
 <span class="k">func</span> (Guard) <span class="f">OnToolStart</span>(_ context.Context, _ *types.LoopState, call *types.ToolCall) (hook.Action, <span class="k">error</span>) {
-    <span class="k">if</span> call.Name == <span class="s">"bash"</span> {
+    <span class="k">if</span> call.Name == <span class="s">"terminal"</span> {
         <span class="k">var</span> a <span class="k">struct</span>{ Command <span class="k">string</span> `json:<span class="s">"command"</span>` }
         _ = json.<span class="f">Unmarshal</span>(call.Args, &amp;a)
         <span class="k">if</span> !isReadOnly(a.Command) {
-            <span class="k">return</span> hook.<span class="f">Skip</span>(<span class="s">"bash: read-only commands only"</span>), <span class="k">nil</span>
+            <span class="k">return</span> hook.<span class="f">Skip</span>(<span class="s">"terminal: read-only commands only"</span>), <span class="k">nil</span>
         }
     }
     <span class="k">return</span> hook.<span class="f">Proceed</span>, <span class="k">nil</span>
@@ -588,7 +588,7 @@ core.<span class="f">WithToolWarp</span>(safetool.<span class="f">Warp</span>(),
 
     <table>
       <tr><th>扩展</th><th>类型</th><th>说明</th></tr>
-      <tr><td><code>ext/fs</code></td><td>底座</td><td>FileSystem 核心 + 可选 Modifier（Edit/ApplyPatch）/ Searcher（Grep/Find）；Local 实现（root 沙箱、补丁预检+回滚）</td></tr>
+      <tr><td><code>ext/fs</code></td><td>底座</td><td>唯一 FileSystem 接口（Read/Write/List/Edit）；Local 实现（root 沙箱、查找替换）</td></tr>
       <tr><td><code>ext/provider/openai</code></td><td>model</td><td>OpenAI 兼容 Provider（Invoke + SSE 流式 + reasoning 思考流），兼容 DeepSeek / SiliconFlow / vLLM / Ollama；缓存命中双协议解析</td></tr>
       <tr><td><code>ext/warp/model/modelretry</code></td><td>warp</td><td>模型重试：指数退避，流式仅在未发出 chunk 时重试（生产必挂）</td></tr>
       <tr><td><code>ext/warp/tool/limit</code></td><td>warp</td><td>工具并发闸：跨全部工具共享信号量，限制一轮 fan-out 实际并发</td></tr>
@@ -602,7 +602,7 @@ core.<span class="f">WithToolWarp</span>(safetool.<span class="f">Warp</span>(),
       <tr><td><code>ext/hook/task</code></td><td>hook</td><td>并行分身：基于 <code>core.Fork</code> 复刻当前 Agent 独立跑子循环，只回传最终答案；事件与 session 按 ForkID 区分，单层防递归</td></tr>
       <tr><td><code>ext/hook/contextfix</code></td><td>hook</td><td>Run 开始修理历史：补缺失 tool 结果、删孤儿 tool 消息（resume 旧存档防悬空）</td></tr>
       <tr><td><code>ext/hook/offload</code></td><td>hook</td><td>大结果卸载：超阈值写 FS，上下文只留摘要+路径</td></tr>
-      <tr><td><code>ext/hook/filetools</code></td><td>hook</td><td>文件工具集（read/write/edit/apply_patch/grep/find/bash），按 FS 能力注册</td></tr>
+      <tr><td><code>ext/hook/filetools</code></td><td>hook</td><td>文件四件套（read/write/edit/terminal，系统原生终端+OS 提示注入），恒注册</td></tr>
       <tr><td><code>ext/hook/localsession</code></td><td>hook</td><td>会话持久化：滚动快照，Load/List 恢复续聊；分身写独立文件只存增量</td></tr>
     </table>
 

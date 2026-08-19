@@ -119,13 +119,13 @@ flowchart TB
     subgraph LANE["工具泳道 · 每个调用独立单元 · 全并发（SerialTools 可选串行）"]
         direction LR
         subgraph U1["ToolWarp"]
-            T1["bash"]
+            T1["terminal"]
         end
         subgraph U2["ToolWarp"]
             T2["read_file"]
         end
         subgraph U3["ToolWarp"]
-            T3["grep"]
+            T3["edit_file"]
         end
     end
 
@@ -183,7 +183,7 @@ sequenceDiagram
 
         alt 含 tool calls
             E->>T: ④ toolStart 判定（并发 · 审批批量呈现）
-            par 调用 1（bash）
+            par 调用 1（terminal）
                 T->>T: warp 壳内执行（panic 各自恢复）
                 T->>T: ⑤ toolEnd（offload 可改写结果）
             and 调用 2（read_file）
@@ -224,7 +224,7 @@ sequenceDiagram
 
 | 扩展 | 类型 | 说明 |
 |---|---|---|
-| `ext/fs` | 底座 | FileSystem 核心（Read/Write/List）+ 可选能力 Modifier（Edit/ApplyPatch）、Searcher（Grep/Find）；Local 实现全部能力（root 沙箱、补丁预检+回滚） |
+| `ext/fs` | 底座 | 唯一 FileSystem 接口（Read/Write/List/Edit 四方法）；Local 实现（root 沙箱、查找替换） |
 | `ext/provider/openai` | model | OpenAI 兼容 Provider（Invoke + SSE 流式），兼容 DeepSeek/SiliconFlow/Ollama/vLLM |
 | `ext/warp/model/modelretry` | warp | 模型重试：指数退避，流式仅在未发出 chunk 时重试（裸用引擎无内置重试，生产建议挂载） |
 | `ext/warp/tool/limit` | warp | 工具并发闸：跨全部工具共享信号量，限制一轮 fan-out 的实际并发数，保护外部资源 |
@@ -238,7 +238,7 @@ sequenceDiagram
 | `ext/hook/taskplan` | hook | task_plan 工具：规划提交中断等处置（执行/否决/修订） |
 | `ext/hook/task` | hook | task 工具：并行分身——基于引擎原语 `core.Agent.Fork` 复刻当前 Agent（provider/超参/全部运行期 hook）与上下文快照独立跑子循环，只把最终答案回传主循环（并发、单层；事件与 session 均按 forkID 区分归属，分身写 sessions/<主ID>-<forkID>.json 只存增量（seed 与主 session 重复，剥离）可回放；主 Agent 经 ctx 自动注入，`WithHooks(task.New())` 即可） |
 | `ext/hook/contextfix` | hook | Run 开始时修理历史：缺失的 tool 结果补占位，序列协议完整 |
-| `ext/hook/filetools` | hook | 文件工具集：read_file（行分页）、write、edit、apply_patch、grep、find、bash；按 FS 能力注册，修改走 per-path 队列 |
+| `ext/hook/filetools` | hook | 文件工具四件套：read_file、write_file、edit_file、terminal（系统原生终端+系统提示注入，建议配 approve）；搜索浏览走 terminal，写操作走 per-path 队列 |
 | `ext/hook/localsession` | hook | 会话持久化：滚动快照到 sessions/<id>.json，Load/List 恢复续聊 |
 
 ## 包结构
