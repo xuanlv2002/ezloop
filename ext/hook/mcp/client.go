@@ -31,6 +31,8 @@ type Closer interface {
 /* ServerConfig 描述一个 MCP server 的接入方式与权限。 */
 type ServerConfig struct {
 	Name string
+	// Description 是 server 用途说明，mcp_list 时带给模型做发现。
+	Description string
 	// Allow 是工具白名单；nil 表示全部允许。
 	Allow []string
 	// Factory 创建该 server 的 Client（懒建立）。
