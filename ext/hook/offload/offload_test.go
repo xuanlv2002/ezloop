@@ -57,3 +57,21 @@ func TestOffloadAndDegrade(t *testing.T) {
 		t.Fatal("write failure must degrade to passthrough")
 	}
 }
+
+// 免卸载名单：名单内工具的大结果原样保留。
+func TestOffloadSkip(t *testing.T) {
+	state, err := core.NewAgent(
+		testutil.Scripted(
+			testutil.ToolCalls(testutil.Call("1", "dump", `{}`)),
+			testutil.Text("done"),
+		),
+		core.WithTools(bigTool{n: 10_000}),
+		core.WithHooks(New(fs.NewLocal(t.TempDir()), WithSkip("dump"))),
+	).Run(context.Background(), "hi")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if msg := state.Messages[2].Content; msg != strings.Repeat("x", 10_000) {
+		t.Fatalf("skipped tool must keep full output, got %d bytes", len(msg))
+	}
+}

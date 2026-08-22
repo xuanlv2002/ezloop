@@ -11,6 +11,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/xuanlv2002/ezloop/ext/fs"
@@ -27,6 +28,9 @@ type Options struct {
 	Dir string
 	// Head 保留在消息里的原文头部长度，默认 512。
 	Head int
+	// Skip 免卸载名单：这些工具的结果原样保留（如分身最终答案——
+	// 截断成摘要会伤主循环决策）。
+	Skip []string
 }
 
 type Hook struct {
@@ -43,10 +47,18 @@ func New(fsys fs.FileSystem, opts ...func(*Options)) *Hook {
 	return &Hook{fsys: fsys, opts: o}
 }
 
+/* WithSkip 设置免卸载名单：名单内工具的结果不做大卸载。 */
+func WithSkip(names ...string) func(*Options) {
+	return func(o *Options) { o.Skip = names }
+}
+
 func (h *Hook) Name() string { return "offload" }
 
 func (h *Hook) OnToolEnd(ctx context.Context, _ *types.LoopState, result *types.ToolResult) error {
 	if result.Err != nil || len(result.Content) <= h.opts.Threshold {
+		return nil
+	}
+	if slices.Contains(h.opts.Skip, result.Name) {
 		return nil
 	}
 
