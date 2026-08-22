@@ -15,10 +15,10 @@ import (
 const RouterToolName = "mcp_router"
 
 type routerArgs struct {
-	Action string          `json:"action" desc:"操作类型" enum:"mcp_list|tool_list|tool_call"`
-	Server string          `json:"server,omitempty" desc:"server 名，tool_list 与 tool_call 必填"`
-	Tool   string          `json:"tool,omitempty" desc:"工具名，tool_call 必填"`
-	Args   json.RawMessage `json:"args,omitempty" desc:"工具参数，tool_call 时使用"`
+	Action string `json:"action" desc:"操作类型" enum:"mcp_list|tool_list|tool_call"`
+	Server string `json:"server,omitempty" desc:"server 名，tool_list 与 tool_call 必填"`
+	Tool   string `json:"tool,omitempty" desc:"工具名，tool_call 必填"`
+	Args   string `json:"args,omitempty" desc:"工具参数，JSON 对象的字符串形式，tool_call 时使用"`
 }
 
 type toolEntry struct {
@@ -159,12 +159,16 @@ func (r *Router) callTool(ctx context.Context, args routerArgs) (string, error) 
 	if err != nil {
 		return r.errJSON(err.Error(), "call mcp_list to see available servers"), nil
 	}
-	// 空串/null 也是空参（模型常传 ""），统一为 {}——部分 server 的
-	// arguments 字段不接受字符串。
-	if t := strings.TrimSpace(string(args.Args)); len(t) == 0 || t == "null" || t == `""` {
-		args.Args = json.RawMessage(`{}`)
+	// args 是 JSON 文本串：空串/null/引号空串统一为 {}；非 JSON 文本
+	// 回错误让模型自纠（部分 server 的 arguments 字段不接受裸字符串）。
+	t := strings.TrimSpace(args.Args)
+	if t == "" || t == "null" || t == `""` || t == `'{}'` {
+		t = "{}"
 	}
-	result, err := client.CallTool(ctx, args.Tool, args.Args)
+	if !json.Valid([]byte(t)) {
+		return r.errJSON("args must be a JSON object string (e.g. \"{\\\"tz\\\":\\\"Asia/Shanghai\\\"}\")", "pass args as a string containing JSON"), nil
+	}
+	result, err := client.CallTool(ctx, args.Tool, json.RawMessage(t))
 	if err != nil {
 		return r.errJSON(fmt.Sprintf("call %s/%s failed: %v", args.Server, args.Tool, err), "check tool name and args schema from tool_list"), nil
 	}

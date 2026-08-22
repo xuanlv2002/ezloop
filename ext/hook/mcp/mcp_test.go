@@ -69,7 +69,7 @@ func TestRouterCore(t *testing.T) {
 		t.Fatalf("tool_list db must be ACL-filtered: %s", dbTools)
 	}
 
-	out := invoke(t, r, `{"action":"tool_call","server":"fs","tool":"read","args":{"path":"a"}}`)
+	out := invoke(t, r, `{"action":"tool_call","server":"fs","tool":"read","args":"{\"path\":\"a\"}"}`)
 	if out != `read({"path":"a"})` {
 		t.Fatalf("call: %s", out)
 	}
@@ -78,6 +78,14 @@ func TestRouterCore(t *testing.T) {
 	empty := invoke(t, r, `{"action":"tool_call","server":"fs","tool":"read","args":""}`)
 	if empty != `read({})` {
 		t.Fatalf("empty args should normalize to {}: %s", empty)
+	}
+
+	// 非 JSON 文本的 args：结构化错误回传模型自纠
+	bad := invoke(t, r, `{"action":"tool_call","server":"fs","tool":"read","args":"abc"}`)
+	var badErr callError
+	_ = json.Unmarshal([]byte(bad), &badErr)
+	if badErr.Error == "" || badErr.Hint == "" {
+		t.Fatalf("non-JSON args should be structured: %s", bad)
 	}
 
 	unknown := invoke(t, r, `{"action":"tool_list","server":"nope"}`)
@@ -106,7 +114,7 @@ func TestHookFullLoop(t *testing.T) {
 		testutil.Scripted(
 			testutil.ToolCalls(testutil.Call("c1", RouterToolName, `{"action":"mcp_list"}`)),
 			testutil.ToolCalls(testutil.Call("c2", RouterToolName, `{"action":"tool_list","server":"fs"}`)),
-			testutil.ToolCalls(testutil.Call("c3", RouterToolName, `{"action":"tool_call","server":"fs","tool":"read","args":{"path":"x"}}`)),
+			testutil.ToolCalls(testutil.Call("c3", RouterToolName, `{"action":"tool_call","server":"fs","tool":"read","args":"{\"path\":\"x\"}"}`)),
 			testutil.Text("done"),
 		),
 		core.WithHooks(NewHook(cfg)),
