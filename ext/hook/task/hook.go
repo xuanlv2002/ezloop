@@ -25,7 +25,6 @@ package task
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -119,9 +118,7 @@ func (h *Hook) OnToolStart(ctx context.Context, state *types.LoopState, call *ty
 	if state.ForkID != "" {
 		return hook.Skip("task: nested fork is not allowed (single level)"), nil
 	}
-	var args struct {
-		Task string `json:"task"`
-	}
+	var args taskArgs
 	_ = json.Unmarshal(call.Args, &args)
 	if args.Task == "" {
 		return hook.Skip("task: empty task description"), nil
@@ -181,7 +178,7 @@ func contextSnapshot(state *types.LoopState) []types.Message {
 }
 
 /*
-forkTools 派生 fork 的工具集：继承当前 state 工具并剔除 task 自身
+forkTools 派生 fork 的工具集：继承当前 state 的工具并剔除 task 自身
 （单层保证），再叠加 Options.Tools；InheritTools=false 时仅用 Options.Tools。
 */
 func (h *Hook) forkTools(state *types.LoopState) []types.Tool {
@@ -258,24 +255,4 @@ func lastAssistantContent(sub *types.LoopState) string {
 		}
 	}
 	return ""
-}
-
-/*
-Tool 返回 task 壳工具：仅提供 schema 供主模型发现，
-真正的"执行体"是 Hook 拦截后跑隔离子循环，Invoke 不会被走到。
-*/
-func Tool() types.Tool { return tool{} }
-
-type tool struct{}
-
-func (tool) Name() string { return ToolName }
-func (tool) Description() string {
-	return "在隔离上下文中求解子任务：复刻当前模型与上下文独立运行，只把最终结果带回主对话。适合需要多步工具调用、过程细节无需回流的子问题。"
-}
-func (tool) ArgsSchema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"task":{"type":"string","description":"子任务的完整描述，包含目标与验收标准"}},"required":["task"]}`)
-}
-func (tool) Invoke(_ context.Context, _ json.RawMessage) (string, error) {
-	// 防呆：未挂 Hook 时尽早暴露装配错误。
-	return "", errors.New("task: hook not registered (task is intercepted by task.Hook)")
 }

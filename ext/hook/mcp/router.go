@@ -8,15 +8,17 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/xuanlv2002/ezloop/types"
 )
 
 const RouterToolName = "mcp_router"
 
 type routerArgs struct {
-	Action string          `json:"action"`
-	Server string          `json:"server,omitempty"`
-	Tool   string          `json:"tool,omitempty"`
-	Args   json.RawMessage `json:"args,omitempty"`
+	Action string          `json:"action" desc:"操作类型" enum:"mcp_list|tool_list|tool_call"`
+	Server string          `json:"server,omitempty" desc:"server 名，tool_list 与 tool_call 必填"`
+	Tool   string          `json:"tool,omitempty" desc:"工具名，tool_call 必填"`
+	Args   json.RawMessage `json:"args,omitempty" desc:"工具参数，tool_call 时使用"`
 }
 
 type toolEntry struct {
@@ -36,11 +38,16 @@ type callError struct {
 	Hint  string `json:"hint,omitempty"`
 }
 
-/* Router 实现 types.Tool：对模型暴露唯一入口，内部转发到各 MCP server。 */
+/*
+Router 实现 types.Tool：对模型暴露唯一入口，内部转发到各 MCP server。
+工具面经嵌入的 types.Tool 提供（NewRouter 内由 NewTool 构造，schema 从
+routerArgs tag 反射生成、恒定，热加载 server 列表不影响缓存前缀）。
+*/
 type Router struct {
 	mu      sync.RWMutex
 	servers map[string]ServerConfig
 	clients map[string]Client
+	types.Tool
 }
 
 func NewRouter(servers []ServerConfig) *Router {
@@ -48,27 +55,15 @@ func NewRouter(servers []ServerConfig) *Router {
 	for _, s := range servers {
 		m[s.Name] = s
 	}
-	return &Router{servers: m, clients: make(map[string]Client)}
-}
-
-func (r *Router) Name() string { return RouterToolName }
-func (r *Router) Description() string {
-	return "Unified entry for all MCP tools. Discover progressively: " +
-		"action=mcp_list lists servers, action=tool_list lists tools of one server (with schemas), " +
-		"action=tool_call invokes one."
-}
-
-func (r *Router) ArgsSchema() json.RawMessage {
-	return json.RawMessage(`{
-	"type": "object",
-	"properties": {
-		"action": {"type": "string", "enum": ["mcp_list", "tool_list", "tool_call"]},
-		"server": {"type": "string", "description": "server name, required by tool_list and tool_call"},
-		"tool":   {"type": "string", "description": "tool name, required by tool_call"},
-		"args":   {"type": "object", "description": "tool arguments for tool_call"}
-	},
-	"required": ["action"]
-}`)
+	r := &Router{servers: m, clients: make(map[string]Client)}
+	r.Tool = types.NewTool(RouterToolName,
+		"Unified entry for all MCP tools. Discover progressively: "+
+			"action=mcp_list lists servers, action=tool_list lists tools of one server (with schemas), "+
+			"action=tool_call invokes one.",
+		func(ctx context.Context, in *routerArgs) (string, error) {
+			return r.dispatch(ctx, in)
+		})
+	return r
 }
 
 /* ReplaceServers 热加载 server 列表；工具 schema 不变，不影响缓存前缀。 */
@@ -101,11 +96,7 @@ func (r *Router) Close() error {
 	return nil
 }
 
-func (r *Router) Invoke(ctx context.Context, raw json.RawMessage) (string, error) {
-	var args routerArgs
-	if err := json.Unmarshal(raw, &args); err != nil {
-		return r.errJSON(fmt.Sprintf("invalid args: %v", err), "args must be JSON matching mcp_router schema"), nil
-	}
+func (r *Router) dispatch(ctx context.Context, args *routerArgs) (string, error) {
 	switch args.Action {
 	case "mcp_list":
 		return r.mcpList(), nil
@@ -115,7 +106,7 @@ func (r *Router) Invoke(ctx context.Context, raw json.RawMessage) (string, error
 		}
 		return r.toolList(ctx, args.Server)
 	case "tool_call":
-		return r.callTool(ctx, args)
+		return r.callTool(ctx, *args)
 	default:
 		return r.errJSON("unknown action: "+args.Action, `use "mcp_list", "tool_list" or "tool_call"`), nil
 	}

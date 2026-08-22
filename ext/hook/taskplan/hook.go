@@ -10,8 +10,6 @@ package taskplan
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 
 	"github.com/xuanlv2002/ezloop/event"
 	"github.com/xuanlv2002/ezloop/ext/hook/internal/await"
@@ -91,24 +89,4 @@ func (d Decision) formatResult() string {
 	default: // Revise
 		return "plan needs revision, user feedback: " + d.Input
 	}
-}
-
-/*
-Tool 返回 task_plan 壳工具：仅提供 schema 供模型发现，
-真正的"执行体"是 Hook 拦截后等用户处置，Invoke 不会被走到。
-hook 已在 OnStart 自动注册本工具，通常无需手动调用。
-*/
-func Tool() types.Tool { return tool{} }
-
-type tool struct{}
-
-func (tool) Name() string { return ToolName }
-func (tool) Description() string {
-	return "提交任务规划等待用户处置：用户将选择执行、拒绝或给出修改意见。开始多步任务前先提交规划。"
-}
-func (tool) ArgsSchema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"plan":{"type":"string","description":"完整的任务规划，分步骤列出"}},"required":["plan"]}`)
-}
-func (tool) Invoke(_ context.Context, _ json.RawMessage) (string, error) {
-	return "", errors.New("taskplan: hook not registered (task_plan is intercepted by taskplan.Hook)")
 }

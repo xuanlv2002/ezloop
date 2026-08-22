@@ -171,7 +171,7 @@ func main() {
 			task.New(),
 			session,
 		),
-		core.WithTools(nowTool{}),
+		core.WithTools(nowTool),
 		core.WithLoopParams(core.LoopParams{MaxIterations: 12}),
 		core.WithStreaming(true),
 		core.WithOnEvent(func(e event.Event) {
@@ -381,13 +381,7 @@ func streamTag(e event.Event) string {
 }
 
 /* nowTool 获取当前时间。 */
-type nowTool struct{}
-
-func (nowTool) Name() string        { return "now" }
-func (nowTool) Description() string { return "获取当前本地时间" }
-func (nowTool) ArgsSchema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{}}`)
-}
-func (nowTool) Invoke(_ context.Context, _ json.RawMessage) (string, error) {
-	return time.Now().Format("2006-01-02 15:04:05 MST"), nil
-}
+var nowTool = types.NewTool("now", "获取当前本地时间",
+	func(_ context.Context, _ *struct{}) (string, error) {
+		return time.Now().Format("2006-01-02 15:04:05 MST"), nil
+	})

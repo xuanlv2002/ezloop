@@ -89,7 +89,7 @@ sequenceDiagram
 
 | 包 | 关键文件 | 职责与公开面 |
 |---|---|---|
-| types | `state.go` `message.go` `model.go` `tool.go` | `LoopState`（Input/Messages/Tools/Usage/ForkID/SeedLen/Metadata/Emitter…）、`Message`（含 Reasoning/ToolCalls/Err）、`ModelRequest/ModelResponse/ModelChunk`、`Tool` 接口与 `ToolRegistry`（map 存储、同名覆盖、List 按名排序＝集合的确定函数） |
+| types | `state.go` `message.go` `model.go` `tool.go` `toolgen.go` | `LoopState`（Input/Messages/Tools/Usage/ForkID/SeedLen/Metadata/Emitter…）、`Message`（含 Reasoning/ToolCalls/Err）、`ModelRequest/ModelResponse/ModelChunk`、`Tool` 接口与 `ToolRegistry`（map 存储、同名覆盖、List 按名排序＝集合的确定函数）、`NewTool` 泛型构造（参数结构体 tag 反射生成 schema，字段声明序确定输出） |
 | event | `event.go` | `Event{Type,Timestamp,Iteration,ForkID,Data}`、全部引擎事件类型常量、`OnEvent`、`Emitter`（warp 层最小观察出口）、`Noop` |
 | hook | `hook.go` | `Hook` 基接口（Name）+ 七个时机接口（Start/ModelStart/ModelEnd/ToolStart/ToolEnd/Loop/End）、`Action{Kind,Result}` 与 `Proceed/Abort/Skip` |
 | provider | `provider.go` | `ModelProvider.Invoke`、`StreamProvider.Stream`（可选实现，WithStreaming 时优先） |

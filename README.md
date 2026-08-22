@@ -54,7 +54,7 @@ flowchart LR
 | 概念 | 关注点 | 扩展方式 |
 |---|---|---|
 | **model** | 节点本身：模型调用 | 实现 `provider.ModelProvider` + `WithModelWarp` 中间件 |
-| **tool** | 节点本身：工具执行 | 实现 `types.Tool` + `WithToolWarp` 中间件 |
+| **tool** | 节点本身：工具执行 | `types.NewTool` 构造（或手写实现 `types.Tool`）+ `WithToolWarp` 中间件 |
 | **hook** | 流的前后：生命周期与控制流 | 实现 hook 小接口 + `WithHooks` 插入 |
 
 三条设计原则：
