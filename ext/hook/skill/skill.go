@@ -1,27 +1,37 @@
 /*
-Package skill 将预定义技能指令按需注入 system prompt。
+Package skill 将技能指令按需注入 system prompt。
 Keywords 匹配到用户输入（或未配置 Keywords）的 skill 才会被注入，节省 token。
 技能源支持代码内定义（New）与文件系统目录加载（NewFromFS）。
+
+文件布局遵循标准 skill 规范：dir/<skill>/SKILL.md 是唯一必需文件，
+frontmatter 提供元数据（name/description，缺省回落目录名与正文首行），
+frontmatter 之后的正文是指令。scripts/、references/、assets/ 等子资源
+由正文相对路径引用（模型用文件工具按需读取），加载器不感知。
 */
 package skill
 
 import (
 	"context"
 	"fmt"
-	"path"
 	"strings"
 
 	"github.com/xuanlv2002/ezloop/ext/fs"
 	"github.com/xuanlv2002/ezloop/types"
 )
 
+/* SkillFile 是技能的指令文件名。 */
+const SkillFile = "SKILL.md"
+
 type Skill struct {
 	Name        string
 	Description string
-	// Instructions 是注入给模型的完整指令内容。
+	// Instructions 是注入给模型的完整指令内容（已剥离 frontmatter）。
 	Instructions string
-	// Keywords 命中用户输入则注入；为空表示总是注入。
+	// Keywords 命中用户输入则注入；为空表示总是注入（仅代码内定义用，
+	// 文件加载不提供）。
 	Keywords []string
+	// Path 是 SKILL.md 的 FS 相对路径（宿主提示"全文见此"用）。
+	Path string
 }
 
 type Hook struct {
@@ -33,9 +43,8 @@ func New(skills ...Skill) *Hook {
 }
 
 /*
-NewFromFS 从文件系统加载技能：dir 下每个 *.md 文件是一个技能，
-文件名（去扩展名）为技能名，文件内容为 Instructions。
-可选同名 .keywords 文件（逗号分隔）提供关键词。
+NewFromFS 从文件系统加载技能：dir 下每个含 SKILL.md 的子目录是一个
+技能；无 SKILL.md 的目录跳过。
 */
 func NewFromFS(ctx context.Context, fsys fs.FileSystem, dir string) (*Hook, error) {
 	skills, err := LoadDir(ctx, fsys, dir)
@@ -53,29 +62,80 @@ func LoadDir(ctx context.Context, fsys fs.FileSystem, dir string) ([]Skill, erro
 	}
 	var skills []Skill
 	for _, e := range entries {
-		if e.IsDir || !strings.HasSuffix(e.Name, ".md") {
+		if !e.IsDir {
 			continue
 		}
-		data, rerr := fsys.Read(ctx, dir+"/"+e.Name)
+		p := dir + "/" + e.Name + "/" + SkillFile
+		data, rerr := fsys.Read(ctx, p)
 		if rerr != nil {
-			continue
+			continue // 无 SKILL.md 的目录不是技能
 		}
-		s := Skill{
-			Name:         strings.TrimSuffix(e.Name, path.Ext(e.Name)),
-			Instructions: string(data),
+		meta, rest := splitFrontmatter(string(data))
+		name := strings.TrimSpace(meta["name"])
+		if name == "" {
+			name = e.Name
 		}
-		// 可选 keywords 文件：skill.md 对应 skill.keywords
-		kwData, kerr := fsys.Read(ctx, dir+"/"+strings.TrimSuffix(e.Name, ".md")+".keywords")
-		if kerr == nil {
-			for kw := range strings.SplitSeq(string(kwData), ",") {
-				if kw = strings.TrimSpace(kw); kw != "" {
-					s.Keywords = append(s.Keywords, kw)
-				}
-			}
+		desc := strings.TrimSpace(meta["description"])
+		if desc == "" {
+			desc = firstLine(rest) // 容错：frontmatter 漏写时回落正文首行
 		}
-		skills = append(skills, s)
+		skills = append(skills, Skill{
+			Name:         name,
+			Description:  desc,
+			Instructions: rest,
+			Path:         p,
+		})
 	}
 	return skills, nil
+}
+
+/*
+splitFrontmatter 剥离 YAML frontmatter（首行 --- 到闭合 ---），只取顶层
+扁平字段（name/description/license 等；嵌套块如 metadata: 的缩进子行跳过）。
+不引 YAML 依赖——规范必填字段都是扁平标量。无 frontmatter 时原样返回。
+*/
+func splitFrontmatter(body string) (map[string]string, string) {
+	lines := strings.Split(body, "\n")
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
+		return nil, body
+	}
+	meta := map[string]string{}
+	for i := 1; i < len(lines); i++ {
+		raw := lines[i]
+		line := strings.TrimSpace(raw)
+		if line == "---" {
+			rest := strings.Join(lines[i+1:], "\n")
+			rest = strings.TrimPrefix(rest, "\n") // 去 frontmatter 后的首个空行
+			return meta, rest
+		}
+		// 跳过缩进行（嵌套块的子项，如 metadata.author）
+		if raw != strings.TrimLeft(raw, " \t") {
+			continue
+		}
+		if k, v, ok := strings.Cut(line, ":"); ok {
+			k = strings.TrimSpace(k)
+			v = strings.Trim(strings.TrimSpace(v), `"'`)
+			if k != "" && v != "" {
+				meta[k] = v
+			}
+		}
+	}
+	return nil, body // frontmatter 未闭合，视为普通正文
+}
+
+/* firstLine 取正文首个非空行（# 标题去前缀），截 60 rune。 */
+func firstLine(body string) string {
+	for line := range strings.SplitSeq(body, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			line = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(strings.TrimPrefix(line, "#")), "#"))
+			r := []rune(line)
+			if len(r) > 60 {
+				return string(r[:60]) + "…"
+			}
+			return line
+		}
+	}
+	return ""
 }
 
 func (h *Hook) Name() string { return "skill" }

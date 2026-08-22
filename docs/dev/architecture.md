@@ -126,3 +126,19 @@ sequenceDiagram
 - 只 `startHooks=nil`（组装期不重跑，产物已在 seed/tools 中）；运行期 hook 全继承——审批无旁路、分身可问用户
 - seed 深拷贝防并行踩踏；`state.ForkID`（事件与持久化归属）+ `state.SeedLen`（持久化剥离边界）由引擎结构性填写
 - ext/hook/task 是第一个使用者；任何"以当前自我为模板跑隔离循环"的场景（评审、假设分支、重跑验证）都可复用
+
+## Backlog：设计议题
+
+### OnBuild 钩子点（待定）
+
+**设想**：新增第八个时机接口 `OnBuild(a *Agent)`，NewAgent 组装完成时执行——hook 在构建期拿到 Agent 引用，做一次性初始化（目前只能在 `NewXxx` 构造函数里做，拿不到 Agent 与最终配置）。
+
+**与现有原则的张力**：
+
+1. **组装期定制一律 Option**：现契约是"构建用 Option（纯组装），运行用 hook（生命周期切面）"。OnBuild 让 hook 参与构建，出现第三态，分层变模糊。
+2. **构建后只读**：若 OnBuild 允许改 Agent（追加工具/hook），Option 顺序敏感、覆盖语义复杂化，浅拷贝 Fork 与并发 Run 的安全论证要重做。只读通知式（观察者）则无此问题，但价值也有限。
+3. **Fork 语义**：Fork 浅拷贝不重跑构建期——OnBuild 只在主构建执行一次，fork 静默继承，与 startHooks 的"跳过组装期"口径一致，但需要在 Fork 文档里显式补充。
+
+**现有替代物**：hook 自身的 `NewXxx` 构造函数初始化（ezharness 的 SysPrompt/Store 均如此）；需要感知完整装配的场景由宿主 Assemble 层承担（应用层职责，不进引擎）。
+
+**结论**：除非出现"hook 必须在构建期拿 Agent 引用才能实现"的真实场景（目前没有——`AgentFromContext` 已覆盖运行期自举），否则维持七钩子不加。若真要加，限定为只读通知式。
