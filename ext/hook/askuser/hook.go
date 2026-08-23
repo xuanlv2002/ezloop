@@ -9,8 +9,6 @@ package askuser
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 
 	"github.com/xuanlv2002/ezloop/event"
 	"github.com/xuanlv2002/ezloop/ext/hook/internal/await"
@@ -69,25 +67,4 @@ func answerAction(a Answer) hook.Action {
 		a.Input = "(user gave no input)"
 	}
 	return hook.Skip(a.Input)
-}
-
-/*
-Tool 返回 ask_user 壳工具：仅提供 schema 供模型发现，
-真正的"执行体"是 Hook 拦截后等用户回答，Invoke 不会被走到。
-hook 已在 OnStart 自动注册本工具，通常无需手动调用。
-*/
-func Tool() types.Tool { return tool{} }
-
-type tool struct{}
-
-func (tool) Name() string { return ToolName }
-func (tool) Description() string {
-	return "向用户提问并等待回答。缺少必要信息、需要澄清或确认方向时使用，不要替用户假设。"
-}
-func (tool) ArgsSchema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"question":{"type":"string","description":"要问用户的问题"}},"required":["question"]}`)
-}
-func (tool) Invoke(_ context.Context, _ json.RawMessage) (string, error) {
-	// 防呆：未挂 Hook 时尽早暴露装配错误。
-	return "", errors.New("askuser: hook not registered (ask_user is intercepted by askuser.Hook)")
 }

@@ -15,8 +15,21 @@ type ModelResponse struct {
 	Reasoning string
 }
 
-/* ModelChunk 是流式输出的增量：正文与思考过程分开通出。 */
+/*
+ToolCallDelta 是流式工具调用的增量分片：Index 定位同轮第几个调用
+（协议侧的累积序号），各字段是本片新增量——ID 一次性给出，
+名字与参数按序拼接。消费方按 Index 分桶累积。
+*/
+type ToolCallDelta struct {
+	Index     int    `json:"index"`
+	ID        string `json:"id,omitempty"`
+	NameDelta string `json:"nameDelta,omitempty"`
+	ArgsDelta string `json:"argsDelta,omitempty"`
+}
+
+/* ModelChunk 是流式输出的增量：正文与思考过程分开通出，工具调用增量按片透出。 */
 type ModelChunk struct {
 	ContentDelta   string
 	ReasoningDelta string
+	ToolCalls      []ToolCallDelta
 }

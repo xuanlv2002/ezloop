@@ -48,10 +48,13 @@ func (r *ToolRegistry) Lookup(name string) (Tool, error) {
 
 - 需要配置的用 Options 模式：`New(opts ...Option)` + `WithXxx` 函数项
 - 提供工具的 hook 在 OnStart 自动注册（`state.Tools.Register(Tool())`），使用方 `WithHooks(New())` 一步到位
+- 含工具的 hook 包拆两个文件：`hook.go`（生命周期与拦截逻辑）+ `tools.go`（工具定义，全用 `types.NewTool`）
 - 人机中断统一 channel 决策模式：`New() (hook, chan<- Decision)` + `state.EmitEvent` 发请求事件，渲染层 OnEvent 里呈现、独立 goroutine 回传（同步回传会死锁）；并发多等待者共享 channel 必须用 ext/hook/internal/await.Router（按 CallID 路由 + 错配暂存 + close 广播重查），"不匹配就丢弃"会造成互饿死锁
 - 自定义事件类型加命名空间前缀（如 `approve.denied`、`task.start`），避免与引擎事件冲突
 
 **新 warp**：`warp.Handler[T]` 签名 `func(em event.Emitter, node T) T`，闭包持有自身状态（信号量等）在工厂里建。先注册的在外层；需要捕获内层 panic 的（safetool）注册在最外
+
+**新工具**：用 `types.NewTool(name, desc, fn)` 构造，schema 从参数结构体的 tag 反射生成——`json:"name,omitempty"` 定字段名（omitempty → 非 required，默认全 required）、`desc:"…"` → description、`enum:"a|b|c"` → string enum；支持 string/bool/number/slice/map[string]T/json.RawMessage/嵌套 struct。schema 构造期生成一次，字段声明序即输出序（确定函数，缓存友好）。required 只约束字段出现与否，值级业务校验（空串拒绝等）留在 fn 内（edit_file 的 new_text 允许空串删除语义）。手写实现 `types.Tool` 仅留给需要动态 schema 的场景（如 provider 适配）
 
 **新 provider**：实现 `provider.ModelProvider`（Invoke）；流式能力可选实现 `StreamProvider`。错误带可重试判断时实现 `Retryable() bool`（与 modelretry 的解耦契约，参见 openai.HTTPError）
 

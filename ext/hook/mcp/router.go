@@ -8,22 +8,29 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/xuanlv2002/ezloop/types"
 )
 
 const RouterToolName = "mcp_router"
 
 type routerArgs struct {
-	Action string          `json:"action"`
-	Server string          `json:"server,omitempty"`
-	Tool   string          `json:"tool,omitempty"`
-	Args   json.RawMessage `json:"args,omitempty"`
+	Action string `json:"action" desc:"操作类型" enum:"mcp_list|tool_list|tool_call"`
+	Server string `json:"server,omitempty" desc:"server 名，tool_list 与 tool_call 必填"`
+	Tool   string `json:"tool,omitempty" desc:"工具名，tool_call 必填"`
+	Args   string `json:"args,omitempty" desc:"工具参数，JSON 对象的字符串形式，tool_call 时使用"`
 }
 
 type toolEntry struct {
-	Server string `json:"server"`
 	Name   string `json:"name"`
 	Desc   string `json:"description,omitempty"`
 	Schema any    `json:"args_schema,omitempty"`
+}
+
+/* serverEntry 是 mcp_list 的条目：名字 + 配置里的用途描述。 */
+type serverEntry struct {
+	Name string `json:"name"`
+	Desc string `json:"description,omitempty"`
 }
 
 type callError struct {
@@ -31,11 +38,16 @@ type callError struct {
 	Hint  string `json:"hint,omitempty"`
 }
 
-/* Router 实现 types.Tool：对模型暴露唯一入口，内部转发到各 MCP server。 */
+/*
+Router 实现 types.Tool：对模型暴露唯一入口，内部转发到各 MCP server。
+工具面经嵌入的 types.Tool 提供（NewRouter 内由 NewTool 构造，schema 从
+routerArgs tag 反射生成、恒定，热加载 server 列表不影响缓存前缀）。
+*/
 type Router struct {
 	mu      sync.RWMutex
 	servers map[string]ServerConfig
 	clients map[string]Client
+	types.Tool
 }
 
 func NewRouter(servers []ServerConfig) *Router {
@@ -43,25 +55,15 @@ func NewRouter(servers []ServerConfig) *Router {
 	for _, s := range servers {
 		m[s.Name] = s
 	}
-	return &Router{servers: m, clients: make(map[string]Client)}
-}
-
-func (r *Router) Name() string { return RouterToolName }
-func (r *Router) Description() string {
-	return "Unified entry for all MCP tools. Use action=list_tools to discover, action=call_tool to invoke."
-}
-
-func (r *Router) ArgsSchema() json.RawMessage {
-	return json.RawMessage(`{
-	"type": "object",
-	"properties": {
-		"action": {"type": "string", "enum": ["list_tools", "call_tool"]},
-		"server": {"type": "string", "description": "server name, required by call_tool"},
-		"tool":   {"type": "string", "description": "tool name, required by call_tool"},
-		"args":   {"type": "object", "description": "tool arguments"}
-	},
-	"required": ["action"]
-}`)
+	r := &Router{servers: m, clients: make(map[string]Client)}
+	r.Tool = types.NewTool(RouterToolName,
+		"Unified entry for all MCP tools. Discover progressively: "+
+			"action=mcp_list lists servers, action=tool_list lists tools of one server (with schemas), "+
+			"action=tool_call invokes one.",
+		func(ctx context.Context, in *routerArgs) (string, error) {
+			return r.dispatch(ctx, in)
+		})
+	return r
 }
 
 /* ReplaceServers 热加载 server 列表；工具 schema 不变，不影响缓存前缀。 */
@@ -94,49 +96,52 @@ func (r *Router) Close() error {
 	return nil
 }
 
-func (r *Router) Invoke(ctx context.Context, raw json.RawMessage) (string, error) {
-	var args routerArgs
-	if err := json.Unmarshal(raw, &args); err != nil {
-		return r.errJSON(fmt.Sprintf("invalid args: %v", err), "args must be JSON matching mcp_router schema"), nil
-	}
+func (r *Router) dispatch(ctx context.Context, args *routerArgs) (string, error) {
 	switch args.Action {
-	case "list_tools":
-		return r.listTools(ctx)
-	case "call_tool":
-		return r.callTool(ctx, args)
+	case "mcp_list":
+		return r.mcpList(), nil
+	case "tool_list":
+		if args.Server == "" {
+			return r.errJSON("server is required", "call mcp_list to see available servers"), nil
+		}
+		return r.toolList(ctx, args.Server)
+	case "tool_call":
+		return r.callTool(ctx, *args)
 	default:
-		return r.errJSON("unknown action: "+args.Action, `use "list_tools" or "call_tool"`), nil
+		return r.errJSON("unknown action: "+args.Action, `use "mcp_list", "tool_list" or "tool_call"`), nil
 	}
 }
 
-func (r *Router) listTools(ctx context.Context) (string, error) {
+/* mcpList 列出配置的 server 名单与描述（不主动连接）。 */
+func (r *Router) mcpList() string {
 	r.mu.RLock()
-	names := make([]string, 0, len(r.servers))
-	for name := range r.servers {
-		names = append(names, name)
+	entries := make([]serverEntry, 0, len(r.servers))
+	for name, cfg := range r.servers {
+		entries = append(entries, serverEntry{Name: name, Desc: cfg.Description})
 	}
 	r.mu.RUnlock()
-	sort.Strings(names)
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Name < entries[j].Name })
+	out, _ := json.MarshalIndent(entries, "", "  ")
+	return string(out)
+}
 
-	entries := make([]toolEntry, 0)
-	for _, name := range names {
-		client, err := r.client(name)
-		if err != nil {
-			entries = append(entries, toolEntry{Server: name, Desc: "unavailable: " + err.Error()})
-			continue
-		}
-		defs, err := client.ListTools(ctx)
-		if err != nil {
-			entries = append(entries, toolEntry{Server: name, Desc: "list failed: " + err.Error()})
-			continue
-		}
-		for _, d := range defs {
-			if r.allowed(name, d.Name) {
-				entries = append(entries, toolEntry{
-					Server: name, Name: d.Name, Desc: d.Description,
-					Schema: json.RawMessage(d.ArgsSchema),
-				})
-			}
+/* toolList 连接（或复用）server 拉取该 server 的工具清单（含 schema，ACL 过滤）。 */
+func (r *Router) toolList(ctx context.Context, server string) (string, error) {
+	client, err := r.client(server)
+	if err != nil {
+		return r.errJSON(err.Error(), "call mcp_list to see available servers"), nil
+	}
+	defs, err := client.ListTools(ctx)
+	if err != nil {
+		return r.errJSON(fmt.Sprintf("list %s failed: %v", server, err), "check server status or config"), nil
+	}
+	entries := make([]toolEntry, 0, len(defs))
+	for _, d := range defs {
+		if r.allowed(server, d.Name) {
+			entries = append(entries, toolEntry{
+				Name: d.Name, Desc: d.Description,
+				Schema: json.RawMessage(d.ArgsSchema),
+			})
 		}
 	}
 	out, _ := json.MarshalIndent(entries, "", "  ")
@@ -145,21 +150,27 @@ func (r *Router) listTools(ctx context.Context) (string, error) {
 
 func (r *Router) callTool(ctx context.Context, args routerArgs) (string, error) {
 	if args.Server == "" || args.Tool == "" {
-		return r.errJSON("server and tool are required", "call list_tools first"), nil
+		return r.errJSON("server and tool are required", "call tool_list first"), nil
 	}
 	if !r.allowed(args.Server, args.Tool) {
 		return r.errJSON(fmt.Sprintf("tool %s/%s is not allowed", args.Server, args.Tool), "it is not in the server allow list"), nil
 	}
 	client, err := r.client(args.Server)
 	if err != nil {
-		return r.errJSON(err.Error(), "call list_tools to see available servers"), nil
+		return r.errJSON(err.Error(), "call mcp_list to see available servers"), nil
 	}
-	if len(args.Args) == 0 {
-		args.Args = json.RawMessage(`{}`)
+	// args 是 JSON 文本串：空串/null/引号空串统一为 {}；非 JSON 文本
+	// 回错误让模型自纠（部分 server 的 arguments 字段不接受裸字符串）。
+	t := strings.TrimSpace(args.Args)
+	if t == "" || t == "null" || t == `""` || t == `'{}'` {
+		t = "{}"
 	}
-	result, err := client.CallTool(ctx, args.Tool, args.Args)
+	if !json.Valid([]byte(t)) {
+		return r.errJSON("args must be a JSON object string (e.g. \"{\\\"tz\\\":\\\"Asia/Shanghai\\\"}\")", "pass args as a string containing JSON"), nil
+	}
+	result, err := client.CallTool(ctx, args.Tool, json.RawMessage(t))
 	if err != nil {
-		return r.errJSON(fmt.Sprintf("call %s/%s failed: %v", args.Server, args.Tool, err), "check tool name and args schema from list_tools"), nil
+		return r.errJSON(fmt.Sprintf("call %s/%s failed: %v", args.Server, args.Tool, err), "check tool name and args schema from tool_list"), nil
 	}
 	return result, nil
 }

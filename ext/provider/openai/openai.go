@@ -365,13 +365,22 @@ func (p *Provider) Stream(ctx context.Context, req *types.ModelRequest, onChunk 
 				c = &accCall{}
 				acc[tc.Index] = c
 			}
+			d := types.ToolCallDelta{Index: tc.Index, ArgsDelta: tc.Function.Arguments}
 			if tc.ID != "" {
 				c.id = tc.ID
+				d.ID = tc.ID
 			}
 			if tc.Function.Name != "" {
 				c.name += tc.Function.Name
+				d.NameDelta = tc.Function.Name
 			}
 			c.args += tc.Function.Arguments
+			// 增量同步透出：大参数（如整文件内容）构造期外部可见进展
+			if onChunk != nil {
+				if err := onChunk(types.ModelChunk{ToolCalls: []types.ToolCallDelta{d}}); err != nil {
+					return nil, err
+				}
+			}
 		}
 	}
 	if err := scanner.Err(); err != nil {

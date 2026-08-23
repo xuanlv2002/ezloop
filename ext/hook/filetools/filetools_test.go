@@ -143,7 +143,7 @@ func TestMutationQueue(t *testing.T) {
 			args, _ := json.Marshal(map[string]string{
 				"path": "same.txt", "content": strings.Repeat(fmt.Sprintf("w%d", n), 500),
 			})
-			_, _ = writeFileTool{h: hook}.Invoke(context.Background(), args)
+			_, _ = writeTool(hook).Invoke(context.Background(), args)
 		}(i)
 	}
 	wg.Wait()
