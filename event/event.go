@@ -18,6 +18,9 @@ const (
 	EventReasoningChunk EventType = "reasoning_chunk"
 	EventToolStart      EventType = "tool_start"
 	EventToolEnd        EventType = "tool_end"
+	// EventToolChunk 流式工具调用增量（大参数调用构造期的实时反馈），
+	// data 为 types.ToolCallDelta。
+	EventToolChunk EventType = "tool_chunk"
 	EventIterationEnd   EventType = "iteration_end"
 	EventError          EventType = "error"
 	// EventStreamFallback 警告：WithStreaming(true) 但链上无 StreamProvider，

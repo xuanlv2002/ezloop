@@ -342,6 +342,9 @@ func (a *Agent) callModel(ctx context.Context, model provider.ModelProvider, sta
 				if c.ContentDelta != "" {
 					a.emit(state, event.EventModelChunk, c.ContentDelta)
 				}
+				for _, d := range c.ToolCalls {
+					a.emit(state, event.EventToolChunk, d)
+				}
 				return nil
 			})
 		}
