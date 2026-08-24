@@ -14,12 +14,25 @@ package filetools
 import (
 	"context"
 	"os/exec"
+	"strconv"
 	"syscall"
+	"time"
 )
 
 func terminalCmd(ctx context.Context, raw, dir string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, "cmd")
 	cmd.SysProcAttr = &syscall.SysProcAttr{CmdLine: `cmd /c chcp 65001 >nul & ` + raw}
 	cmd.Dir = dir
+	// 取消时必须杀整棵进程树：真正命令是 cmd.exe 的孙进程，只杀 cmd.exe
+	// 的话孙进程仍持有 stdout/stderr 管道写端，CombinedOutput 的 Wait 会
+	// 永久阻塞（表现为"停止无效"）。taskkill /T 连树终结、管道随之关闭；
+	// WaitDelay 兜底 taskkill 自身失败时的挂起。
+	cmd.Cancel = func() error {
+		if cmd.Process != nil {
+			return exec.Command("taskkill", "/F", "/T", "/PID", strconv.Itoa(cmd.Process.Pid)).Run()
+		}
+		return nil
+	}
+	cmd.WaitDelay = 3 * time.Second
 	return cmd
 }
