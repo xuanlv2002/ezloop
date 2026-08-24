@@ -60,6 +60,41 @@ func TestFileToolsCore(t *testing.T) {
 	}
 }
 
+// read_file 分页：offset/limit 取行窗口，尾部标注剩余行数与续读 offset。
+func TestReadFilePaging(t *testing.T) {
+	hook := New(fs.NewLocal(t.TempDir()))
+	var b strings.Builder
+	for i := 1; i <= 10; i++ {
+		fmt.Fprintf(&b, "line%d\n", i)
+	}
+	writeArgs, _ := json.Marshal(map[string]string{"path": "ten.txt", "content": b.String()})
+	if out := runTool(t, hook, "write_file", string(writeArgs)); !strings.Contains(out, "written") {
+		t.Fatalf("write: %q", out)
+	}
+
+	// 窗口截取：第 3 行起 4 行。
+	out := runTool(t, hook, "read_file", `{"path":"ten.txt","offset":3,"limit":4}`)
+	for _, want := range []string{"line3", "line6", "已读第 3-6 行，共 10 行", "offset=7"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("window read missing %q: %q", want, out)
+		}
+	}
+	if strings.Contains(out, "line2") || strings.Contains(out, "line7") {
+		t.Fatalf("window read leaked outside lines: %q", out)
+	}
+
+	// 末页：窗口越过文件尾，读到结尾且无续读提示。
+	out = runTool(t, hook, "read_file", `{"path":"ten.txt","offset":8,"limit":100}`)
+	if !strings.Contains(out, "line10") || strings.Contains(out, "offset=") {
+		t.Fatalf("last page: %q", out)
+	}
+
+	// offset 越界：明确告知总行数而非报错。
+	if out = runTool(t, hook, "read_file", `{"path":"ten.txt","offset":99}`); !strings.Contains(out, "总行数 10") {
+		t.Fatalf("out of range: %q", out)
+	}
+}
+
 // 四件套恒注册：read_file / write_file / edit_file / terminal。
 func TestRegistersAllTools(t *testing.T) {
 	state, err := core.NewAgent(

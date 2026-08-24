@@ -162,7 +162,7 @@ func main() {
 		core.WithToolWarp(limit.Warp(4), safetool.Warp()),
 		core.WithHooks(
 			contextfix.New(), // 历史进入引擎前先修理（/resume 旧存档防悬空 tool_call）
-			offload.New(fsys),
+			offload.New(fsys, offload.WithReplayTool("read_file")),
 			filetools.New(fsys),
 			skillHook,
 			approver,

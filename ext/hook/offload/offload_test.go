@@ -10,6 +10,7 @@ import (
 	"github.com/xuanlv2002/ezloop/core"
 	"github.com/xuanlv2002/ezloop/ext/fs"
 	"github.com/xuanlv2002/ezloop/internal/testutil"
+	"github.com/xuanlv2002/ezloop/types"
 )
 
 type bigTool struct{ n int }
@@ -73,5 +74,38 @@ func TestOffloadSkip(t *testing.T) {
 	}
 	if msg := state.Messages[2].Content; msg != strings.Repeat("x", 10_000) {
 		t.Fatalf("skipped tool must keep full output, got %d bytes", len(msg))
+	}
+}
+
+// 配置回放工具：摘要尾部提示模型用它回放全文；该工具自身的结果免卸载。
+func TestReplayTool(t *testing.T) {
+	fsys := fs.NewLocal(t.TempDir())
+	hook := New(fsys, WithReplayTool("read_file"))
+	state, err := core.NewAgent(
+		testutil.Scripted(
+			testutil.ToolCalls(testutil.Call("1", "dump", `{}`)),
+			testutil.Text("done"),
+		),
+		core.WithTools(bigTool{n: 10_000}),
+		core.WithHooks(hook),
+	).Run(context.Background(), "hi")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	// 摘要尾部提示回放工具（read_file），卸载路径就在同一条消息里。
+	msg := state.Messages[2].Content
+	if !strings.Contains(msg, "已卸载到 .ezloop/offload/") ||
+		!strings.Contains(msg, "可使用 tool read_file 进行全量内容回放") {
+		t.Fatalf("summary must mention offload path and replay tool: %q", msg)
+	}
+
+	// 回放工具自身的大结果免卸载：全文进上下文才是回放的意义。
+	result := &types.ToolResult{Name: "read_file", Content: strings.Repeat("x", 10_000)}
+	if herr := hook.OnToolEnd(context.Background(), state, result); herr != nil {
+		t.Fatalf("err: %v", herr)
+	}
+	if result.Content != strings.Repeat("x", 10_000) {
+		t.Fatal("replay tool output must be whitelisted from offload")
 	}
 }

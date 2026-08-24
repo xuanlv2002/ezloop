@@ -17,27 +17,63 @@ import (
 	"github.com/xuanlv2002/ezloop/types"
 )
 
-const readMaxBytes = 50 << 10 // 50KB，防超大文件撑爆上下文
+const readDefaultLines = 2000 // 默认读取行数，防大文件一次撑爆上下文
 
 type readArgs struct {
-	Path string `json:"path" desc:"文件路径"`
+	Path   string `json:"path" desc:"文件路径"`
+	Offset int    `json:"offset,omitempty" desc:"起始行号，1 起，默认 1"`
+	Limit  int    `json:"limit,omitempty" desc:"读取行数，默认 2000"`
 }
 
+/*
+readTool 按行分页读取：offset/limit 缺省时读前 2000 行；未读完时尾部
+标注剩余行数与续读 offset，模型据此翻页——大文件对模型不再是只有
+前半截的黑盒。
+*/
 func readTool(fsys fs.FileSystem) types.Tool {
-	return types.NewTool("read_file", "读取文件内容（50KB 截断）",
+	return types.NewTool("read_file", "按行读取文件内容（默认第 1 行起 2000 行，可指定 offset/limit 翻页）",
 		func(ctx context.Context, in *readArgs) (string, error) {
 			if in.Path == "" {
 				return "", errors.New("path is required")
+			}
+			if in.Offset <= 0 {
+				in.Offset = 1
+			}
+			if in.Limit <= 0 {
+				in.Limit = readDefaultLines
 			}
 			data, err := fsys.Read(ctx, in.Path)
 			if err != nil {
 				return "", err
 			}
-			if len(data) > readMaxBytes {
-				return string(data[:readMaxBytes]) + "\n[已达 50KB 上限，已截断]", nil
+			lines := splitLines(string(data))
+			if len(lines) == 0 {
+				return "", nil
 			}
-			return string(data), nil
+			if in.Offset > len(lines) {
+				return fmt.Sprintf("offset %d 超出文件总行数 %d", in.Offset, len(lines)), nil
+			}
+			end := min(in.Offset-1+in.Limit, len(lines))
+			out := strings.Join(lines[in.Offset-1:end], "\n")
+			if end < len(lines) {
+				out += fmt.Sprintf("\n[已读第 %d-%d 行，共 %d 行；继续读取请设 offset=%d]",
+					in.Offset, end, len(lines), end+1)
+			}
+			return out, nil
 		})
+}
+
+/* splitLines 按 \n 切行并剥掉 \r；结尾换行不产生末尾空行。 */
+func splitLines(s string) []string {
+	s = strings.TrimSuffix(s, "\n")
+	if s == "" {
+		return nil
+	}
+	lines := strings.Split(s, "\n")
+	for i, l := range lines {
+		lines[i] = strings.TrimSuffix(l, "\r")
+	}
+	return lines
 }
 
 type writeArgs struct {
