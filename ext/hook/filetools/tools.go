@@ -6,12 +6,16 @@ schema 从参数结构体的 tag 反射生成（json 定名，desc 描述，omit
 package filetools
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"os/exec"
 	"runtime"
 	"strings"
+	"unicode/utf8"
+
+	"golang.org/x/text/encoding/simplifiedchinese"
 
 	"github.com/xuanlv2002/ezloop/ext/fs"
 	"github.com/xuanlv2002/ezloop/types"
@@ -126,9 +130,11 @@ type terminalArgs struct {
 terminalTool 在系统原生终端执行单条命令：Windows 是 cmd，类 Unix 是 sh。
 workDir 为执行目录（空 = 进程 cwd）——宿主可把终端锚定到用户工作目录，
 同时提示模型用绝对路径，命令不再依赖进程 cwd。
-不做 shell 探测与切换——设计立场是"模型适配环境"：工具描述与 system
-注入都标明当前系统，模型据此书写对应语法（Windows 写 dir/type/findstr，
-类 Unix 写 ls/cat/grep）。
+Windows 下命令前预置 chcp 65001（控制台与重定向文件转 UTF-8；审批按
+模型提交的原始命令判定，不受此包装影响），仍按 OEM 代码页输出的老
+程序由 decodeOutput 兜底解码。不做 shell 探测与切换——设计立场是
+"模型适配环境"：工具描述与 system 注入都标明当前系统，模型据此书写
+对应语法（Windows 写 dir/type/findstr，类 Unix 写 ls/cat/grep）。
 输出为 stdout+stderr 合并；退出码非零时输出与退出码一并作为正常结果
 返回（不报工具错误）——真实报错信息是模型自纠的依据，仅执行失败
 （无法启动/取消）才是 error。
@@ -139,14 +145,15 @@ func terminalTool(workDir string) types.Tool {
 			if strings.TrimSpace(in.Command) == "" {
 				return "", errors.New("command is required")
 			}
-			name, flag := "sh", "-c"
+			name, flag, cmdStr := "sh", "-c", in.Command
 			if runtime.GOOS == "windows" {
 				name, flag = "cmd", "/c"
+				cmdStr = "chcp 65001 >nul & " + in.Command
 			}
-			cmd := exec.CommandContext(ctx, name, flag, in.Command)
+			cmd := exec.CommandContext(ctx, name, flag, cmdStr)
 			cmd.Dir = workDir
 			out, err := cmd.CombinedOutput()
-			text := strings.TrimSpace(strings.ToValidUTF8(string(out), ""))
+			text := strings.TrimSpace(decodeOutput(out))
 			var exitErr *exec.ExitError
 			if errors.As(err, &exitErr) {
 				return text + fmt.Sprintf("\n[exit code %d]", exitErr.ExitCode()), nil
@@ -156,6 +163,20 @@ func terminalTool(workDir string) types.Tool {
 			}
 			return text, nil
 		})
+}
+
+/* decodeOutput 把命令输出归一为 UTF-8：Windows 控制台程序可能按 OEM
+代码页（简中 GBK）输出，非 UTF-8 字节按 GB18030（GBK 超集）解码，
+失败再剥离无效字节（原文输出不可强求）。chcp 65001 重定向会带 BOM，一并剥掉。 */
+func decodeOutput(b []byte) string {
+	b = bytes.TrimPrefix(b, []byte{0xEF, 0xBB, 0xBF})
+	if utf8.Valid(b) {
+		return string(b)
+	}
+	if out, err := simplifiedchinese.GB18030.NewDecoder().Bytes(b); err == nil {
+		return string(out)
+	}
+	return strings.ToValidUTF8(string(b), "")
 }
 
 /* terminalDesc 按当前系统给模型提示对应 shell 语法；GOOS 进程内恒定。 */

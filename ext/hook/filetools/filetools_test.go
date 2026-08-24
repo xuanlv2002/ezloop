@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 
+	"golang.org/x/text/encoding/simplifiedchinese"
+
 	"github.com/xuanlv2002/ezloop/core"
 	"github.com/xuanlv2002/ezloop/ext/fs"
 	"github.com/xuanlv2002/ezloop/internal/testutil"
@@ -189,5 +191,30 @@ func TestMutationQueue(t *testing.T) {
 	s := string(data)
 	if len(s) != 1000 || strings.Count(s, s[:2]) != 500 {
 		t.Fatal("concurrent writes interleaved — mutation queue failed")
+	}
+}
+
+// GBK 输出（Windows 控制台 OEM 代码页）解码为 UTF-8；UTF-8 原文透传。
+func TestDecodeOutput(t *testing.T) {
+	if got := decodeOutput([]byte("plain ascii")); got != "plain ascii" {
+		t.Fatalf("ascii passthrough: %q", got)
+	}
+	msg := "文件名、目录名或卷标语法不正确。"
+	if got := decodeOutput([]byte(msg)); got != msg { // 已是 UTF-8：原样
+		t.Fatalf("utf8 passthrough: %q", got)
+	}
+	gbk, err := simplifiedchinese.GBK.NewEncoder().Bytes([]byte(msg))
+	if err != nil {
+		t.Fatalf("encode gbk: %v", err)
+	}
+	if got := decodeOutput(gbk); got != msg {
+		t.Fatalf("gbk decode: %q", got)
+	}
+}
+
+// chcp 65001 重定向输出带 BOM，解码时剥掉。
+func TestDecodeOutputBOM(t *testing.T) {
+	if got := decodeOutput([]byte{0xEF, 0xBB, 0xBF, 'h', 'i'}); got != "hi" {
+		t.Fatalf("bom strip: %q", got)
 	}
 }
