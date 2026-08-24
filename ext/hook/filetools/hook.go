@@ -19,15 +19,28 @@ import (
 )
 
 type Hook struct {
-	fsys fs.FileSystem
+	fsys    fs.FileSystem
+	workDir string // terminal 执行目录（空 = 进程 cwd）
 
 	mu    sync.Mutex
 	locks map[string]*sync.Mutex // per-path 修改队列
 }
 
-/* New 创建文件与终端工具 hook。 */
-func New(fsys fs.FileSystem) *Hook {
-	return &Hook{fsys: fsys, locks: make(map[string]*sync.Mutex)}
+/* New 创建文件与终端工具 hook；WithWorkDir 可指定 terminal 执行目录。 */
+func New(fsys fs.FileSystem, opts ...Option) *Hook {
+	h := &Hook{fsys: fsys, locks: make(map[string]*sync.Mutex)}
+	for _, o := range opts {
+		o(h)
+	}
+	return h
+}
+
+/* Option 是 hook 装配选项。 */
+type Option func(*Hook)
+
+/* WithWorkDir 设定 terminal 工具的执行目录（空串保持进程 cwd）。 */
+func WithWorkDir(dir string) Option {
+	return func(h *Hook) { h.workDir = dir }
 }
 
 func (h *Hook) Name() string { return "filetools" }
@@ -36,7 +49,7 @@ func (h *Hook) OnStart(_ context.Context, state *types.LoopState) error {
 	state.Tools.Register(readTool(h.fsys))
 	state.Tools.Register(writeTool(h))
 	state.Tools.Register(editTool(h))
-	state.Tools.Register(terminalTool())
+	state.Tools.Register(terminalTool(h.workDir))
 	injectOSHint(state)
 	return nil
 }

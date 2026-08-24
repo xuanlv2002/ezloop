@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 
+	"golang.org/x/text/encoding/simplifiedchinese"
+
 	"github.com/xuanlv2002/ezloop/core"
 	"github.com/xuanlv2002/ezloop/ext/fs"
 	"github.com/xuanlv2002/ezloop/internal/testutil"
@@ -57,6 +59,41 @@ func TestFileToolsCore(t *testing.T) {
 	}
 	if out := runTool(t, hook, "read_file", `{"path":"app.go"}`); !strings.Contains(out, "DONE") {
 		t.Fatalf("after edit: %q", out)
+	}
+}
+
+// read_file 分页：offset/limit 取行窗口，尾部标注剩余行数与续读 offset。
+func TestReadFilePaging(t *testing.T) {
+	hook := New(fs.NewLocal(t.TempDir()))
+	var b strings.Builder
+	for i := 1; i <= 10; i++ {
+		fmt.Fprintf(&b, "line%d\n", i)
+	}
+	writeArgs, _ := json.Marshal(map[string]string{"path": "ten.txt", "content": b.String()})
+	if out := runTool(t, hook, "write_file", string(writeArgs)); !strings.Contains(out, "written") {
+		t.Fatalf("write: %q", out)
+	}
+
+	// 窗口截取：第 3 行起 4 行。
+	out := runTool(t, hook, "read_file", `{"path":"ten.txt","offset":3,"limit":4}`)
+	for _, want := range []string{"line3", "line6", "已读第 3-6 行，共 10 行", "offset=7"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("window read missing %q: %q", want, out)
+		}
+	}
+	if strings.Contains(out, "line2") || strings.Contains(out, "line7") {
+		t.Fatalf("window read leaked outside lines: %q", out)
+	}
+
+	// 末页：窗口越过文件尾，读到结尾且无续读提示。
+	out = runTool(t, hook, "read_file", `{"path":"ten.txt","offset":8,"limit":100}`)
+	if !strings.Contains(out, "line10") || strings.Contains(out, "offset=") {
+		t.Fatalf("last page: %q", out)
+	}
+
+	// offset 越界：明确告知总行数而非报错。
+	if out = runTool(t, hook, "read_file", `{"path":"ten.txt","offset":99}`); !strings.Contains(out, "总行数 10") {
+		t.Fatalf("out of range: %q", out)
 	}
 }
 
@@ -154,5 +191,30 @@ func TestMutationQueue(t *testing.T) {
 	s := string(data)
 	if len(s) != 1000 || strings.Count(s, s[:2]) != 500 {
 		t.Fatal("concurrent writes interleaved — mutation queue failed")
+	}
+}
+
+// GBK 输出（Windows 控制台 OEM 代码页）解码为 UTF-8；UTF-8 原文透传。
+func TestDecodeOutput(t *testing.T) {
+	if got := decodeOutput([]byte("plain ascii")); got != "plain ascii" {
+		t.Fatalf("ascii passthrough: %q", got)
+	}
+	msg := "文件名、目录名或卷标语法不正确。"
+	if got := decodeOutput([]byte(msg)); got != msg { // 已是 UTF-8：原样
+		t.Fatalf("utf8 passthrough: %q", got)
+	}
+	gbk, err := simplifiedchinese.GBK.NewEncoder().Bytes([]byte(msg))
+	if err != nil {
+		t.Fatalf("encode gbk: %v", err)
+	}
+	if got := decodeOutput(gbk); got != msg {
+		t.Fatalf("gbk decode: %q", got)
+	}
+}
+
+// chcp 65001 重定向输出带 BOM，解码时剥掉。
+func TestDecodeOutputBOM(t *testing.T) {
+	if got := decodeOutput([]byte{0xEF, 0xBB, 0xBF, 'h', 'i'}); got != "hi" {
+		t.Fatalf("bom strip: %q", got)
 	}
 }

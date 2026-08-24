@@ -3,6 +3,10 @@ Package offload 是 ToolEndHook：超大工具结果卸载到文件系统，
 上下文里只保留头部摘要与文件路径，防止大输出（日志、转储、目录遍历）
 撑爆上下文。写入失败时降级透传原文，绝不阻断工具执行。
 结果后处理不耦合工具节点本身，故为 hook 而非 warp。
+
+配置 ReplayTool（如 read_file）后，摘要尾部提示模型用该工具回放
+卸载文件全文，且该工具自身的结果免卸载——回放的意义就是把全文
+带回上下文，再卸载即死循环。
 */
 package offload
 
@@ -31,6 +35,9 @@ type Options struct {
 	// Skip 免卸载名单：这些工具的结果原样保留（如分身最终答案——
 	// 截断成摘要会伤主循环决策）。
 	Skip []string
+	// ReplayTool 回放工具名（如 read_file）：摘要尾部提示模型用它读回
+	// 卸载文件全文，该工具的结果自动免卸载。空串（默认）不提示。
+	ReplayTool string
 }
 
 type Hook struct {
@@ -52,13 +59,18 @@ func WithSkip(names ...string) func(*Options) {
 	return func(o *Options) { o.Skip = names }
 }
 
+/* WithReplayTool 指定回放工具名（如 read_file），摘要尾部提示模型用它回放全文。 */
+func WithReplayTool(name string) func(*Options) {
+	return func(o *Options) { o.ReplayTool = name }
+}
+
 func (h *Hook) Name() string { return "offload" }
 
 func (h *Hook) OnToolEnd(ctx context.Context, _ *types.LoopState, result *types.ToolResult) error {
 	if result.Err != nil || len(result.Content) <= h.opts.Threshold {
 		return nil
 	}
-	if slices.Contains(h.opts.Skip, result.Name) {
+	if slices.Contains(h.opts.Skip, result.Name) || result.Name == h.opts.ReplayTool {
 		return nil
 	}
 
@@ -78,7 +90,11 @@ func (h *Hook) OnToolEnd(ctx context.Context, _ *types.LoopState, result *types.
 	if len(head) > h.opts.Head {
 		head = head[:h.opts.Head]
 	}
-	result.Content = fmt.Sprintf("%s\n\n[输出共 %d 字节，超出 %d 字节阈值，已卸载到 %s，可用文件工具按需读取]",
-		head, len(result.Content), h.opts.Threshold, path)
+	tail := "可用文件工具按需读取"
+	if h.opts.ReplayTool != "" {
+		tail = "可使用 tool " + h.opts.ReplayTool + " 进行全量内容回放"
+	}
+	result.Content = fmt.Sprintf("%s\n\n[输出共 %d 字节，超出 %d 字节阈值，已卸载到 %s，%s]",
+		head, len(result.Content), h.opts.Threshold, path, tail)
 	return nil
 }
