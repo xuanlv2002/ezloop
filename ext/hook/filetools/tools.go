@@ -131,8 +131,11 @@ terminalTool 在系统原生终端执行单条命令：Windows 是 cmd，类 Uni
 workDir 为执行目录（空 = 进程 cwd）——宿主可把终端锚定到用户工作目录，
 同时提示模型用绝对路径，命令不再依赖进程 cwd。
 Windows 下命令前预置 chcp 65001（控制台与重定向文件转 UTF-8；审批按
-模型提交的原始命令判定，不受此包装影响），仍按 OEM 代码页输出的老
-程序由 decodeOutput 兜底解码。不做 shell 探测与切换——设计立场是
+模型提交的原始命令判定，不受此包装影响），且整条命令行经
+SysProcAttr.CmdLine 原样传入（exec.Args 的 EscapeArg 会把模型命令里
+的双引号写成 \"，cmd 不认反斜杠转义，带引号参数会被解析坏，见
+terminalcmd_windows.go）。仍按 OEM 代码页输出的老程序由 decodeOutput
+兜底解码。不做 shell 探测与切换——设计立场是
 "模型适配环境"：工具描述与 system 注入都标明当前系统，模型据此书写
 对应语法（Windows 写 dir/type/findstr，类 Unix 写 ls/cat/grep）。
 输出为 stdout+stderr 合并；退出码非零时输出与退出码一并作为正常结果
@@ -145,13 +148,7 @@ func terminalTool(workDir string) types.Tool {
 			if strings.TrimSpace(in.Command) == "" {
 				return "", errors.New("command is required")
 			}
-			name, flag, cmdStr := "sh", "-c", in.Command
-			if runtime.GOOS == "windows" {
-				name, flag = "cmd", "/c"
-				cmdStr = "chcp 65001 >nul & " + in.Command
-			}
-			cmd := exec.CommandContext(ctx, name, flag, cmdStr)
-			cmd.Dir = workDir
+			cmd := terminalCmd(ctx, in.Command, workDir)
 			out, err := cmd.CombinedOutput()
 			text := strings.TrimSpace(decodeOutput(out))
 			var exitErr *exec.ExitError

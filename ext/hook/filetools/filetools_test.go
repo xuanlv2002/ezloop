@@ -169,6 +169,23 @@ func TestTerminalTool(t *testing.T) {
 	}
 }
 
+// 引号参数原样执行：Windows 上 EscapeArg 的 \" 转义 cmd 不认，带引号
+// 的参数（findstr /C:"…"、含空格路径）曾整条损坏——回归护栏。
+func TestTerminalQuotedArgs(t *testing.T) {
+	dir := t.TempDir()
+	hook := New(fs.NewLocal(dir), WithWorkDir(dir))
+	runTool(t, hook, "write_file", `{"path":"q.txt","content":"hello world"}`)
+
+	cmd := `grep "hello world" q.txt`
+	if runtime.GOOS == "windows" {
+		cmd = `findstr /C:"hello world" q.txt`
+	}
+	args, _ := json.Marshal(map[string]string{"command": cmd})
+	if out := runTool(t, hook, "terminal", string(args)); !strings.Contains(out, "hello world") {
+		t.Fatalf("quoted args output: %q", out)
+	}
+}
+
 // 修改队列：并发写同一路径，最终内容必须是某次完整写入。
 func TestMutationQueue(t *testing.T) {
 	hook := New(fs.NewLocal(t.TempDir()))
