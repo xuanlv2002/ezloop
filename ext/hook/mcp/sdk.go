@@ -37,6 +37,10 @@ func StreamableHTTP(endpoint string, headers map[string]string) func(ServerConfi
 		transport := &sdkmcp.StreamableClientTransport{
 			Endpoint:   endpoint,
 			HTTPClient: httpClient,
+			// 不建立 standalone GET SSE 流：部分 server
+			// 对 GET 既不返回 SSE 也不返回 405，连接会一直挂起直到超时。
+			// ezloop 只消费 ListTools/CallTool，不需要 server 主动推送。
+			DisableStandaloneSSE: true,
 		}
 		return connectSDK(transport)
 	}
