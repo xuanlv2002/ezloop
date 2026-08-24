@@ -124,6 +124,8 @@ type terminalArgs struct {
 
 /*
 terminalTool 在系统原生终端执行单条命令：Windows 是 cmd，类 Unix 是 sh。
+workDir 为执行目录（空 = 进程 cwd）——宿主可把终端锚定到用户工作目录，
+同时提示模型用绝对路径，命令不再依赖进程 cwd。
 不做 shell 探测与切换——设计立场是"模型适配环境"：工具描述与 system
 注入都标明当前系统，模型据此书写对应语法（Windows 写 dir/type/findstr，
 类 Unix 写 ls/cat/grep）。
@@ -131,7 +133,7 @@ terminalTool 在系统原生终端执行单条命令：Windows 是 cmd，类 Uni
 返回（不报工具错误）——真实报错信息是模型自纠的依据，仅执行失败
 （无法启动/取消）才是 error。
 */
-func terminalTool() types.Tool {
+func terminalTool(workDir string) types.Tool {
 	return types.NewTool("terminal", terminalDesc(),
 		func(ctx context.Context, in *terminalArgs) (string, error) {
 			if strings.TrimSpace(in.Command) == "" {
@@ -141,7 +143,9 @@ func terminalTool() types.Tool {
 			if runtime.GOOS == "windows" {
 				name, flag = "cmd", "/c"
 			}
-			out, err := exec.CommandContext(ctx, name, flag, in.Command).CombinedOutput()
+			cmd := exec.CommandContext(ctx, name, flag, in.Command)
+			cmd.Dir = workDir
+			out, err := cmd.CombinedOutput()
 			text := strings.TrimSpace(strings.ToValidUTF8(string(out), ""))
 			var exitErr *exec.ExitError
 			if errors.As(err, &exitErr) {
