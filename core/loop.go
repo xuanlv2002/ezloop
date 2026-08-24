@@ -328,18 +328,26 @@ func (a *Agent) execToolCalls(ctx context.Context, state *types.LoopState) error
 	return hookErr
 }
 
-/* callModel 发起一次模型调用：流式时 chunk 经事件实时透出（正文与思考分路）。 */
+/* callModel 发起一次模型调用：流式时 chunk 经事件实时透出（正文与思考分路）。
+
+取消抢救：ctx 打断流式时，provider 不会返回部分响应——已流到消费方的
+半截内容若不入史，用户"看过模型说过的话"下轮却消失。回调侧累积正文
+与思考，取消时以 assistant 消息补入历史（残缺的工具调用参数不可执行、
+协议要求 tool_calls 与结果成对，一律丢弃）。 */
 func (a *Agent) callModel(ctx context.Context, model provider.ModelProvider, state *types.LoopState) (*types.ModelResponse, error) {
 	req := &types.ModelRequest{Messages: state.Messages, Tools: state.Tools.List()}
 	a.emit(state, event.EventModelStart, nil)
 
 	if a.streaming {
 		if sp, ok := model.(provider.StreamProvider); ok {
-			return sp.Stream(ctx, req, func(c types.ModelChunk) error {
+			var partial types.ModelResponse
+			resp, err := sp.Stream(ctx, req, func(c types.ModelChunk) error {
 				if c.ReasoningDelta != "" {
+					partial.Reasoning += c.ReasoningDelta
 					a.emit(state, event.EventReasoningChunk, c.ReasoningDelta)
 				}
 				if c.ContentDelta != "" {
+					partial.Content += c.ContentDelta
 					a.emit(state, event.EventModelChunk, c.ContentDelta)
 				}
 				for _, d := range c.ToolCalls {
@@ -347,6 +355,15 @@ func (a *Agent) callModel(ctx context.Context, model provider.ModelProvider, sta
 				}
 				return nil
 			})
+			if err != nil && ctx.Err() != nil &&
+				(partial.Content != "" || partial.Reasoning != "") {
+				state.AppendMessage(types.Message{
+					Role:      types.RoleAssistant,
+					Content:   partial.Content,
+					Reasoning: partial.Reasoning,
+				})
+			}
+			return resp, err
 		}
 	}
 	return model.Invoke(ctx, req)
