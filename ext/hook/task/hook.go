@@ -46,12 +46,13 @@ const EventStart = event.EventType("task.start")
 const EventEnd = event.EventType("task.end")
 
 /*
-taskInputPrefix 包装任务描述。拼在 input（请求最末尾）而非 system：
+TaskInputPrefix 包装任务描述。拼在 input（请求最末尾）而非 system：
 不动 seed 前缀，主循环 KV 缓存对分身依旧可复用。回传机制只保证取
 最后一条 assistant 消息，不保证其质量——这里引导分身以自包含的最终
-结果收尾，主循环拿到的工具结果才有内容。
+结果收尾，主循环拿到的工具结果才有内容。导出供宿主渲染层剥前缀
+（fork 存档的 Input 字段含此前缀）。
 */
-const taskInputPrefix = "以下是你独立负责的子任务，请完成它；你的最后一条回复将作为结果直接交付，须自包含、简洁：\n\n"
+const TaskInputPrefix = "以下是你独立负责的子任务，请完成它；你的最后一条回复将作为结果直接交付，须自包含、简洁：\n\n"
 
 /* Options 配置 fork 的工具集。 */
 type Options struct {
@@ -138,7 +139,7 @@ func (h *Hook) OnToolStart(ctx context.Context, state *types.LoopState, call *ty
 	tools := h.forkTools(state)
 
 	h.emit(state, EventStart, call, forkID)
-	sub, err := agent.Fork(ctx, forkID, seed, tools, taskInputPrefix+args.Task)
+	sub, err := agent.Fork(ctx, forkID, seed, tools, TaskInputPrefix+args.Task)
 	h.emit(state, EventEnd, sub, forkID)
 
 	if err != nil {

@@ -360,7 +360,7 @@ func TestForkSeedExcludesTriggeringUser(t *testing.T) {
 		}
 	}
 	// input 带包装前缀：分身以自包含的最终结果收尾（引导回传质量）。
-	wantInput := taskInputPrefix + "go"
+	wantInput := TaskInputPrefix + "go"
 	if subMsgs[0].Role != types.RoleUser || subMsgs[0].Content != wantInput {
 		t.Fatalf("fork input should carry prefix: %q", subMsgs[0].Content)
 	}
