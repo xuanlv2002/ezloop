@@ -22,6 +22,7 @@ import (
 )
 
 const readDefaultLines = 2000 // 默认读取行数，防大文件一次撑爆上下文
+const readMaxChars = 200_000  // 单次结果字符上限：分页限行不限字节，单行超长（minified）文件需另行设防
 
 type readArgs struct {
 	Path   string `json:"path" desc:"文件路径"`
@@ -32,10 +33,11 @@ type readArgs struct {
 /*
 readTool 按行分页读取：offset/limit 缺省时读前 2000 行；未读完时尾部
 标注剩余行数与续读 offset，模型据此翻页——大文件对模型不再是只有
-前半截的黑盒。
+前半截的黑盒。行数之外另有整段字符上限（readMaxChars）：少数超长行
+文件（压缩 JS、单行大 JSON）行数不多但体量巨大，按字符截断兜底。
 */
 func readTool(fsys fs.FileSystem) types.Tool {
-	return types.NewTool("read_file", "按行读取文件内容（默认第 1 行起 2000 行，可指定 offset/limit 翻页）",
+	return types.NewTool("read_file", "按行读取文件内容（默认第 1 行起 2000 行，可指定 offset/limit 翻页；单次最多返回 200000 字符，超出截断）",
 		func(ctx context.Context, in *readArgs) (string, error) {
 			if in.Path == "" {
 				return "", errors.New("path is required")
@@ -59,6 +61,10 @@ func readTool(fsys fs.FileSystem) types.Tool {
 			}
 			end := min(in.Offset-1+in.Limit, len(lines))
 			out := strings.Join(lines[in.Offset-1:end], "\n")
+			if runes := utf8.RuneCountInString(out); runes > readMaxChars {
+				return string([]rune(out)[:readMaxChars]) +
+					fmt.Sprintf("\n[本次内容共 %d 字符，超出单次 %d 字符上限已截断；如需其余部分请分批次使用读取]", runes, readMaxChars), nil
+			}
 			if end < len(lines) {
 				out += fmt.Sprintf("\n[已读第 %d-%d 行，共 %d 行；继续读取请设 offset=%d]",
 					in.Offset, end, len(lines), end+1)
@@ -162,9 +168,12 @@ func terminalTool(workDir string) types.Tool {
 		})
 }
 
-/* decodeOutput 把命令输出归一为 UTF-8：Windows 控制台程序可能按 OEM
+/*
+	decodeOutput 把命令输出归一为 UTF-8：Windows 控制台程序可能按 OEM
+
 代码页（简中 GBK）输出，非 UTF-8 字节按 GB18030（GBK 超集）解码，
-失败再剥离无效字节（原文输出不可强求）。chcp 65001 重定向会带 BOM，一并剥掉。 */
+失败再剥离无效字节（原文输出不可强求）。chcp 65001 重定向会带 BOM，一并剥掉。
+*/
 func decodeOutput(b []byte) string {
 	b = bytes.TrimPrefix(b, []byte{0xEF, 0xBB, 0xBF})
 	if utf8.Valid(b) {
