@@ -64,6 +64,16 @@ func New(needs func(*types.ToolCall) bool) (*Hook, chan<- Decision) {
 
 func (h *Hook) Name() string { return "approve" }
 
+/* OnStart 注入审批机制说明：仅当首条为 system 时追加（无 system 的裸装配不注入，
+避免挪动消息序；宿主的 system hook 注册在首位即可承接）。 */
+func (h *Hook) OnStart(_ context.Context, state *types.LoopState) error {
+	if len(state.Messages) > 0 && state.Messages[0].Role == types.RoleSystem {
+		state.Messages[0].Content += "\n\n<tool-guide>\n审批：写操作等有副作用的工具调用会先请用户批准再执行；" +
+			"被拒绝时理由会作为工具结果返回，此时不要原样重试，先调整方案或询问用户。\n</tool-guide>"
+	}
+	return nil
+}
+
 func (h *Hook) OnToolStart(ctx context.Context, state *types.LoopState, call *types.ToolCall) (hook.Action, error) {
 	if h.needs != nil && !h.needs(call) {
 		return hook.Proceed, nil

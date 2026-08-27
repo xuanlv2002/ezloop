@@ -215,8 +215,11 @@ func (a *Agent) execToolCalls(ctx context.Context, state *types.LoopState) error
 			}
 		}
 
-		// 判定：toolStart hooks（单调用内串行，Skip 保留首个结果文案）。
+		// 判定：toolStart hooks（单调用内串行，Skip 保留首个结果文案并短路：
+		// 后续 hook 不再评估——approve 拒绝必须拦下 task 等"OnToolStart
+		// 内执行工作"的 hook，否则拒绝形同虚设）。
 		proceed := true
+	hooks:
 		for _, h := range a.toolStartHooks {
 			action, err := a.runToolStartHook(h, callCtx, state, call)
 			if err != nil {
@@ -229,6 +232,7 @@ func (a *Agent) execToolCalls(ctx context.Context, state *types.LoopState) error
 				if result.Content == "" {
 					result.Content = action.Result
 				}
+				break hooks
 			case hook.KindAbort:
 				mu.Lock()
 				aborted = true

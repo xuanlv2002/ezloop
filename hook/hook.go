@@ -65,7 +65,9 @@ var Proceed = Action{Kind: KindProceed}
 /* Abort 终止整个 loop（StopReason = aborted）。 */
 var Abort = Action{Kind: KindAbort}
 
-/* Skip 跳过本次调用：result 作为工具结果写入消息历史，循环继续。 */
+/* Skip 跳过本次调用：result 作为工具结果写入消息历史，循环继续；
+后续 toolStart hook 不再评估（拒绝即短路，如 approve 拒绝后 task
+等在 OnToolStart 内执行工作的 hook 不得再跑）。 */
 func Skip(result string) Action { return Action{Kind: KindSkip, Result: result} }
 
 /* ToolStartHook 在每个工具调用前触发，是权限拦截等能力的挂载点。 */

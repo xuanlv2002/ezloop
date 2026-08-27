@@ -200,6 +200,45 @@ func TestSkipPrefilledResult(t *testing.T) {
 	}
 }
 
+// Skip 短路：首个 hook 拒绝后，后续 toolStart hook 不再运行——approve
+// 拒绝必须拦下 task 等"OnToolStart 内执行工作"的 hook（fork 已跑即事故）。
+type skipDeny struct{}
+
+func (skipDeny) Name() string { return "skip-deny" }
+func (skipDeny) OnToolStart(_ context.Context, _ *types.LoopState, _ *types.ToolCall) (hook.Action, error) {
+	return hook.Skip("denied by user"), nil
+}
+
+type laterHookRan struct{ ran *bool }
+
+func (laterHookRan) Name() string { return "later-hook" }
+func (h laterHookRan) OnToolStart(_ context.Context, _ *types.LoopState, _ *types.ToolCall) (hook.Action, error) {
+	*h.ran = true
+	return hook.Proceed, nil
+}
+
+func TestSkipShortCircuitsLaterHooks(t *testing.T) {
+	ran := false
+	a := NewAgent(
+		testutil.Scripted(
+			testutil.ToolCalls(testutil.Call("1", "echo", `{}`)),
+			testutil.Text("done"),
+		),
+		WithTools(testutil.EchoTool{}),
+		WithHooks(skipDeny{}, laterHookRan{&ran}),
+	)
+	state, err := a.Run(context.Background(), "hi")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if ran {
+		t.Fatal("toolStart hook after Skip must not run")
+	}
+	if state.Messages[2].Content != "denied by user" {
+		t.Fatalf("msg: %q", state.Messages[2].Content)
+	}
+}
+
 // abort / hook 报错后未执行的调用也补齐结果消息：历史无悬空 tool_call，
 // 协议完整（持久化恢复安全）。
 func TestExitPathsKeepHistoryComplete(t *testing.T) {
