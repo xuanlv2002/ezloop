@@ -98,11 +98,16 @@ func New(opts ...Option) *Hook {
 func (h *Hook) Name() string { return "task" }
 
 /*
-OnStart 自动注册 task 工具：主模型无需 core.WithTools(Tool()) 即可发现它。
-仍导出 Tool() 以便显式装配。
+OnStart 自动注册 task 工具并注入使用说明：仅当首条为 system 时追加
+（无 system 的裸装配不注入，避免挪动消息序）。仍导出 Tool() 以便显式装配。
 */
 func (h *Hook) OnStart(_ context.Context, state *types.LoopState) error {
 	state.Tools.Register(Tool())
+	if len(state.Messages) > 0 && state.Messages[0].Role == types.RoleSystem {
+		state.Messages[0].Content += "\n\n<tool-guide>\ntask：可并行或较复杂的子任务交给 task 分身隔离执行（工具集相同、" +
+			"过程互不干扰，最终结果直接回传）。超长任务尤其适合：分身可自行压缩上下文持续运行。" +
+			"任务描述须自包含（分身看不到本轮对话之外的语境）。\n</tool-guide>"
+	}
 	return nil
 }
 

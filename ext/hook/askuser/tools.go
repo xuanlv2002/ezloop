@@ -12,7 +12,8 @@ import (
 )
 
 type askArgs struct {
-	Question string `json:"question" desc:"要问用户的问题"`
+	Question string   `json:"question" desc:"要问用户的问题"`
+	Options  []string `json:"options" desc:"可选：候选选项列表，用户可点选或自由输入，如 [\"执行\",\"否决\",\"修改\"]"`
 }
 
 /*
