@@ -78,6 +78,7 @@ func (a *Agent) Run(ctx context.Context, input string, runOpts ...RunOption) (st
 				state.StopReason = types.StopCancelled
 			} else {
 				state.StopReason = types.StopError
+				state.LastError = err
 				// 发送错误事件，便于外部日志记录。
 				a.emit(state, event.EventError, err)
 			}
@@ -427,6 +428,7 @@ func (a *Agent) fail(ctx context.Context, state *types.LoopState, err error) err
 		return err
 	}
 	state.StopReason = types.StopError
+	state.LastError = err
 	a.emit(state, event.EventError, err)
 	return err
 }

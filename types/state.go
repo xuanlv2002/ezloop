@@ -52,6 +52,10 @@ type LoopState struct {
 	Stop       bool
 	StopReason StopReason
 
+	// LastError 记录导致 StopError 的错误本体（endnote 等收尾 hook
+	// 展示用）。error 不可序列化，不参与落盘。
+	LastError error `json:"-"`
+
 	StartedAt time.Time
 	EndedAt   time.Time
 }
