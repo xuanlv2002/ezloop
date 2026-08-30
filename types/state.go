@@ -15,6 +15,10 @@ type LoopState struct {
 	Input    string
 	Messages []Message
 
+	// InputImages 是本次输入携带的多模态图片（WithInputImages 注入，
+	// 引擎组装 input user 消息时带上）。已入 Messages，不参与序列化。
+	InputImages []ImagePart `json:"-"`
+
 	Tools *ToolRegistry
 
 	Iteration     int

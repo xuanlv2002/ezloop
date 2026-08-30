@@ -92,7 +92,7 @@ func (a *Agent) Run(ctx context.Context, input string, runOpts ...RunOption) (st
 		a.emit(state, event.EventLoopEnd, state.StopReason)
 	}()
 
-	state.AppendMessage(types.Message{Role: types.RoleUser, Content: input})
+	state.AppendMessage(types.Message{Role: types.RoleUser, Content: input, Images: state.InputImages})
 
 	for _, h := range a.startHooks {
 		if err = a.runHook(h, "OnStart", func() error { return h.OnStart(ctx, state) }); err != nil {

@@ -38,6 +38,18 @@ type Message struct {
 	// 推理模型的思考过程（reasoning_content），仅展示与持久化回放——
 	// 协议要求请求不回传，Provider 构造请求时丢弃。
 	Reasoning string `json:"reasoning,omitempty"`
+
+	// 多模态图片输入（仅 user 消息携带）。base64 内嵌消息：落盘/恢复、
+	// fork 复制、trim 折叠段随消息自然流转；Provider 按各自协议转
+	// content parts（chat/completions image_url / responses input_image /
+	// anthropic image block），非 user 消息忽略。
+	Images []ImagePart `json:"images,omitempty"`
+}
+
+/* ImagePart 是一张内嵌图片（MIME 类型 + 纯 base64 数据，无 data: 前缀）。 */
+type ImagePart struct {
+	MimeType string `json:"mimeType"` // image/png | image/jpeg | image/webp | image/gif
+	Data     string `json:"data"`
 }
 
 /* Usage 统计单次或整轮 loop 的 token 用量。 */
