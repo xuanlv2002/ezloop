@@ -15,6 +15,10 @@ type LoopState struct {
 	Input    string
 	Messages []Message
 
+	// InputImages 是本次输入携带的多模态图片（WithInputImages 注入，
+	// 引擎组装 input user 消息时带上）。已入 Messages，不参与序列化。
+	InputImages []ImagePart `json:"-"`
+
 	Tools *ToolRegistry
 
 	Iteration     int
@@ -47,6 +51,10 @@ type LoopState struct {
 	// Stop 置 true 后，当前节点收尾完毕即终止 loop。
 	Stop       bool
 	StopReason StopReason
+
+	// LastError 记录导致 StopError 的错误本体（endnote 等收尾 hook
+	// 展示用）。error 不可序列化，不参与落盘。
+	LastError error `json:"-"`
 
 	StartedAt time.Time
 	EndedAt   time.Time

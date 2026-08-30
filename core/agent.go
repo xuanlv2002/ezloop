@@ -149,6 +149,19 @@ func WithHistory(messages ...types.Message) RunOption {
 }
 
 /*
+WithInputImages 为本次输入附带多模态图片（挂 state，引擎组装 input
+
+user 消息时携带；对齐 WithHistory 变参风格，空调用无效果）。
+*/
+func WithInputImages(images ...types.ImagePart) RunOption {
+	return func(state *types.LoopState) {
+		if len(images) > 0 {
+			state.InputImages = images
+		}
+	}
+}
+
+/*
 WithStreaming 启用后，Provider 若实现 StreamProvider 则走流式，
 
 chunk 通过 EventModelChunk / EventReasoningChunk 实时发出。

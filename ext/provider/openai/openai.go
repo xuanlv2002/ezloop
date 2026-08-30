@@ -6,15 +6,14 @@ Package openai 实现 OpenAI 兼容协议的 Provider，
 package openai
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"time"
 
+	"github.com/xuanlv2002/ezloop/ext/provider/provutil"
 	"github.com/xuanlv2002/ezloop/provider"
 	"github.com/xuanlv2002/ezloop/types"
 )
@@ -75,8 +74,11 @@ type streamOptions struct {
 }
 
 type chatMessage struct {
-	Role       string         `json:"role"`
-	Content    string         `json:"content"`
+	Role    string `json:"role"`
+	Content any    `json:"content"` // string（纯文本）| []chatContentPart（多模态）
+	// Content 用 any 保持序列化兼容：无图消息输出纯 string 字节不变，
+	// 有图 user 消息切换为 content parts 数组（text + image_url）。
+
 	ToolCalls  []chatToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string         `json:"tool_call_id,omitempty"`
 
@@ -84,6 +86,19 @@ type chatMessage struct {
 	// 思考过程，仅出现在响应侧；toChatMessages 从 types.Message 构造请求时
 	// 不填它（协议要求请求不回传 reasoning）。
 	ReasoningContent string `json:"reasoning_content,omitempty"`
+}
+
+/* chatContentPart 是多模态 content 数组的一个分块（text 或 image_url）。 */
+type chatContentPart struct {
+	Type string `json:"type"` // "text" | "image_url"
+	Text string `json:"text,omitempty"`
+
+	ImageURL *chatImageURL `json:"image_url,omitempty"`
+}
+
+/* chatImageURL 的 URL 支持 data URI（内嵌 base64 图片）。 */
+type chatImageURL struct {
+	URL string `json:"url"`
 }
 
 type chatTool struct {
@@ -152,6 +167,14 @@ type streamChunk struct {
 
 // ---- ezloop 类型与协议类型的双向映射 ----
 
+/* asString 取 any 化 Content 的文本值（响应侧恒为 string）。 */
+func asString(v any) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return ""
+}
+
 func toChatMessages(msgs []types.Message) []chatMessage {
 	out := make([]chatMessage, 0, len(msgs))
 	for _, m := range msgs {
@@ -161,6 +184,19 @@ func toChatMessages(msgs []types.Message) []chatMessage {
 			if m.Err != "" {
 				cm.Content = "error: " + m.Err
 			}
+		}
+		// 多模态：user 消息的图片转为 content parts 数组（data URI 内嵌）；
+		// 其余角色（含 tool）按协议不支持图片，忽略。
+		if m.Role == types.RoleUser && len(m.Images) > 0 {
+			parts := make([]chatContentPart, 0, len(m.Images)+1)
+			if m.Content != "" {
+				parts = append(parts, chatContentPart{Type: "text", Text: m.Content})
+			}
+			for _, img := range m.Images {
+				parts = append(parts, chatContentPart{Type: "image_url",
+					ImageURL: &chatImageURL{URL: "data:" + img.MimeType + ";base64," + img.Data}})
+			}
+			cm.Content = parts
 		}
 		for _, tc := range m.ToolCalls {
 			args := string(tc.Args)
@@ -193,7 +229,7 @@ func toChatTools(tools []types.Tool) []chatTool {
 }
 
 func fromChatMessage(msg chatMessage, usage types.Usage) *types.ModelResponse {
-	resp := &types.ModelResponse{Content: msg.Content, Reasoning: msg.ReasoningContent, Usage: usage}
+	resp := &types.ModelResponse{Content: asString(msg.Content), Reasoning: msg.ReasoningContent, Usage: usage}
 	for _, tc := range msg.ToolCalls {
 		args := json.RawMessage(tc.Function.Arguments)
 		if len(args) == 0 {
@@ -229,35 +265,10 @@ func (p *Provider) post(ctx context.Context, req *chatRequest) (*http.Response, 
 }
 
 /*
-HTTPError 是非 2xx 响应的结构化错误，实现 Retryable() bool：
-modelretry 等装饰器按此判断可重试性，无需解析错误文本。
+HTTPError 是非 2xx 响应的结构化错误（provutil.HTTPError 别名，实现
+Retryable() bool）：modelretry 等装饰器按此判断可重试性，无需解析错误文本。
 */
-type HTTPError struct {
-	Status int
-	Body   string
-}
-
-func (e *HTTPError) Error() string {
-	return fmt.Sprintf("openai: http %d: %s", e.Status, e.Body)
-}
-
-/*
-Retryable：408（请求超时）、429（限流）与 5xx 可安全重试；
-其余 4xx（鉴权错误、请求格式错误等）重试无意义。
-*/
-func (e *HTTPError) Retryable() bool {
-	return e.Status == http.StatusRequestTimeout ||
-		e.Status == http.StatusTooManyRequests ||
-		e.Status >= http.StatusInternalServerError
-}
-
-func checkStatus(resp *http.Response) error {
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
-		return &HTTPError{Status: resp.StatusCode, Body: string(body)}
-	}
-	return nil
-}
+type HTTPError = provutil.HTTPError
 
 /* Invoke 非流式调用。 */
 func (p *Provider) Invoke(ctx context.Context, req *types.ModelRequest) (*types.ModelResponse, error) {
@@ -275,7 +286,7 @@ func (p *Provider) Invoke(ctx context.Context, req *types.ModelRequest) (*types.
 		return nil, err
 	}
 	defer resp.Body.Close()
-	if err := checkStatus(resp); err != nil {
+	if err := provutil.CheckStatus("openai", resp); err != nil {
 		return nil, err
 	}
 
@@ -310,7 +321,7 @@ func (p *Provider) Stream(ctx context.Context, req *types.ModelRequest, onChunk 
 		return nil, err
 	}
 	defer resp.Body.Close()
-	if err := checkStatus(resp); err != nil {
+	if err := provutil.CheckStatus("openai", resp); err != nil {
 		return nil, err
 	}
 
@@ -321,8 +332,7 @@ func (p *Provider) Stream(ctx context.Context, req *types.ModelRequest, onChunk 
 	}
 	acc := map[int]*accCall{}
 
-	scanner := bufio.NewScanner(resp.Body)
-	scanner.Buffer(make([]byte, 0, 64<<10), 1<<20)
+	scanner := provutil.SSEScanner(resp.Body)
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		if !bytes.HasPrefix(line, []byte("data:")) {
@@ -351,10 +361,10 @@ func (p *Provider) Stream(ctx context.Context, req *types.ModelRequest, onChunk 
 				}
 			}
 		}
-		if delta.Content != "" {
-			final.Content += delta.Content
+		if c := asString(delta.Content); c != "" {
+			final.Content += c
 			if onChunk != nil {
-				if err := onChunk(types.ModelChunk{ContentDelta: delta.Content}); err != nil {
+				if err := onChunk(types.ModelChunk{ContentDelta: c}); err != nil {
 					return nil, err
 				}
 			}

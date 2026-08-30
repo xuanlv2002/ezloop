@@ -669,3 +669,41 @@ func TestToolWarpEventsFlow(t *testing.T) {
 		t.Fatalf("tool warp events: %v", seen)
 	}
 }
+
+// captureProvider 捕获收到的模型请求（多模态输入断言用）。
+type captureProvider struct{ reqs []*types.ModelRequest }
+
+func (p *captureProvider) Invoke(_ context.Context, req *types.ModelRequest) (*types.ModelResponse, error) {
+	p.reqs = append(p.reqs, req)
+	return testutil.Text("ok"), nil
+}
+
+// WithInputImages：图片挂在 input user 消息上进入模型请求；不传则消息无图。
+func TestWithInputImages(t *testing.T) {
+	img := types.ImagePart{MimeType: "image/png", Data: "aGk="}
+	p := &captureProvider{}
+	a := NewAgent(p)
+	state, err := a.Run(context.Background(), "看图", WithInputImages(img))
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	in := state.Messages[0]
+	if in.Role != types.RoleUser || in.Content != "看图" || len(in.Images) != 1 || in.Images[0] != img {
+		t.Fatalf("input message: %+v", in)
+	}
+	req := p.reqs[0]
+	last := req.Messages[len(req.Messages)-1]
+	if len(last.Images) != 1 || last.Images[0] != img {
+		t.Fatalf("provider received: %+v", last)
+	}
+
+	p2 := &captureProvider{}
+	a2 := NewAgent(p2)
+	if _, err := a2.Run(context.Background(), "纯文本"); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	last2 := p2.reqs[0].Messages[len(p2.reqs[0].Messages)-1]
+	if len(last2.Images) != 0 {
+		t.Fatalf("unexpected images: %+v", last2.Images)
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,42 +13,6 @@ import (
 	"github.com/xuanlv2002/ezloop/provider"
 	"github.com/xuanlv2002/ezloop/types"
 )
-
-// Retryable 语义:408/429/5xx 可重试,其余 4xx 不可。
-func TestHTTPErrorRetryable(t *testing.T) {
-	cases := []struct {
-		status int
-		want   bool
-	}{
-		{http.StatusRequestTimeout, true},
-		{http.StatusTooManyRequests, true},
-		{http.StatusInternalServerError, true},
-		{http.StatusServiceUnavailable, true},
-		{http.StatusBadRequest, false},
-		{http.StatusUnauthorized, false},
-		{http.StatusForbidden, false},
-		{http.StatusNotFound, false},
-	}
-	for _, c := range cases {
-		e := &HTTPError{Status: c.status, Body: "x"}
-		if e.Retryable() != c.want {
-			t.Fatalf("status %d: want %v", c.status, c.want)
-		}
-	}
-}
-
-// checkStatus 返回结构化 HTTPError,装饰器可 errors.As 断言。
-func TestCheckStatusReturnsHTTPError(t *testing.T) {
-	resp := &http.Response{StatusCode: 429, Body: http.NoBody}
-	err := checkStatus(resp)
-	if err == nil {
-		t.Fatal("want error")
-	}
-	he, ok := err.(*HTTPError)
-	if !ok || he.Status != 429 {
-		t.Fatalf("type=%T err=%v", err, err)
-	}
-}
 
 // toUsage 兼容两套缓存字段:OpenAI prompt_tokens_details 与 DeepSeek prompt_cache_hit_tokens。
 func TestToUsageCachedTokens(t *testing.T) {
@@ -152,3 +117,32 @@ func TestRequestDropsReasoning(t *testing.T) {
 }
 
 var _ provider.ModelProvider = (*Provider)(nil)
+
+// 多模态序列化：有图 user 消息 content 为 parts 数组（text+image_url data URI），
+// 无图消息保持纯 string（请求字节兼容），tool 消息忽略图片。
+func TestMultimodalContentSerialization(t *testing.T) {
+	var body []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ = io.ReadAll(r.Body)
+		fmt.Fprint(w, `{"choices":[{"message":{"content":"ok"}}]}`)
+	}))
+	defer srv.Close()
+	p := New(Options{BaseURL: srv.URL, APIKey: "x", Model: "m"})
+
+	req := &types.ModelRequest{Messages: []types.Message{
+		{Role: types.RoleUser, Content: "看图", Images: []types.ImagePart{
+			{MimeType: "image/png", Data: "aGk="},
+		}},
+		{Role: types.RoleAssistant, Content: "a"},
+		{Role: types.RoleUser, Content: "纯文本"},
+	}}
+	if _, err := p.Invoke(context.Background(), req); err != nil {
+		t.Fatalf("invoke: %v", err)
+	}
+	want := `"messages":[{"role":"user","content":[{"type":"text","text":"看图"},` +
+		`{"type":"image_url","image_url":{"url":"data:image/png;base64,aGk="}}]},` +
+		`{"role":"assistant","content":"a"},{"role":"user","content":"纯文本"}]`
+	if !strings.Contains(string(body), want) {
+		t.Fatalf("body: %s", body)
+	}
+}
