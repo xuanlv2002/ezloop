@@ -116,7 +116,7 @@ func TestInvokeParsesContent(t *testing.T) {
 	if len(resp.ToolCalls) != 1 || resp.ToolCalls[0].ID != "c1" || string(resp.ToolCalls[0].Args) != `{"m":"a"}` {
 		t.Fatalf("toolcalls: %+v", resp.ToolCalls)
 	}
-	if resp.Usage.PromptTokens != 100 || resp.Usage.CachedTokens != 64 || resp.Usage.CompletionTokens != 10 {
+	if resp.Usage.PromptTokens != 164 || resp.Usage.CachedTokens != 64 || resp.Usage.CompletionTokens != 10 {
 		t.Fatalf("usage: %+v", resp.Usage)
 	}
 }
@@ -149,9 +149,15 @@ func TestStreamFullEventSequence(t *testing.T) {
 	p := New(Options{BaseURL: srv.URL, APIKey: "x", Model: "m"})
 
 	var content, reasoning strings.Builder
+	var nameDeltas []string
 	resp, err := p.Stream(context.Background(), &types.ModelRequest{}, func(c types.ModelChunk) error {
 		content.WriteString(c.ContentDelta)
 		reasoning.WriteString(c.ReasoningDelta)
+		for _, tc := range c.ToolCalls {
+			if tc.NameDelta != "" {
+				nameDeltas = append(nameDeltas, tc.NameDelta)
+			}
+		}
 		return nil
 	})
 	if err != nil {
@@ -163,10 +169,42 @@ func TestStreamFullEventSequence(t *testing.T) {
 	if content.String() != "ans" || reasoning.String() != "th" {
 		t.Fatalf("chunks: %q %q", content.String(), reasoning.String())
 	}
+	if len(nameDeltas) != 1 || nameDeltas[0] != "echo" {
+		t.Fatalf("name deltas: %v", nameDeltas)
+	}
 	if len(resp.ToolCalls) != 1 || resp.ToolCalls[0].ID != "c1" || string(resp.ToolCalls[0].Args) != `{"m":"a"}` {
 		t.Fatalf("toolcalls: %+v", resp.ToolCalls)
 	}
-	if resp.Usage.PromptTokens != 100 || resp.Usage.CompletionTokens != 9 || resp.Usage.CachedTokens != 32 {
+	if resp.Usage.PromptTokens != 132 || resp.Usage.CompletionTokens != 9 || resp.Usage.CachedTokens != 32 {
+		t.Fatalf("usage: %+v", resp.Usage)
+	}
+}
+
+// 网关场景：message_start 不带 usage，输入侧用量只出现在 message_delta
+// （非零覆盖合并，否则水位为 0）。
+func TestStreamUsageFromMessageDelta(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		for _, s := range []string{
+			`data: {"type":"message_start","message":{}}`,
+			`data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
+			`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hi"}}`,
+			`data: {"type":"content_block_stop","index":0}`,
+			`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":300,"cache_read_input_tokens":80,"output_tokens":5}}`,
+			`data: {"type":"message_stop"}`,
+		} {
+			fmt.Fprintln(w, s)
+			fmt.Fprintln(w)
+		}
+	}))
+	defer srv.Close()
+	p := New(Options{BaseURL: srv.URL, APIKey: "x", Model: "m"})
+
+	resp, err := p.Stream(context.Background(), &types.ModelRequest{}, func(c types.ModelChunk) error { return nil })
+	if err != nil {
+		t.Fatalf("stream: %v", err)
+	}
+	if resp.Usage.PromptTokens != 380 || resp.Usage.CompletionTokens != 5 || resp.Usage.CachedTokens != 80 {
 		t.Fatalf("usage: %+v", resp.Usage)
 	}
 }

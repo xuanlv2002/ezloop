@@ -117,9 +117,10 @@ type antTool struct {
 }
 
 type antUsage struct {
-	InputTokens          int `json:"input_tokens"`
-	OutputTokens         int `json:"output_tokens"`
-	CacheReadInputTokens int `json:"cache_read_input_tokens"`
+	InputTokens              int `json:"input_tokens"`
+	OutputTokens             int `json:"output_tokens"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
 }
 
 type antResponse struct {
@@ -127,13 +128,15 @@ type antResponse struct {
 	Usage   *antUsage  `json:"usage"`
 }
 
-/* toUsage 把协议用量映射到 types.Usage。 */
+/* toUsage 把协议用量映射到 types.Usage。anthropic 的 input_tokens 不含
+缓存命中/写入部分，OpenAI 语义的 prompt_tokens 含缓存（cached ⊆ prompt，
+水位与命中率口径）——此处按后者对齐。 */
 func toUsage(u *antUsage) types.Usage {
 	if u == nil {
 		return types.Usage{}
 	}
 	return types.Usage{
-		PromptTokens:     u.InputTokens,
+		PromptTokens:     u.InputTokens + u.CacheReadInputTokens + u.CacheCreationInputTokens,
 		CompletionTokens: u.OutputTokens,
 		CachedTokens:     u.CacheReadInputTokens,
 	}
@@ -307,7 +310,9 @@ func (p *Provider) Invoke(ctx context.Context, req *types.ModelRequest) (*types.
 /*
 Stream 流式调用：text/thinking 增量经 onChunk 实时透出；tool_use 的
 input 由 input_json_delta 按 content block index 聚合（index 含 text/
-thinking 块，tool 下标按 tool_use 出现顺序另行递增分配）。用量来自
+thinking 块，tool 下标按 tool_use 出现顺序另行递增分配），名称在
+content_block_start 即以 NameDelta 透出（对齐 openai 协议的流式契约：
+消费者凭流式增量即可拿到工具名）。用量来自
 message_start（input 侧）与 message_delta（output 侧）两段。
 */
 func (p *Provider) Stream(ctx context.Context, req *types.ModelRequest, onChunk provider.ModelChunkHandler) (*types.ModelResponse, error) {
@@ -362,12 +367,19 @@ stream:
 			if ev.Message != nil && ev.Message.Usage != nil {
 				usage.InputTokens = ev.Message.Usage.InputTokens
 				usage.CacheReadInputTokens = ev.Message.Usage.CacheReadInputTokens
+				usage.CacheCreationInputTokens = ev.Message.Usage.CacheCreationInputTokens
 			}
 		case "content_block_start":
 			if ev.ContentBlock != nil && ev.ContentBlock.Type == "tool_use" {
 				acc[ev.Index] = &accCall{id: ev.ContentBlock.ID, name: ev.ContentBlock.Name}
 				blockIdxToTool[ev.Index] = toolSeq
 				toolSeq++
+				if err := emit(types.ModelChunk{ToolCalls: []types.ToolCallDelta{{
+					Index:     blockIdxToTool[ev.Index],
+					NameDelta: ev.ContentBlock.Name,
+				}}}); err != nil {
+					return nil, err
+				}
 			}
 		case "content_block_delta":
 			d := ev.Delta
@@ -403,6 +415,17 @@ stream:
 		case "message_delta":
 			if ev.Usage != nil {
 				usage.OutputTokens = ev.Usage.OutputTokens
+				// 新版协议与部分网关只在 message_delta 携带完整 usage——
+				// 非零才覆盖（官方旧行为该处只有 output_tokens）
+				if ev.Usage.InputTokens > 0 {
+					usage.InputTokens = ev.Usage.InputTokens
+				}
+				if ev.Usage.CacheReadInputTokens > 0 {
+					usage.CacheReadInputTokens = ev.Usage.CacheReadInputTokens
+				}
+				if ev.Usage.CacheCreationInputTokens > 0 {
+					usage.CacheCreationInputTokens = ev.Usage.CacheCreationInputTokens
+				}
 			}
 		case "message_stop":
 			break stream
