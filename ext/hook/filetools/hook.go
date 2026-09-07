@@ -11,7 +11,10 @@ package filetools
 
 import (
 	"context"
+	"encoding/base64"
 	"runtime"
+	"slices"
+	"strings"
 	"sync"
 
 	"github.com/xuanlv2002/ezloop/ext/fs"
@@ -21,14 +24,14 @@ import (
 type Hook struct {
 	fsys    fs.FileSystem
 	workDir string // terminal 执行目录（空 = 进程 cwd）
-	onImage func(path, mime string) string // 图片分支处理（nil = 报错不乱码）
+	onImage func(path, mime string) (text string, loadAsImage bool) // 图片分支裁决（nil = 默认插图）
 
 	mu    sync.Mutex
 	locks map[string]*sync.Mutex // per-path 修改队列
 }
 
 /* New 创建文件与终端工具 hook；WithWorkDir 可指定 terminal 执行目录，
-WithImageHandler 可接管 read_file 的图片分支。 */
+WithImageHandler 可裁决 read_file 的图片分支。 */
 func New(fsys fs.FileSystem, opts ...Option) *Hook {
 	h := &Hook{fsys: fsys, locks: make(map[string]*sync.Mutex)}
 	for _, o := range opts {
@@ -45,10 +48,11 @@ func WithWorkDir(dir string) Option {
 	return func(h *Hook) { h.workDir = dir }
 }
 
-/* WithImageHandler 接管 read_file 的图片分支：读到图片（魔数判定）时
-不再按文本分页（乱码），改返回 handler 的文本。宿主借此实现"图片进
-视觉上下文"或"引导外部识别工具"等产品语义。 */
-func WithImageHandler(fn func(path, mime string) string) Option {
+/* WithImageHandler 裁决 read_file 的图片分支：读到图片（魔数判定）时
+不再按文本分页（乱码）。loadAsImage=true 走默认的标记→OnLoop 转换
+（持久化 user 图片消息）；false 返回 text 作为普通工具结果（如无视觉
+模型引导改用识别工具）。 */
+func WithImageHandler(fn func(path, mime string) (text string, loadAsImage bool)) Option {
 	return func(h *Hook) { h.onImage = fn }
 }
 
@@ -61,6 +65,65 @@ func (h *Hook) OnStart(_ context.Context, state *types.LoopState) error {
 	state.Tools.Register(terminalTool(h.workDir))
 	injectOSHint(state)
 	return nil
+}
+
+/*
+OnLoop 把工具结果里的 image_loaded 标记转换为持久化的 user 图片消息：
+紧随 tool 消息插入 {Content:"[图片已加载: 路径]", Images:[base64]}，
+消息随历史落盘——重启后 provider 直接带图，无运行时推断。
+
+全协议通用：user+Images 是三家 provider 共同支持的通道（anthropic
+聚合进相邻 user 消息的 image block、openai 转 image_url parts）。
+
+幂等：标记在转换时即被替换消失；取消轮残留的标记落盘后由下次 Run
+的 OnLoop 补转换。文件缺失/超限时标记替换为失败说明，不插图。
+*/
+func (h *Hook) OnLoop(ctx context.Context, state *types.LoopState) error {
+	for i := 0; i < len(state.Messages); i++ {
+		m := &state.Messages[i]
+		if m.Role != types.RoleTool {
+			continue
+		}
+		loc := imageMarkRe.FindStringSubmatchIndex(m.Content)
+		if loc == nil {
+			continue
+		}
+		path := m.Content[loc[2]:loc[3]]
+		img, ok := h.loadImage(ctx, path)
+		note := "[图片已作为视觉内容加载，见相邻消息]"
+		if !ok {
+			note = "[图片加载失败：" + path + "（文件不存在、非图片或超大小上限）]"
+		}
+		var b strings.Builder
+		b.WriteString(m.Content[:loc[0]])
+		b.WriteString(m.Content[loc[1]:])
+		b.WriteString(note)
+		m.Content = b.String()
+		if !ok {
+			continue
+		}
+		msg := types.Message{
+			Role:    types.RoleUser,
+			Content: "[图片已加载: " + path + "]",
+			Images:  []types.ImagePart{img},
+		}
+		state.Messages = slices.Insert(state.Messages, i+1, msg)
+		i++ // 跳过刚插入的图片消息
+	}
+	return nil
+}
+
+/* loadImage 读盘并转为 ImagePart（魔数推 MIME、上限校验）。 */
+func (h *Hook) loadImage(ctx context.Context, path string) (types.ImagePart, bool) {
+	data, err := h.fsys.Read(ctx, path)
+	if err != nil || len(data) > readMaxImageBytes {
+		return types.ImagePart{}, false
+	}
+	mime := imageMime(data)
+	if mime == "" {
+		return types.ImagePart{}, false
+	}
+	return types.ImagePart{MimeType: mime, Data: base64.StdEncoding.EncodeToString(data)}, true
 }
 
 /*
