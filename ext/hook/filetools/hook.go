@@ -21,12 +21,14 @@ import (
 type Hook struct {
 	fsys    fs.FileSystem
 	workDir string // terminal 执行目录（空 = 进程 cwd）
+	onImage func(path, mime string) string // 图片分支处理（nil = 报错不乱码）
 
 	mu    sync.Mutex
 	locks map[string]*sync.Mutex // per-path 修改队列
 }
 
-/* New 创建文件与终端工具 hook；WithWorkDir 可指定 terminal 执行目录。 */
+/* New 创建文件与终端工具 hook；WithWorkDir 可指定 terminal 执行目录，
+WithImageHandler 可接管 read_file 的图片分支。 */
 func New(fsys fs.FileSystem, opts ...Option) *Hook {
 	h := &Hook{fsys: fsys, locks: make(map[string]*sync.Mutex)}
 	for _, o := range opts {
@@ -43,10 +45,17 @@ func WithWorkDir(dir string) Option {
 	return func(h *Hook) { h.workDir = dir }
 }
 
+/* WithImageHandler 接管 read_file 的图片分支：读到图片（魔数判定）时
+不再按文本分页（乱码），改返回 handler 的文本。宿主借此实现"图片进
+视觉上下文"或"引导外部识别工具"等产品语义。 */
+func WithImageHandler(fn func(path, mime string) string) Option {
+	return func(h *Hook) { h.onImage = fn }
+}
+
 func (h *Hook) Name() string { return "filetools" }
 
 func (h *Hook) OnStart(_ context.Context, state *types.LoopState) error {
-	state.Tools.Register(readTool(h.fsys))
+	state.Tools.Register(readTool(h))
 	state.Tools.Register(writeTool(h))
 	state.Tools.Register(editTool(h))
 	state.Tools.Register(terminalTool(h.workDir))
