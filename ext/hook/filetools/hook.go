@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/xuanlv2002/ezloop/event"
 	"github.com/xuanlv2002/ezloop/ext/fs"
 	"github.com/xuanlv2002/ezloop/types"
 )
@@ -67,6 +68,10 @@ func (h *Hook) OnStart(_ context.Context, state *types.LoopState) error {
 	return nil
 }
 
+/* EventImageLoaded 是图片进上下文事件（Data 为 []string 路径）：
+加载点即事实源——前端据此实时渲染，与历史 <image_loaded> 消息同款。 */
+const EventImageLoaded = event.EventType("filetools.image_loaded")
+
 /*
 OnLoop 把本轮工具批的 image_loaded 标记转换为持久化的 user 图片消息。
 
@@ -80,7 +85,7 @@ assistant 停止（批内 tool_use 的载体）。批内全部标记对应的图
 	</image_loaded>
 
 （Images 携带 base64），插在批的最后一条 tool 消息之后，随历史落盘
-——重启后 provider 直接带图。
+——重启后 provider 直接带图。插入成功即发 EventImageLoaded 事件。
 
 已入史的 tool 结果不改写：标记文本自解释（图片消息紧随其后），加载
 失败的标记留着（模型见标记无图自会重读）。不会重复加载：先有
@@ -122,6 +127,7 @@ func (h *Hook) OnLoop(ctx context.Context, state *types.LoopState) error {
 		Images: imgs,
 	}
 	state.Messages = slices.Insert(state.Messages, last+1, msg)
+	state.EmitEvent(EventImageLoaded, paths)
 	return nil
 }
 
