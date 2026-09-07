@@ -68,22 +68,35 @@ func (h *Hook) OnStart(_ context.Context, state *types.LoopState) error {
 }
 
 /*
-OnLoop 把工具结果里的 image_loaded 标记转换为持久化的 user 图片消息：
-紧随 tool 消息插入 {Content:"[图片已加载: 路径]", Images:[base64]}，
-消息随历史落盘——重启后 provider 直接带图，无运行时推断。
+OnLoop 把本轮工具批的 image_loaded 标记转换为持久化的 user 图片消息。
 
-全协议通用：user+Images 是三家 provider 共同支持的通道（anthropic
-聚合进相邻 user 消息的 image block、openai 转 image_url parts）。
+本轮批的边界由消息结构天然划定：从尾部向前收集 tool 消息，遇到第一条
+assistant 停止（批内 tool_use 的载体）。批内全部标记合并为一条 user
+消息 {Content:"[图片已加载: 路径…]", Images:[base64…]}，插在批的最后
+一条 tool 消息之后，随历史落盘——重启后 provider 直接带图。
 
-幂等：标记在转换时即被替换消失；取消轮残留的标记落盘后由下次 Run
-的 OnLoop 补转换。文件缺失/超限时标记替换为失败说明，不插图。
+免状态与增量语义：标记转换即抹除（重复 OnLoop 幂等）；assistant 边界
+之前的残留（取消轮落盘等）不回头补偿——模型看到标记文本无害，重新
+read_file 即可。文件缺失/超限时标记替换为失败说明，不插图。
 */
 func (h *Hook) OnLoop(ctx context.Context, state *types.LoopState) error {
-	for i := 0; i < len(state.Messages); i++ {
-		m := &state.Messages[i]
-		if m.Role != types.RoleTool {
-			continue
+	var toolIdx []int // 本轮批的 tool 消息下标（从尾往前收集）
+	for i := len(state.Messages) - 1; i >= 0; i-- {
+		if state.Messages[i].Role == types.RoleAssistant {
+			break
 		}
+		if state.Messages[i].Role == types.RoleTool {
+			toolIdx = append(toolIdx, i)
+		}
+	}
+	if len(toolIdx) == 0 {
+		return nil
+	}
+	slices.Reverse(toolIdx) // 恢复批内时间序（与 tool_use 对应顺序一致）
+	var imgs []types.ImagePart
+	var paths []string
+	for _, i := range toolIdx {
+		m := &state.Messages[i]
 		loc := imageMarkRe.FindStringSubmatchIndex(m.Content)
 		if loc == nil {
 			continue
@@ -99,17 +112,21 @@ func (h *Hook) OnLoop(ctx context.Context, state *types.LoopState) error {
 		b.WriteString(m.Content[loc[1]:])
 		b.WriteString(note)
 		m.Content = b.String()
-		if !ok {
-			continue
+		if ok {
+			imgs = append(imgs, img)
+			paths = append(paths, path)
 		}
-		msg := types.Message{
-			Role:    types.RoleUser,
-			Content: "[图片已加载: " + path + "]",
-			Images:  []types.ImagePart{img},
-		}
-		state.Messages = slices.Insert(state.Messages, i+1, msg)
-		i++ // 跳过刚插入的图片消息
 	}
+	if len(imgs) == 0 {
+		return nil
+	}
+	last := toolIdx[len(toolIdx)-1] // 恢复正序后，末位即批内最大下标
+	msg := types.Message{
+		Role:    types.RoleUser,
+		Content: "[图片已加载: " + strings.Join(paths, "、") + "]",
+		Images:  imgs,
+	}
+	state.Messages = slices.Insert(state.Messages, last+1, msg)
 	return nil
 }
 
