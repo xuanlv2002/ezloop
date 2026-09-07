@@ -56,18 +56,11 @@ func TestOnLoopConvertsMarkToImageMessage(t *testing.T) {
 	if want := base64.StdEncoding.EncodeToString(png1x1); img.Images[0].Data != want {
 		t.Fatalf("data mismatch")
 	}
-	if !strings.Contains(img.Content, "[图片已加载: /tmp/a.png]") {
+	if img.Content != "<image_loaded>\n/tmp/a.png\n</image_loaded>" {
 		t.Fatalf("content = %q", img.Content)
 	}
-	if strings.Contains(state.Messages[2].Content, "<image_loaded") {
-		t.Fatalf("mark should be replaced: %q", state.Messages[2].Content)
-	}
-	// 幂等：再跑一次不重复插入
-	if err := h.OnLoop(context.Background(), state); err != nil {
-		t.Fatalf("onloop 2: %v", err)
-	}
-	if len(state.Messages) != 4 {
-		t.Fatalf("idempotent rerun inserted again: %d", len(state.Messages))
+	if !strings.Contains(state.Messages[2].Content, `<image_loaded path="/tmp/a.png"/>`) {
+		t.Fatalf("tool result should keep mark verbatim: %q", state.Messages[2].Content)
 	}
 }
 
@@ -89,7 +82,7 @@ func TestOnLoopMergesBatchMarks(t *testing.T) {
 	if img.Role != types.RoleUser || len(img.Images) != 2 {
 		t.Fatalf("merged msg = %+v", img)
 	}
-	if img.Content != "[图片已加载: /tmp/a.png、/tmp/b.png]" {
+	if img.Content != "<image_loaded>\n/tmp/a.png\n/tmp/b.png\n</image_loaded>" {
 		t.Fatalf("content = %q", img.Content)
 	}
 }
@@ -113,12 +106,12 @@ func TestOnLoopStopsAtAssistantBoundary(t *testing.T) {
 	if !strings.Contains(state.Messages[0].Content, "<image_loaded") {
 		t.Fatalf("stale mark should be left untouched: %q", state.Messages[0].Content)
 	}
-	if !strings.Contains(state.Messages[5].Content, "[图片已加载") {
+	if !strings.Contains(state.Messages[5].Content, "<image_loaded>\n/tmp/a.png") {
 		t.Fatalf("new mark should convert: %q", state.Messages[5].Content)
 	}
 }
 
-/* 文件缺失：标记替换为失败说明，不插图 */
+/* 文件缺失：tool 结果原样保留，不插图 */
 func TestOnLoopMissingFile(t *testing.T) {
 	h := New(fakeFS{files: map[string][]byte{}})
 	state := &types.LoopState{Messages: []types.Message{
@@ -131,8 +124,8 @@ func TestOnLoopMissingFile(t *testing.T) {
 	if len(state.Messages) != 2 {
 		t.Fatalf("missing file should not insert, got %d", len(state.Messages))
 	}
-	if !strings.Contains(state.Messages[1].Content, "加载失败") {
-		t.Fatalf("content = %q", state.Messages[1].Content)
+	if state.Messages[1].Content != imageLoadedMark("/gone.png") {
+		t.Fatalf("tool result should be untouched: %q", state.Messages[1].Content)
 	}
 }
 

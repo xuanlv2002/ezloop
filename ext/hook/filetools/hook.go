@@ -71,13 +71,21 @@ func (h *Hook) OnStart(_ context.Context, state *types.LoopState) error {
 OnLoop 把本轮工具批的 image_loaded 标记转换为持久化的 user 图片消息。
 
 本轮批的边界由消息结构天然划定：从尾部向前收集 tool 消息，遇到第一条
-assistant 停止（批内 tool_use 的载体）。批内全部标记合并为一条 user
-消息 {Content:"[图片已加载: 路径…]", Images:[base64…]}，插在批的最后
-一条 tool 消息之后，随历史落盘——重启后 provider 直接带图。
+assistant 停止（批内 tool_use 的载体）。批内全部标记对应的图片合并为
+一条 user 消息：
 
-免状态与增量语义：标记转换即抹除（重复 OnLoop 幂等）；assistant 边界
-之前的残留（取消轮落盘等）不回头补偿——模型看到标记文本无害，重新
-read_file 即可。文件缺失/超限时标记替换为失败说明，不插图。
+	<image_loaded>
+	C:/路径1
+	C:/路径2
+	</image_loaded>
+
+（Images 携带 base64），插在批的最后一条 tool 消息之后，随历史落盘
+——重启后 provider 直接带图。
+
+已入史的 tool 结果不改写：标记文本自解释（图片消息紧随其后），加载
+失败的标记留着（模型见标记无图自会重读）。不会重复加载：先有
+assistant（tool_use）才有 tool 结果，上一批之后必有新的 assistant
+边界挡住回扫；取消轮残留进历史的标记不补偿。
 */
 func (h *Hook) OnLoop(ctx context.Context, state *types.LoopState) error {
 	var toolIdx []int // 本轮批的 tool 消息下标（从尾往前收集）
@@ -96,25 +104,11 @@ func (h *Hook) OnLoop(ctx context.Context, state *types.LoopState) error {
 	var imgs []types.ImagePart
 	var paths []string
 	for _, i := range toolIdx {
-		m := &state.Messages[i]
-		loc := imageMarkRe.FindStringSubmatchIndex(m.Content)
-		if loc == nil {
-			continue
-		}
-		path := m.Content[loc[2]:loc[3]]
-		img, ok := h.loadImage(ctx, path)
-		note := "[图片已作为视觉内容加载，见相邻消息]"
-		if !ok {
-			note = "[图片加载失败：" + path + "（文件不存在、非图片或超大小上限）]"
-		}
-		var b strings.Builder
-		b.WriteString(m.Content[:loc[0]])
-		b.WriteString(m.Content[loc[1]:])
-		b.WriteString(note)
-		m.Content = b.String()
-		if ok {
-			imgs = append(imgs, img)
-			paths = append(paths, path)
+		for _, match := range imageMarkRe.FindAllStringSubmatch(state.Messages[i].Content, -1) {
+			if img, ok := h.loadImage(ctx, match[1]); ok {
+				imgs = append(imgs, img)
+				paths = append(paths, match[1])
+			}
 		}
 	}
 	if len(imgs) == 0 {
@@ -122,9 +116,10 @@ func (h *Hook) OnLoop(ctx context.Context, state *types.LoopState) error {
 	}
 	last := toolIdx[len(toolIdx)-1] // 恢复正序后，末位即批内最大下标
 	msg := types.Message{
-		Role:    types.RoleUser,
-		Content: "[图片已加载: " + strings.Join(paths, "、") + "]",
-		Images:  imgs,
+		Role: types.RoleUser,
+		Content: "<" + imageLoadedTag + ">\n" + strings.Join(paths, "\n") +
+			"\n</" + imageLoadedTag + ">",
+		Images: imgs,
 	}
 	state.Messages = slices.Insert(state.Messages, last+1, msg)
 	return nil

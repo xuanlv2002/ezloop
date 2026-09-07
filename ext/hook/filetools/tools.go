@@ -91,11 +91,15 @@ func readTool(h *Hook) types.Tool {
 		})
 }
 
+/* imageLoadedTag 是图片消息的包裹标签名：user 消息形如
+<image_loaded>\n路径…\n</image_loaded>，Images 携带 base64（前端按
+它识别渲染缩略图行）。工具结果内的机器标记是自闭合变体（见下）。 */
+const imageLoadedTag = "image_loaded"
+
 /* imageLoadedMark 是工具结果内的机器标记：OnLoop 识别并转换为
-user 图片消息（转换后即从历史消失，只在"结果入史→回边"窗口存在）。
-路径须转义引号。 */
+user 图片消息（只在"结果入史→回边"窗口存在，历史里保留原样）。 */
 func imageLoadedMark(path string) string {
-	return fmt.Sprintf(`<image_loaded path=%q/>`, path)
+	return fmt.Sprintf(`<%s path=%q/>`, imageLoadedTag, path)
 }
 
 /* imageMarkRe 解析标记里的路径。 */
