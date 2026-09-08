@@ -11,18 +11,19 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"regexp"
 	"runtime"
 	"strings"
 	"unicode/utf8"
 
 	"golang.org/x/text/encoding/simplifiedchinese"
 
-	"github.com/xuanlv2002/ezloop/ext/fs"
 	"github.com/xuanlv2002/ezloop/types"
 )
 
 const readDefaultLines = 2000 // 默认读取行数，防大文件一次撑爆上下文
 const readMaxChars = 200_000  // 单次结果字符上限：分页限行不限字节，单行超长（minified）文件需另行设防
+const readMaxImageBytes = 8 << 20 // 图片字节上限：超出不进上下文（多模态请求体积防线）
 
 type readArgs struct {
 	Path   string `json:"path" desc:"文件路径"`
@@ -35,9 +36,14 @@ readTool 按行分页读取：offset/limit 缺省时读前 2000 行；未读完�
 标注剩余行数与续读 offset，模型据此翻页——大文件对模型不再是只有
 前半截的黑盒。行数之外另有整段字符上限（readMaxChars）：少数超长行
 文件（压缩 JS、单行大 JSON）行数不多但体量巨大，按字符截断兜底。
+图片文件走魔数判定的独立分支（文本分页对图片是乱码）：默认返回
+imageLoadedMark 标记，由本 hook 的 OnLoop 在回边转换为持久化的
+user 图片消息（全协议经 user+Images 通道携带）；装配 WithImageHandler
+时由回调决定（loadAsImage=false 返回宿主文案，如无视觉引导）。
 */
-func readTool(fsys fs.FileSystem) types.Tool {
-	return types.NewTool("read_file", "按行读取文件内容（默认第 1 行起 2000 行，可指定 offset/limit 翻页；单次最多返回 200000 字符，超出截断）",
+func readTool(h *Hook) types.Tool {
+	fsys := h.fsys
+	return types.NewTool("read_file", "按行读取文件内容（默认第 1 行起 2000 行，可指定 offset/limit 翻页；单次最多返回 200000 字符，超出截断；图片文件作为图片消息进入上下文，不返回文本）",
 		func(ctx context.Context, in *readArgs) (string, error) {
 			if in.Path == "" {
 				return "", errors.New("path is required")
@@ -51,6 +57,18 @@ func readTool(fsys fs.FileSystem) types.Tool {
 			data, err := fsys.Read(ctx, in.Path)
 			if err != nil {
 				return "", err
+			}
+			if mime := imageMime(data); mime != "" {
+				if len(data) > readMaxImageBytes {
+					return fmt.Sprintf("[图片 %s 大小 %d 字节，超出 %d 字节上限，无法加载进上下文；请改用文件路径引用或外部识别工具]",
+						in.Path, len(data), readMaxImageBytes), nil
+				}
+				if h.onImage != nil {
+					if text, load := h.onImage(in.Path, mime); !load {
+						return text, nil
+					}
+				}
+				return imageLoadedMark(in.Path), nil
 			}
 			lines := splitLines(string(data))
 			if len(lines) == 0 {
@@ -71,6 +89,35 @@ func readTool(fsys fs.FileSystem) types.Tool {
 			}
 			return out, nil
 		})
+}
+
+/* imageLoadedTag 是图片消息的包裹标签名：user 消息形如
+<image_loaded>\n路径…\n</image_loaded>，Images 携带 base64（前端按
+它识别渲染缩略图行）。工具结果内的机器标记是自闭合变体（见下）。 */
+const imageLoadedTag = "image_loaded"
+
+/* imageLoadedMark 是工具结果内的机器标记：OnLoop 识别并转换为
+user 图片消息（只在"结果入史→回边"窗口存在，历史里保留原样）。 */
+func imageLoadedMark(path string) string {
+	return fmt.Sprintf(`<%s path=%q/>`, imageLoadedTag, path)
+}
+
+/* imageMarkRe 解析标记里的路径。 */
+var imageMarkRe = regexp.MustCompile(`<image_loaded path="([^"]*)"/>`)
+
+/* imageMime 按魔数判定常见图片格式（覆盖多模态 API 的主流接受集）。 */
+func imageMime(b []byte) string {
+	switch {
+	case len(b) > 3 && b[0] == 0xFF && b[1] == 0xD8 && b[2] == 0xFF:
+		return "image/jpeg"
+	case len(b) > 8 && string(b[:8]) == "\x89PNG\r\n\x1a\n":
+		return "image/png"
+	case len(b) > 6 && (string(b[:6]) == "GIF87a" || string(b[:6]) == "GIF89a"):
+		return "image/gif"
+	case len(b) > 12 && string(b[:4]) == "RIFF" && string(b[8:12]) == "WEBP":
+		return "image/webp"
+	}
+	return ""
 }
 
 /* splitLines 按 \n 切行并剥掉 \r；结尾换行不产生末尾空行。 */

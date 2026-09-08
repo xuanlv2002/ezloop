@@ -90,6 +90,22 @@ func LoadDir(ctx context.Context, fsys fs.FileSystem, dir string) ([]Skill, erro
 }
 
 /*
+DirOf 从 SKILL.md 的 FS 路径提取技能目录名（技能的稳定身份：
+frontmatter name 仅是显示名，启停/删除按目录名定位）。
+形如 dir/<skill>/SKILL.md → <skill>；无目录层级时返回空串。
+*/
+func DirOf(path string) string {
+	i := strings.LastIndex(path, "/")
+	if i < 0 {
+		return ""
+	}
+	if j := strings.LastIndex(path[:i], "/"); j >= 0 {
+		return path[j+1 : i]
+	}
+	return path[:i]
+}
+
+/*
 splitFrontmatter 剥离 YAML frontmatter（首行 --- 到闭合 ---），只取顶层
 扁平字段（name/description/license 等；嵌套块如 metadata: 的缩进子行跳过）。
 不引 YAML 依赖——规范必填字段都是扁平标量。无 frontmatter 时原样返回。
