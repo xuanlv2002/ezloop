@@ -24,7 +24,7 @@ import (
 
 type Hook struct {
 	fsys    fs.FileSystem
-	workDir string // terminal 执行目录（空 = 进程 cwd）
+	workDir string                                                  // terminal 执行目录（空 = 进程 cwd）
 	onImage func(path, mime string) (text string, loadAsImage bool) // 图片分支裁决（nil = 默认插图）
 
 	mu    sync.Mutex

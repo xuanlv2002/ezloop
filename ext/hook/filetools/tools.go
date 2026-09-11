@@ -21,8 +21,8 @@ import (
 	"github.com/xuanlv2002/ezloop/types"
 )
 
-const readDefaultLines = 2000 // 默认读取行数，防大文件一次撑爆上下文
-const readMaxChars = 200_000  // 单次结果字符上限：分页限行不限字节，单行超长（minified）文件需另行设防
+const readDefaultLines = 2000     // 默认读取行数，防大文件一次撑爆上下文
+const readMaxChars = 200_000      // 单次结果字符上限：分页限行不限字节，单行超长（minified）文件需另行设防
 const readMaxImageBytes = 8 << 20 // 图片字节上限：超出不进上下文（多模态请求体积防线）
 
 type readArgs struct {
@@ -43,7 +43,7 @@ user 图片消息（全协议经 user+Images 通道携带）；装配 WithImageH
 */
 func readTool(h *Hook) types.Tool {
 	fsys := h.fsys
-	return types.NewTool("read_file", "按行读取文件内容（默认第 1 行起 2000 行，可指定 offset/limit 翻页；单次最多返回 200000 字符，超出截断；图片文件作为图片消息进入上下文，不返回文本）",
+	return types.NewTool("read_file", "按行读取文件内容（默认第 1 行起 2000 行，可指定 offset/limit 翻页；单次最多返回 200000 字符，超出截断；图片文件作为图片消息进入上下文，不返回文本；二进制文件（pdf/ppt/压缩包/可执行等）暂不支持读取）",
 		func(ctx context.Context, in *readArgs) (string, error) {
 			if in.Path == "" {
 				return "", errors.New("path is required")
@@ -69,6 +69,10 @@ func readTool(h *Hook) types.Tool {
 					}
 				}
 				return imageLoadedMark(in.Path), nil
+			}
+			// 二进制兜底：乱码干爆上下文，直接拒读
+			if kind, bin := binaryKind(in.Path, data); bin {
+				return fmt.Sprintf("read_file 当前暂不支持读取 %s 类型文件（%s）", kind, in.Path), nil
 			}
 			lines := splitLines(string(data))
 			if len(lines) == 0 {
