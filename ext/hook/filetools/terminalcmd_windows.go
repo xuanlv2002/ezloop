@@ -1,3 +1,5 @@
+//go:build windows
+
 /*
 Windows 构造 terminal 子进程：整条命令行经 SysProcAttr.CmdLine 原样
 交给 CreateProcess，引号语义完全归 cmd 解析。不能走 exec.Args——
@@ -7,7 +9,6 @@ findstr /C:"a b"、powershell -Command "…" 全部损坏。chcp 65001
 预置在此（控制台与重定向文件转 UTF-8；审批按模型原始命令判定，
 不受此包装影响）。
 */
-//go:build windows
 
 package filetools
 

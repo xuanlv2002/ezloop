@@ -2,7 +2,10 @@ module github.com/xuanlv2002/ezloop
 
 go 1.25.0
 
-require github.com/modelcontextprotocol/go-sdk v1.7.0
+require (
+	github.com/modelcontextprotocol/go-sdk v1.7.0
+	golang.org/x/text v0.34.0
+)
 
 require (
 	github.com/google/jsonschema-go v0.4.3 // indirect
@@ -12,6 +15,5 @@ require (
 	golang.org/x/oauth2 v0.35.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
 	golang.org/x/sys v0.41.0 // indirect
-	golang.org/x/text v0.34.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 )
