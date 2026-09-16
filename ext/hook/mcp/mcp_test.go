@@ -133,6 +133,44 @@ func TestHookFullLoop(t *testing.T) {
 	}
 }
 
+// 注入式 router：hook OnEnd 不关闭连接（生命周期归调用方）；自建式才关。
+func TestHookWithRouterKeepsConnections(t *testing.T) {
+	state := &types.LoopState{Tools: types.NewToolRegistry(), Metadata: map[string]any{}}
+
+	r := NewRouter(nil)
+	r.clients["db"] = &mockClient{tools: []ToolDef{{Name: "query"}}}
+	h := NewHookWithRouter(r, nil)
+	if err := h.OnEnd(context.Background(), state); err != nil {
+		t.Fatalf("onend: %v", err)
+	}
+	if !r.Connected("db") {
+		t.Fatal("injected router must keep connections after hook OnEnd")
+	}
+
+	owned := NewHook(Config{})
+	owned.router.clients["db"] = &mockClient{}
+	if err := owned.OnEnd(context.Background(), state); err != nil {
+		t.Fatalf("owned onend: %v", err)
+	}
+	if owned.router.Connected("db") {
+		t.Fatal("owned router must be closed on hook OnEnd")
+	}
+}
+
+// ReplaceServers：被移除 server 的连接随之关闭，保留的不受影响。
+func TestReplaceServersDropsRemoved(t *testing.T) {
+	r := NewRouter(nil)
+	r.clients["a"] = &mockClient{}
+	r.clients["b"] = &mockClient{}
+	r.ReplaceServers([]ServerConfig{{Name: "b"}, {Name: "c"}})
+	if r.Connected("a") {
+		t.Fatal("removed server connection must be dropped")
+	}
+	if !r.Connected("b") {
+		t.Fatal("kept server connection must survive")
+	}
+}
+
 // mcp-go in-process 会话：真实协议栈的 list/call。
 func TestSDKSession(t *testing.T) {
 	srv := mcpserver.NewMCPServer("t", "1.0")

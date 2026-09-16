@@ -11,15 +11,29 @@ Hook 是 mcp 扩展对外的唯一入口：
 
 	core.NewAgent(p, core.WithHooks(mcp.NewHook(cfg)))
 
-OnStart 注册 router，OnLoop 热加载配置，OnEnd 关闭连接。
+OnStart 注册 router，OnLoop 热加载配置，OnEnd 关闭连接（仅自建
+router 时——注入式连接常驻，生命周期归调用方）。
+
+系统级单例场景用 NewHookWithRouter 注入共享 router：多个 agent
+（多 session）与宿主 API 共用同一连接池。
 */
 type Hook struct {
 	router *Router
 	cfg    Config
+	owns   bool // router 是否自建（自建才在 OnEnd 关闭）
 }
 
 func NewHook(cfg Config) *Hook {
-	return &Hook{router: NewRouter(cfg.Servers), cfg: cfg}
+	return &Hook{router: NewRouter(cfg.Servers), cfg: cfg, owns: true}
+}
+
+/*
+NewHookWithRouter 注入外部 router：hook 只使用不拥有——OnEnd 不关
+连接，生命周期归调用方（系统级单例）。reload 语义同 Config.Reload，
+每轮迭代回边前热加载 server 列表。
+*/
+func NewHookWithRouter(r *Router, reload func(context.Context) ([]ServerConfig, error)) *Hook {
+	return &Hook{router: r, cfg: Config{Reload: reload}}
 }
 
 func (h *Hook) Name() string { return "mcp" }
@@ -48,5 +62,8 @@ func (h *Hook) OnLoop(ctx context.Context, _ *types.LoopState) error {
 }
 
 func (h *Hook) OnEnd(_ context.Context, _ *types.LoopState) error {
+	if !h.owns {
+		return nil
+	}
 	return h.router.Close()
 }
