@@ -1,6 +1,6 @@
 /*
-sdk.go 基于官方 go-sdk (modelcontextprotocol/go-sdk) 的接入封装，
-提供开箱即用的 ServerConfig.Factory。
+sdk.go 基于 mark3labs/mcp-go 的接入封装，提供开箱即用的
+ServerConfig.Factory，覆盖三种传输：Streamable HTTP / SSE / stdio。
 */
 package mcp
 
@@ -8,11 +8,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
-	"os/exec"
+	"os"
+	"strings"
 	"time"
 
-	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/mark3labs/mcp-go/client"
+	"github.com/mark3labs/mcp-go/client/transport"
+	"github.com/mark3labs/mcp-go/mcp"
 )
 
 const (
@@ -23,120 +25,151 @@ const (
 
 /*
 StreamableHTTP 返回连接 Streamable HTTP MCP server 的 Factory。
-headers 会附加到每个 HTTP 请求（如 Authorization）。
+headers 会附加到每个 HTTP 请求（如 Authorization）。mcp-go 默认不建立
+standalone GET SSE 流（WithContinuousListening 才开启），ezloop 只消费
+ListTools/CallTool 的请求-响应，恰好够用。
 */
 func StreamableHTTP(endpoint string, headers map[string]string) func(ServerConfig) (Client, error) {
 	return func(ServerConfig) (Client, error) {
-		httpClient := http.DefaultClient
+		var opts []transport.StreamableHTTPCOption
 		if len(headers) > 0 {
-			httpClient = &http.Client{Transport: &headerTransport{
-				base:    http.DefaultTransport,
-				headers: headers,
-			}}
+			opts = append(opts, transport.WithHTTPHeaders(headers))
 		}
-		transport := &sdkmcp.StreamableClientTransport{
-			Endpoint:   endpoint,
-			HTTPClient: httpClient,
-			// 不建立 standalone GET SSE 流：部分 server
-			// 对 GET 既不返回 SSE 也不返回 405，连接会一直挂起直到超时。
-			// ezloop 只消费 ListTools/CallTool，不需要 server 主动推送。
-			DisableStandaloneSSE: true,
+		tr, err := transport.NewStreamableHTTP(endpoint, opts...)
+		if err != nil {
+			return nil, fmt.Errorf("connect: %w", err)
 		}
-		return connectSDK(transport)
+		return handshake(client.NewClient(tr))
 	}
 }
 
-/* Stdio 返回通过子进程 stdio 连接 MCP server 的 Factory。 */
-func Stdio(name string, args ...string) func(ServerConfig) (Client, error) {
+/* SSE 返回连接旧协议 HTTP SSE MCP server 的 Factory。 */
+func SSE(endpoint string, headers map[string]string) func(ServerConfig) (Client, error) {
 	return func(ServerConfig) (Client, error) {
-		return connectSDK(&sdkmcp.CommandTransport{Command: exec.Command(name, args...)})
+		var opts []transport.ClientOption
+		if len(headers) > 0 {
+			opts = append(opts, transport.WithHeaders(headers))
+		}
+		tr, err := transport.NewSSE(endpoint, opts...)
+		if err != nil {
+			return nil, fmt.Errorf("connect: %w", err)
+		}
+		return handshake(client.NewClient(tr))
 	}
 }
 
-/* WrapSession 将官方 SDK 的已连接会话包装为 mcp.Client（高级用法/测试用）。 */
-func WrapSession(session *sdkmcp.ClientSession) Client { return &sdkClient{session: session} }
+/*
+Stdio 返回通过子进程 stdio 连接 MCP server 的 Factory。command 是要
+执行的命令，args 是传给它的参数；env 是附加环境变量——在继承父进程
+环境的基础上合并（同名以附加为准），调用方只需填增量。
+*/
+func Stdio(command string, env map[string]string, args ...string) func(ServerConfig) (Client, error) {
+	return func(ServerConfig) (Client, error) {
+		merged := os.Environ()
+		for k, v := range env {
+			merged = append(merged, k+"="+v)
+		}
+		return handshake(client.NewClient(transport.NewStdio(command, merged, args...)))
+	}
+}
 
-func connectSDK(transport sdkmcp.Transport) (Client, error) {
-	client := sdkmcp.NewClient(&sdkmcp.Implementation{Name: clientName, Version: clientVersion}, nil)
+/*
+handshake 走完 Start + Initialize（10s 超时整体覆盖），失败即关闭连接
+防子进程/会话泄漏。ProtocolVersion 取 initialize 握手可协商的最高
+legacy 版本，server 会按自身支持下修。
+*/
+func handshake(c *client.Client) (Client, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), connectTimeout)
 	defer cancel()
-	session, err := client.Connect(ctx, transport, nil)
-	if err != nil {
-		return nil, fmt.Errorf("mcp: connect: %w", err)
+	if err := c.Start(ctx); err != nil {
+		_ = c.Close()
+		return nil, fmt.Errorf("connect: %w", err)
 	}
-	return &sdkClient{session: session}, nil
+	req := mcp.InitializeRequest{}
+	req.Params.ProtocolVersion = mcp.LATEST_LEGACY_PROTOCOL_VERSION
+	req.Params.ClientInfo = mcp.Implementation{Name: clientName, Version: clientVersion}
+	if _, err := c.Initialize(ctx, req); err != nil {
+		_ = c.Close()
+		return nil, fmt.Errorf("initialize: %w", err)
+	}
+	return &mcpGoClient{client: c}, nil
 }
 
-/* sdkClient 用官方 SDK 的 ClientSession 实现 ezloop 的 mcp.Client。 */
-type sdkClient struct {
-	session *sdkmcp.ClientSession
+/* mcpGoClient 用 mcp-go 的 client 实现 ezloop 的 mcp.Client。 */
+type mcpGoClient struct {
+	client *client.Client
 }
 
-var _ Client = (*sdkClient)(nil)
-var _ Closer = (*sdkClient)(nil)
+var _ Client = (*mcpGoClient)(nil)
+var _ Closer = (*mcpGoClient)(nil)
 
-func (c *sdkClient) ListTools(ctx context.Context) ([]ToolDef, error) {
-	res, err := c.session.ListTools(ctx, nil)
+func (c *mcpGoClient) ListTools(ctx context.Context) ([]ToolDef, error) {
+	res, err := c.client.ListTools(ctx, mcp.ListToolsRequest{})
 	if err != nil {
 		return nil, err
 	}
 	out := make([]ToolDef, 0, len(res.Tools))
 	for _, tool := range res.Tools {
 		def := ToolDef{Name: tool.Name, Description: tool.Description}
-		if tool.InputSchema != nil {
-			if b, merr := json.Marshal(tool.InputSchema); merr == nil {
-				def.ArgsSchema = b
-			}
+		if schema := rawSchema(tool); len(schema) > 0 {
+			def.ArgsSchema = schema
 		}
 		out = append(out, def)
 	}
 	return out, nil
 }
 
-func (c *sdkClient) CallTool(ctx context.Context, name string, args json.RawMessage) (string, error) {
-	var arguments any
-	if len(args) > 0 {
-		if err := json.Unmarshal(args, &arguments); err != nil {
-			return "", fmt.Errorf("mcp: invalid args for %s: %w", name, err)
-		}
+/* rawSchema 优先取反序列化保真的 RawInputSchema，缺失再结构化序列化。 */
+func rawSchema(tool mcp.Tool) json.RawMessage {
+	if len(tool.RawInputSchema) > 0 {
+		return tool.RawInputSchema
 	}
-	res, err := c.session.CallTool(ctx, &sdkmcp.CallToolParams{Name: name, Arguments: arguments})
+	b, err := json.Marshal(tool.InputSchema)
+	if err != nil {
+		return nil
+	}
+	return b
+}
+
+func (c *mcpGoClient) CallTool(ctx context.Context, name string, args json.RawMessage) (string, error) {
+	req := mcp.CallToolRequest{}
+	req.Params.Name = name
+	if len(args) > 0 {
+		var arguments any
+		if err := json.Unmarshal(args, &arguments); err != nil {
+			return "", fmt.Errorf("invalid args for %s: %w", name, err)
+		}
+		req.Params.Arguments = arguments
+	}
+	res, err := c.client.CallTool(ctx, req)
 	if err != nil {
 		return "", err
 	}
 	return resultText(res), nil
 }
 
-func (c *sdkClient) Close() error { return c.session.Close() }
+func (c *mcpGoClient) Close() error { return c.client.Close() }
 
-/* resultText 提取文本内容；结构化输出序列化为 JSON。 */
-func resultText(res *sdkmcp.CallToolResult) string {
+/*
+resultText 提取文本内容；结构化输出序列化为 JSON；工具级错误
+（IsError=true）以文本透传给模型自纠，不升格为 Go error。Content
+元素可能是 typed TextContent 也可能是 map 形态，双路覆盖。
+*/
+func resultText(res *mcp.CallToolResult) string {
 	if res.StructuredContent != nil {
 		if b, err := json.Marshal(res.StructuredContent); err == nil {
 			return string(b)
 		}
 	}
-	text := ""
+	var texts []string
 	for _, content := range res.Content {
-		if tc, ok := content.(*sdkmcp.TextContent); ok {
-			if text != "" {
-				text += "\n"
-			}
-			text += tc.Text
+		if tc, ok := mcp.AsTextContent(content); ok {
+			texts = append(texts, tc.Text)
+			continue
+		}
+		if s := mcp.GetTextFromContent(content); s != "" {
+			texts = append(texts, s)
 		}
 	}
-	return text
-}
-
-type headerTransport struct {
-	base    http.RoundTripper
-	headers map[string]string
-}
-
-func (t *headerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	clone := req.Clone(req.Context())
-	for k, v := range t.headers {
-		clone.Header.Set(k, v)
-	}
-	return t.base.RoundTrip(clone)
+	return strings.Join(texts, "\n")
 }

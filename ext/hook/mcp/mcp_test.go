@@ -7,7 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	mcpclient "github.com/mark3labs/mcp-go/client"
+	mcpserver "github.com/mark3labs/mcp-go/server"
+	"github.com/mark3labs/mcp-go/mcp"
 
 	"github.com/xuanlv2002/ezloop/core"
 	"github.com/xuanlv2002/ezloop/internal/testutil"
@@ -131,21 +133,19 @@ func TestHookFullLoop(t *testing.T) {
 	}
 }
 
-// 官方 go-sdk 内存会话：真实协议栈的 list/call。
+// mcp-go in-process 会话：真实协议栈的 list/call。
 func TestSDKSession(t *testing.T) {
-	server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "t"}, nil)
-	type greetArgs struct {
-		Name string `json:"name"`
+	srv := mcpserver.NewMCPServer("t", "1.0")
+	srv.AddTool(mcp.NewTool("greet", mcp.WithDescription("打招呼")),
+		func(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return mcp.NewToolResultText("hi " + req.GetString("name", "")), nil
+		})
+	rawClient, err := mcpclient.NewInProcessClient(srv)
+	if err != nil {
+		t.Fatalf("in-process: %v", err)
 	}
-	sdkmcp.AddTool(server, &sdkmcp.Tool{Name: "greet"}, func(_ context.Context, _ *sdkmcp.CallToolRequest, args greetArgs) (*sdkmcp.CallToolResult, any, error) {
-		return &sdkmcp.CallToolResult{
-			Content: []sdkmcp.Content{&sdkmcp.TextContent{Text: "hi " + args.Name}},
-		}, nil, nil
-	})
-	clientTransport, serverTransport := sdkmcp.NewInMemoryTransports()
-	go func() { _ = server.Run(context.Background(), serverTransport) }()
 
-	client, err := connectSDK(clientTransport)
+	client, err := handshake(rawClient)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
