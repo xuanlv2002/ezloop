@@ -66,7 +66,8 @@ func NewRouter(servers []ServerConfig) *Router {
 	return r
 }
 
-/* ReplaceServers 热加载 server 列表；工具 schema 不变，不影响缓存前缀。 */
+/* ReplaceServers 热加载 server 列表，被移除 server 的旧连接随之关闭；
+工具 schema 不变，不影响缓存前缀。 */
 func (r *Router) ReplaceServers(servers []ServerConfig) {
 	m := make(map[string]ServerConfig, len(servers))
 	for _, s := range servers {
@@ -74,7 +75,78 @@ func (r *Router) ReplaceServers(servers []ServerConfig) {
 	}
 	r.mu.Lock()
 	r.servers = m
+	var dropped []Client
+	for name, c := range r.clients {
+		if _, ok := m[name]; !ok {
+			dropped = append(dropped, c)
+			delete(r.clients, name)
+		}
+	}
 	r.mu.Unlock()
+	for _, c := range dropped {
+		if cl, ok := c.(Closer); ok {
+			_ = cl.Close()
+		}
+	}
+}
+
+/*
+Servers 返回当前配置的 server 清单副本（按名排序，不主动连接）。
+Connected 报告某 server 是否已有活跃连接。
+Drop 关闭并逐出单个 server 的连接（断开会话/失效自愈共用；
+下次调用按需重建）。
+Tools 懒建连（或复用）拉取某 server 的全量工具清单——不做 allow
+过滤，白名单只约束模型路径（mcp_router 的 tool_list/tool_call），
+用户与 API 直调看全部。
+Call 直调一个工具，同样不做 allow 过滤；args 是 JSON 对象
+（空/null 视为无参）。
+*/
+func (r *Router) Servers() []ServerConfig {
+	r.mu.RLock()
+	out := make([]ServerConfig, 0, len(r.servers))
+	for _, cfg := range r.servers {
+		out = append(out, cfg)
+	}
+	r.mu.RUnlock()
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+func (r *Router) Connected(name string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	_, ok := r.clients[name]
+	return ok
+}
+
+func (r *Router) Drop(name string) {
+	r.mu.Lock()
+	c, ok := r.clients[name]
+	if ok {
+		delete(r.clients, name)
+	}
+	r.mu.Unlock()
+	if ok {
+		if cl, ok := c.(Closer); ok {
+			_ = cl.Close()
+		}
+	}
+}
+
+func (r *Router) Tools(ctx context.Context, server string) ([]ToolDef, error) {
+	client, err := r.client(server)
+	if err != nil {
+		return nil, err
+	}
+	return client.ListTools(ctx)
+}
+
+func (r *Router) Call(ctx context.Context, server, tool string, args json.RawMessage) (string, error) {
+	client, err := r.client(server)
+	if err != nil {
+		return "", err
+	}
+	return client.CallTool(ctx, tool, args)
 }
 
 /* Close 释放所有已建立的连接。 */

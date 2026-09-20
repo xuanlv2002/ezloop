@@ -7,7 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	mcpclient "github.com/mark3labs/mcp-go/client"
+	mcpserver "github.com/mark3labs/mcp-go/server"
+	"github.com/mark3labs/mcp-go/mcp"
 
 	"github.com/xuanlv2002/ezloop/core"
 	"github.com/xuanlv2002/ezloop/internal/testutil"
@@ -131,21 +133,57 @@ func TestHookFullLoop(t *testing.T) {
 	}
 }
 
-// 官方 go-sdk 内存会话：真实协议栈的 list/call。
-func TestSDKSession(t *testing.T) {
-	server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "t"}, nil)
-	type greetArgs struct {
-		Name string `json:"name"`
-	}
-	sdkmcp.AddTool(server, &sdkmcp.Tool{Name: "greet"}, func(_ context.Context, _ *sdkmcp.CallToolRequest, args greetArgs) (*sdkmcp.CallToolResult, any, error) {
-		return &sdkmcp.CallToolResult{
-			Content: []sdkmcp.Content{&sdkmcp.TextContent{Text: "hi " + args.Name}},
-		}, nil, nil
-	})
-	clientTransport, serverTransport := sdkmcp.NewInMemoryTransports()
-	go func() { _ = server.Run(context.Background(), serverTransport) }()
+// 注入式 router：hook OnEnd 不关闭连接（生命周期归调用方）；自建式才关。
+func TestHookWithRouterKeepsConnections(t *testing.T) {
+	state := &types.LoopState{Tools: types.NewToolRegistry(), Metadata: map[string]any{}}
 
-	client, err := connectSDK(clientTransport)
+	r := NewRouter(nil)
+	r.clients["db"] = &mockClient{tools: []ToolDef{{Name: "query"}}}
+	h := NewHookWithRouter(r, nil)
+	if err := h.OnEnd(context.Background(), state); err != nil {
+		t.Fatalf("onend: %v", err)
+	}
+	if !r.Connected("db") {
+		t.Fatal("injected router must keep connections after hook OnEnd")
+	}
+
+	owned := NewHook(Config{})
+	owned.router.clients["db"] = &mockClient{}
+	if err := owned.OnEnd(context.Background(), state); err != nil {
+		t.Fatalf("owned onend: %v", err)
+	}
+	if owned.router.Connected("db") {
+		t.Fatal("owned router must be closed on hook OnEnd")
+	}
+}
+
+// ReplaceServers：被移除 server 的连接随之关闭，保留的不受影响。
+func TestReplaceServersDropsRemoved(t *testing.T) {
+	r := NewRouter(nil)
+	r.clients["a"] = &mockClient{}
+	r.clients["b"] = &mockClient{}
+	r.ReplaceServers([]ServerConfig{{Name: "b"}, {Name: "c"}})
+	if r.Connected("a") {
+		t.Fatal("removed server connection must be dropped")
+	}
+	if !r.Connected("b") {
+		t.Fatal("kept server connection must survive")
+	}
+}
+
+// mcp-go in-process 会话：真实协议栈的 list/call。
+func TestSDKSession(t *testing.T) {
+	srv := mcpserver.NewMCPServer("t", "1.0")
+	srv.AddTool(mcp.NewTool("greet", mcp.WithDescription("打招呼")),
+		func(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return mcp.NewToolResultText("hi " + req.GetString("name", "")), nil
+		})
+	rawClient, err := mcpclient.NewInProcessClient(srv)
+	if err != nil {
+		t.Fatalf("in-process: %v", err)
+	}
+
+	client, err := handshake(rawClient)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}

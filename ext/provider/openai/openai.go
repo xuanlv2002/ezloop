@@ -399,12 +399,8 @@ func (p *Provider) Stream(ctx context.Context, req *types.ModelRequest, onChunk 
 
 	for i := 0; i < len(acc); i++ {
 		c := acc[i]
-		args := json.RawMessage(c.args)
-		if len(args) == 0 {
-			args = json.RawMessage("{}")
-		}
 		final.ToolCalls = append(final.ToolCalls, types.ToolCall{
-			ID: c.id, Name: c.name, Args: args,
+			ID: c.id, Name: c.name, Args: provutil.SafeArgs([]byte(c.args)),
 		})
 	}
 	return &final, nil
