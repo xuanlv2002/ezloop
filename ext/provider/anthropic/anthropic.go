@@ -447,10 +447,7 @@ stream:
 		if c == nil {
 			continue
 		}
-		args := json.RawMessage(c.args)
-		if len(args) == 0 {
-			args = json.RawMessage("{}")
-		}
+		args := provutil.SafeArgs([]byte(c.args))
 		final.ToolCalls = append(final.ToolCalls, types.ToolCall{ID: c.id, Name: c.name, Args: args})
 	}
 	return &final, nil

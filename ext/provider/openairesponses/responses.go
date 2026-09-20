@@ -421,11 +421,7 @@ stream:
 	}
 	for _, id := range order {
 		c := acc[id]
-		args := json.RawMessage(c.args)
-		if len(args) == 0 {
-			args = json.RawMessage("{}")
-		}
-		final.ToolCalls = append(final.ToolCalls, types.ToolCall{ID: c.id, Name: c.name, Args: args})
+		final.ToolCalls = append(final.ToolCalls, types.ToolCall{ID: c.id, Name: c.name, Args: provutil.SafeArgs([]byte(c.args))})
 	}
 	return &final, nil
 }

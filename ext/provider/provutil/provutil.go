@@ -8,6 +8,7 @@ package provutil
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -49,4 +50,26 @@ func SSEScanner(r io.Reader) *bufio.Scanner {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64<<10), 1<<20)
 	return sc
+}
+
+/*
+SafeArgs 保证工具参数是可 marshal 的合法 JSON。流式增量逐块拼接的参数
+在超长输出下可能损坏（缺块/乱块/截断），非法字节直接进 json.RawMessage
+会连锁炸掉三处：sessionstore 落盘 marshal 失败（整轮静默丢失）、
+openai 协议重发请求被上游 400、前端工具卡乱码。非法时截断预览包成
+{"_corrupted_args": "..."}——工具以缺参报错回传，模型自纠重发。
+*/
+func SafeArgs(raw []byte) json.RawMessage {
+	if len(raw) == 0 {
+		return json.RawMessage("{}")
+	}
+	if json.Valid(raw) {
+		return json.RawMessage(raw)
+	}
+	preview := string(raw)
+	if len(preview) > 1024 {
+		preview = preview[:1024] + "…(truncated)"
+	}
+	esc, _ := json.Marshal(preview)
+	return json.RawMessage(`{"_corrupted_args":` + string(esc) + `}`)
 }
