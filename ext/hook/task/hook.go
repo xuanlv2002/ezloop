@@ -104,9 +104,11 @@ OnStart 自动注册 task 工具并注入使用说明：仅当首条为 system �
 func (h *Hook) OnStart(_ context.Context, state *types.LoopState) error {
 	state.Tools.Register(Tool())
 	if len(state.Messages) > 0 && state.Messages[0].Role == types.RoleSystem {
-		state.Messages[0].Content += "\n\n<tool-guide>\ntask：可并行或较复杂的子任务交给 task 分身隔离执行（工具集相同、" +
-			"过程互不干扰，最终结果直接回传）。超长任务尤其适合：分身可自行压缩上下文持续运行。" +
-			"任务描述须自包含（分身看不到本轮对话之外的语境）。\n</tool-guide>"
+		state.Messages[0].Content += "\n\n<tool-guide>\ntask：可并行、相互独立、或会产生大量中间输出的子任务交给 task 分身隔离执行" +
+			"（工具集相同、过程互不干扰，最终结果直接回传），主上下文只留结论不留过程——" +
+			"检索类、批量生成类、多方案试探类子任务尤其适合；超长任务同样适合，分身可自行压缩上下文持续运行。" +
+			"任务描述必须自包含（分身看不到本轮对话之外的语境）：写清目标、输入、涉及的文件绝对路径与期望的返回格式。" +
+			"同批无依赖的子任务一次并行发多个。\n</tool-guide>"
 	}
 	return nil
 }

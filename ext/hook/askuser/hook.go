@@ -49,9 +49,10 @@ func (h *Hook) Name() string { return "askuser" }
 func (h *Hook) OnStart(_ context.Context, state *types.LoopState) error {
 	state.Tools.Register(Tool())
 	if len(state.Messages) > 0 && state.Messages[0].Role == types.RoleSystem {
-		state.Messages[0].Content += "\n\n<tool-guide>\nask_user：缺少必要信息、需要澄清或确认方向时向用户提问，不要替用户假设。" +
-			"需要用户做选择时用 options 给出候选（如 [\"执行\",\"否决\",\"修改\"]），用户可点选或自由输入；" +
-			"多步或有风险的任务，先用 options 提交计划请用户处置，获批后再动手。\n</tool-guide>"
+		state.Messages[0].Content += "\n\n<tool-guide>\nask_user：缺少必要信息、需要澄清或确认方向时向用户提问，不要替用户假设关键参数。" +
+			"需要选择时用 options 给出候选（如 [\"执行\",\"否决\",\"修改\"]），用户可点选也可自由输入；" +
+			"多步或有风险的任务，先用 options 提交计划获批后再动手。" +
+			"问题要具体到用户一句话能答上来，不要一次抛一堆泛泛的问题。\n</tool-guide>"
 	}
 	return nil
 }

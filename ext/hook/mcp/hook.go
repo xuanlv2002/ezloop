@@ -43,8 +43,10 @@ func (h *Hook) Name() string { return "mcp" }
 func (h *Hook) OnStart(_ context.Context, state *types.LoopState) error {
 	state.Tools.Register(h.router)
 	if len(state.Messages) > 0 && state.Messages[0].Role == types.RoleSystem {
-		state.Messages[0].Content += "\n\n<tool-guide>\nmcp_router：访问外部能力（已配置的 MCP server）统一入口，" +
-			"先 mcp_list / tool_list 发现可用能力，再 tool_call 调用；内置工具能做的事不必绕道 MCP。\n</tool-guide>"
+		state.Messages[0].Content += "\n\n<tool-guide>\nmcp_router：访问外部能力（已配置的 MCP server）的统一入口。" +
+			"用法两步：先 mcp_list 看服务清单、tool_list 拉取目标服务的工具清单（含各工具参数 schema），" +
+			"再 tool_call 调用——不要凭记忆猜工具名或参数。内置工具能做的事不必绕道 MCP。" +
+			"服务清单以 system 的 <mcp> 段为准，轮内变更看 <resource_change>，不要读配置文件发现服务。\n</tool-guide>"
 	}
 	return nil
 }

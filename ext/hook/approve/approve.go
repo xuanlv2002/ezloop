@@ -68,8 +68,11 @@ func (h *Hook) Name() string { return "approve" }
 避免挪动消息序；宿主的 system hook 注册在首位即可承接）。 */
 func (h *Hook) OnStart(_ context.Context, state *types.LoopState) error {
 	if len(state.Messages) > 0 && state.Messages[0].Role == types.RoleSystem {
-		state.Messages[0].Content += "\n\n<tool-guide>\n审批：写操作等有副作用的工具调用会先请用户批准再执行；" +
-			"被拒绝时理由会作为工具结果返回，此时不要原样重试，先调整方案或询问用户。\n</tool-guide>"
+		state.Messages[0].Content += "\n\n<tool-guide>\n" +
+			"审批：写操作等有副作用的工具调用会先请用户批准再执行，等待是正常流程，" +
+			"不要为躲避审批改用其他工具变相完成同一操作。被拒绝时理由会作为工具结果返回：" +
+			"不要原样重试——先读理由，是方案问题就调整方案，是信息不足就 ask_user 澄清，" +
+			"用户明确不要就停手并说明现状。\n</tool-guide>"
 	}
 	return nil
 }
