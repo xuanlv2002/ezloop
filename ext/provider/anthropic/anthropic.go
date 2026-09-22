@@ -25,8 +25,12 @@ const DefaultBaseURL = "https://api.anthropic.com"
 /* DefaultTimeout 是单次请求（含流式全程）的默认超时。 */
 const DefaultTimeout = 5 * time.Minute
 
-/* DefaultMaxTokens 是 max_tokens 必填字段的默认值（协议要求）。 */
-const DefaultMaxTokens = 16384
+/* DefaultMaxTokens 是 max_tokens 必填字段的默认值（协议要求）。
+16384 偏小：思考模型的 thinking 也计入输出，写大文件的 write_file
+参数经常在中途被服务端截断（非法 JSON 被 SafeArgs 包成
+_corrupted_args，工具报 path is required）。65536 已验证
+BigModel/DeepSeek 的 anthropic 兼容端均接受。 */
+const DefaultMaxTokens = 65536
 
 /* APIVersion 是 anthropic-version 头（自定义 Headers 可覆盖）。 */
 const APIVersion = "2023-06-01"
