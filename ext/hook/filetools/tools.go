@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"golang.org/x/text/encoding/simplifiedchinese"
@@ -180,7 +181,8 @@ func editTool(h *Hook) types.Tool {
 }
 
 type terminalArgs struct {
-	Command string `json:"command" desc:"完整终端命令，语法须与当前系统一致"`
+	Command  string `json:"command" desc:"完整终端命令，语法须与当前系统一致"`
+	TimeoutS int    `json:"timeout_s" desc:"总超时秒数（默认 600，上限 3600）。超时杀进程树，已产出输出与超时标记照常返回"`
 }
 
 /*
@@ -205,9 +207,17 @@ func terminalTool(workDir string) types.Tool {
 			if strings.TrimSpace(in.Command) == "" {
 				return "", errors.New("command is required")
 			}
-			cmd := terminalCmd(ctx, in.Command, workDir)
+			timeout := clampTimeoutS(in.TimeoutS)
+			tctx, cancel := context.WithTimeout(ctx, timeout)
+			defer cancel()
+			cmd := terminalCmd(tctx, in.Command, workDir)
 			out, err := cmd.CombinedOutput()
 			text := strings.TrimSpace(decodeOutput(out))
+			if errors.Is(tctx.Err(), context.DeadlineExceeded) {
+				// 超时与退出码同权：作为正常结果返回（已产出输出 + 标记），
+				// 模型据此改用 term_* 或调大 timeout_s 重跑，不误判命令失败
+				return text + fmt.Sprintf("\n[超时 %s 后终止：命令未跑完；长驻/交互命令改用 term_* 系工具，或调大 timeout_s 重试]", timeout), nil
+			}
 			var exitErr *exec.ExitError
 			if errors.As(err, &exitErr) {
 				return text + fmt.Sprintf("\n[exit code %d]", exitErr.ExitCode()), nil
@@ -217,6 +227,17 @@ func terminalTool(workDir string) types.Tool {
 			}
 			return text, nil
 		})
+}
+
+/* clampTimeoutS 归一总超时：0/负 = 默认 10 分钟，上限 1 小时。 */
+func clampTimeoutS(s int) time.Duration {
+	if s <= 0 {
+		s = 600
+	}
+	if s > 3600 {
+		s = 3600
+	}
+	return time.Duration(s) * time.Second
 }
 
 /*
@@ -240,8 +261,10 @@ func decodeOutput(b []byte) string {
 func terminalDesc() string {
 	if runtime.GOOS == "windows" {
 		return "在系统终端执行命令（当前系统 Windows，cmd 语法：dir、type、findstr、&、&&、|）；" +
-			"非零退出码时输出与错误码一并返回，据此修正命令"
+			"非零退出码时输出与错误码一并返回，据此修正命令。总超时默认 10 分钟（timeout_s 可调，上限 1 小时），" +
+			"超时终止并带回已产出输出；长驻/交互命令用 term_* 系工具"
 	}
 	return "在系统终端执行命令（当前系统 " + runtime.GOOS + "，POSIX sh 语法：ls、cat、grep、管道与 &&）；" +
-		"非零退出码时输出与错误码一并返回，据此修正命令"
+		"非零退出码时输出与错误码一并返回，据此修正命令。总超时默认 10 分钟（timeout_s 可调，上限 1 小时），" +
+		"超时终止并带回已产出输出；长驻/交互命令用 term_* 系工具"
 }
