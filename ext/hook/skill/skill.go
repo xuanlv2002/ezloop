@@ -75,7 +75,8 @@ func LoadDir(ctx context.Context, fsys fs.FileSystem, dir string) ([]Skill, erro
 		if name == "" {
 			name = e.Name
 		}
-		desc := strings.TrimSpace(meta["description"])
+		// 块标量多行值折叠单行（清单展示语境换行无意义）
+		desc := strings.Join(strings.Fields(meta["description"]), " ")
 		if desc == "" {
 			desc = firstLine(rest) // 容错：frontmatter 漏写时回落正文首行
 		}
@@ -106,9 +107,10 @@ func DirOf(path string) string {
 }
 
 /*
-splitFrontmatter 剥离 YAML frontmatter（首行 --- 到闭合 ---），只取顶层
-扁平字段（name/description/license 等；嵌套块如 metadata: 的缩进子行跳过）。
-不引 YAML 依赖——规范必填字段都是扁平标量。无 frontmatter 时原样返回。
+splitFrontmatter 剥离 YAML frontmatter（首行 --- 到闭合 ---），取顶层
+扁平字段（name/description/license 等），支持块标量值（| 与 > 家族，
+description 常用多行写法）；嵌套块（如 metadata:）的缩进子行跳过。
+不引 YAML 依赖——只覆盖规范技能文件用到的子集。无 frontmatter 时原样返回。
 */
 func splitFrontmatter(body string) (map[string]string, string) {
 	lines := strings.Split(body, "\n")
@@ -124,19 +126,109 @@ func splitFrontmatter(body string) (map[string]string, string) {
 			rest = strings.TrimPrefix(rest, "\n") // 去 frontmatter 后的首个空行
 			return meta, rest
 		}
-		// 跳过缩进行（嵌套块的子项，如 metadata.author）
+		// 跳过缩进行（嵌套块的子项，如 metadata.author；块标量值走 collectBlock）
 		if raw != strings.TrimLeft(raw, " \t") {
 			continue
 		}
-		if k, v, ok := strings.Cut(line, ":"); ok {
-			k = strings.TrimSpace(k)
-			v = strings.Trim(strings.TrimSpace(v), `"'`)
-			if k != "" && v != "" {
-				meta[k] = v
-			}
+		k, v, ok := strings.Cut(line, ":")
+		if !ok {
+			continue
+		}
+		k = strings.TrimSpace(k)
+		if k == "" {
+			continue
+		}
+		if style := blockStyle(v); style != 0 {
+			block, next := collectBlock(lines, i+1, indentOf(raw), style)
+			meta[k] = block
+			i = next - 1
+			continue
+		}
+		v = strings.Trim(strings.TrimSpace(v), `"'`)
+		if v != "" {
+			meta[k] = v
 		}
 	}
 	return nil, body // frontmatter 未闭合，视为普通正文
+}
+
+/*
+blockStyle 判断值是否是块标量指示符（| 与 > 家族，可带 -/+ 修饰与
+缩进指示数字），返回 '|' 或 '>'，非块标量返回 0。行内注释先剥离。
+*/
+func blockStyle(v string) byte {
+	if i := strings.Index(v, " #"); i >= 0 {
+		v = v[:i]
+	}
+	v = strings.TrimSpace(v)
+	if v == "" || (v[0] != '|' && v[0] != '>') {
+		return 0
+	}
+	for _, c := range v[1:] {
+		if c != '-' && c != '+' && (c < '0' || c > '9') && c != ' ' && c != '\t' {
+			return 0
+		}
+	}
+	return v[0]
+}
+
+/*
+collectBlock 收集块标量的值：从 start 起取所有缩进深于 key 的行（空行
+属块内），去掉公共缩进，到缩进回落（下一个同级 key 或闭合 ---）为止。
+'|' 字面保留换行，'>' 折叠为段（非空行空格连接，空行分段）。
+返回值与停止行索引。
+*/
+func collectBlock(lines []string, start, keyIndent int, style byte) (string, int) {
+	var block []string
+	blockIndent := -1
+	i := start
+	for ; i < len(lines); i++ {
+		raw := lines[i]
+		if strings.TrimSpace(raw) == "" {
+			block = append(block, "")
+			continue
+		}
+		ind := indentOf(raw)
+		if ind <= keyIndent {
+			break
+		}
+		if blockIndent < 0 {
+			blockIndent = ind
+		}
+		strip := min(blockIndent, ind) // 防御：比首行更浅的行按自身缩进取
+		block = append(block, raw[strip:])
+	}
+	for len(block) > 0 && block[len(block)-1] == "" { // 尾部空行 clip
+		block = block[:len(block)-1]
+	}
+	if style == '|' {
+		return strings.Join(block, "\n"), i
+	}
+	var paras []string
+	var cur []string
+	for _, l := range block {
+		if strings.TrimSpace(l) == "" {
+			if len(cur) > 0 {
+				paras = append(paras, strings.Join(cur, " "))
+				cur = nil
+			}
+			continue
+		}
+		cur = append(cur, l)
+	}
+	if len(cur) > 0 {
+		paras = append(paras, strings.Join(cur, " "))
+	}
+	return strings.Join(paras, "\n"), i
+}
+
+/* indentOf 数行首空格数（YAML 缩进只用空格）。 */
+func indentOf(raw string) int {
+	n := 0
+	for n < len(raw) && raw[n] == ' ' {
+		n++
+	}
+	return n
 }
 
 /* firstLine 取正文首个非空行（# 标题去前缀），截 60 rune。 */

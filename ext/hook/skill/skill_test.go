@@ -126,6 +126,36 @@ func TestDescriptionTruncate(t *testing.T) {
 	}
 }
 
+// 块标量 description：| 与 >- 家族取缩进正文为值，不回显指示符。
+func TestBlockScalarDescription(t *testing.T) {
+	fsys := fs.NewLocal(t.TempDir())
+	_ = fsys.Write(context.Background(), "skills/writer/SKILL.md", []byte(
+		"---\nname: khazix-writer\ndescription: |\n  技术文档写作规范，\n  面向工程师的收尾整理\n---\n正文"))
+	_ = fsys.Write(context.Background(), "skills/freak/SKILL.md", []byte(
+		"---\nname: neat-freak\ndescription: >-\n  知识治理\n  收尾技能\n---\n正文"))
+
+	skills, err := LoadDir(context.Background(), fsys, "skills")
+	if err != nil || len(skills) != 2 {
+		t.Fatalf("skills: %+v err=%v", skills, err)
+	}
+	byName := map[string]Skill{}
+	for _, s := range skills {
+		byName[s.Name] = s
+	}
+	if d := byName["khazix-writer"].Description; d != "技术文档写作规范， 面向工程师的收尾整理" {
+		t.Fatalf("literal block desc: %q", d)
+	}
+	if d := byName["neat-freak"].Description; d != "知识治理 收尾技能" {
+		t.Fatalf("folded block desc: %q", d)
+	}
+
+	// 解析边界：块后同级字段与闭合符正常衔接
+	meta, rest := splitFrontmatter("---\nname: a\ndescription: |\n  line1\n  line2\nlicense: MIT\n---\nbody")
+	if meta["description"] != "line1\nline2" || meta["license"] != "MIT" || rest != "body" {
+		t.Fatalf("block then sibling: meta=%+v rest=%q", meta, rest)
+	}
+}
+
 // frontmatter 解析边界：未闭合 / 缺失 / CRLF。
 func TestSplitFrontmatter(t *testing.T) {
 	if _, rest := splitFrontmatter("no fm\nbody"); rest != "no fm\nbody" {
