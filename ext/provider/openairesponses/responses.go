@@ -23,7 +23,7 @@ import (
 
 const DefaultBaseURL = "https://api.deepseek.com"
 
-/* DefaultTimeout 是单次请求（含流式全程）的默认超时。 */
+/* DefaultTimeout 是默认超时：流式=空闲超时（两批 SSE 数据之间），非流式=单次请求全程。 */
 const DefaultTimeout = 5 * time.Minute
 
 type Options struct {
@@ -35,7 +35,7 @@ type Options struct {
 	Headers map[string]string
 	// Client 可选，默认 http.DefaultClient。
 	Client *http.Client
-	// Timeout 单次请求（含流式全程读 body）的超时，默认 5 分钟。
+	// Timeout 流式=空闲超时（连续无数据的时长，超长思考不受限）；非流式=单次请求全程超时。默认 5 分钟。
 	Timeout time.Duration
 }
 
@@ -300,10 +300,13 @@ onChunk 实时透出；function_call 参数按 item 聚合——call_id/name 以
 output_item.added 为准，done 事件兜底回填（部分端点只在 done 给全）。
 */
 func (p *Provider) Stream(ctx context.Context, req *types.ModelRequest, onChunk provider.ModelChunkHandler) (*types.ModelResponse, error) {
-	ctx, cancel := context.WithTimeout(ctx, p.opts.Timeout)
-	defer cancel()
+	// 空闲超时：连续 Timeout 无任何数据（断流/网关挂死）才取消请求；
+	// 数据持续到达则不限总时长（超长思考合法）。等响应头阶段无保护，
+	// 由调用方 ctx cancel 兜底（前端取消轮）。
+	iw, ictx := provutil.NewIdleWatch(ctx, p.opts.Timeout)
+	defer iw.Stop()
 	instr, input := toInput(req.Messages)
-	resp, err := p.post(ctx, &respRequest{
+	resp, err := p.post(ictx, &respRequest{
 		Model: p.opts.Model, Instructions: instr, Input: input,
 		Tools: toRespTools(req.Tools), Stream: true,
 	})
@@ -314,6 +317,7 @@ func (p *Provider) Stream(ctx context.Context, req *types.ModelRequest, onChunk 
 	if err := provutil.CheckStatus("responses", resp); err != nil {
 		return nil, err
 	}
+	iw.Touch()
 
 	final := types.ModelResponse{}
 	// function_call 聚合：item_id → 调用；order 保持注册序（delta 事件只带 item_id）。
@@ -326,6 +330,7 @@ func (p *Provider) Stream(ctx context.Context, req *types.ModelRequest, onChunk 
 	scanner := provutil.SSEScanner(resp.Body)
 stream:
 	for scanner.Scan() {
+		iw.Touch()
 		line := scanner.Bytes()
 		if !bytes.HasPrefix(line, []byte("data:")) {
 			continue
@@ -417,7 +422,7 @@ stream:
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("responses: read stream: %w", err)
+		return nil, provutil.WrapStreamErr("responses", err, iw, p.opts.Timeout)
 	}
 	for _, id := range order {
 		c := acc[id]

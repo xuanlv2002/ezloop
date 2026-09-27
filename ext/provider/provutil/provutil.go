@@ -8,10 +8,14 @@ package provutil
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"sync/atomic"
+	"time"
 )
 
 /* HTTPError 是非 2xx 响应的结构化错误；Proto 用于错误前缀（"openai" 等）。 */
@@ -50,6 +54,88 @@ func SSEScanner(r io.Reader) *bufio.Scanner {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64<<10), 1<<20)
 	return sc
+}
+
+/*
+IdleWatch 是流式空闲看门狗：连续 idle 无任何数据（断流/网关挂死）时
+cancel 请求 ctx（读 body 随即断出），数据持续到达则不限总时长（超长
+思考合法）。响应到达后 Touch 一次，此后每收到一批数据（scanner.Scan
+返回 true）Touch 续期；流读完后 Stop。客户端响应没有读 deadline 的
+官方 API，以 cancel 实现。
+*/
+type IdleWatch struct {
+	cancel   context.CancelFunc
+	idle     time.Duration
+	timedOut atomic.Bool
+	ch       chan struct{}
+}
+
+/* NewIdleWatch 挂载看门狗并返回其派生 ctx（idle<=0 时为无操作看门狗）。 */
+func NewIdleWatch(ctx context.Context, idle time.Duration) (*IdleWatch, context.Context) {
+	if idle <= 0 {
+		return &IdleWatch{}, ctx
+	}
+	cctx, cancel := context.WithCancel(ctx)
+	w := &IdleWatch{cancel: cancel, idle: idle, ch: make(chan struct{}, 1)}
+	go w.loop(cctx)
+	return w, cctx
+}
+
+/* Touch 续期（非阻塞；看门狗未激活时无操作）。 */
+func (w *IdleWatch) Touch() {
+	if w.ch == nil {
+		return
+	}
+	select {
+	case w.ch <- struct{}{}:
+	default:
+	}
+}
+
+/* Stop 停看门狗（流读完后调用，正常/错误路径都要；幂等）。 */
+func (w *IdleWatch) Stop() {
+	if w.cancel != nil {
+		w.cancel()
+	}
+}
+
+/* TimedOut 报告是否因空闲超时触发（区别于调用方主动 cancel）。 */
+func (w *IdleWatch) TimedOut() bool { return w.timedOut.Load() }
+
+func (w *IdleWatch) loop(ctx context.Context) {
+	timer := time.NewTimer(w.idle)
+	defer timer.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-w.ch:
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			timer.Reset(w.idle)
+		case <-timer.C:
+			w.timedOut.Store(true)
+			w.cancel()
+			return
+		}
+	}
+}
+
+/*
+WrapStreamErr 包装流读收尾错误。空闲超时触发时错误标记为
+os.ErrDeadlineExceeded 并注明无数据时长——不透传 context.Canceled
+（modelretry 会把 Canceled 当用户取消而放弃重试）。三协议 provider
+的 scanner.Err() 统一走这。
+*/
+func WrapStreamErr(proto string, err error, w *IdleWatch, idle time.Duration) error {
+	if w.TimedOut() {
+		return fmt.Errorf("%s: read stream: no data for %s (idle timeout): %w", proto, idle, os.ErrDeadlineExceeded)
+	}
+	return fmt.Errorf("%s: read stream: %w", proto, err)
 }
 
 /*

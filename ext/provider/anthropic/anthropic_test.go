@@ -89,7 +89,7 @@ func TestHeadersAndEndpoint(t *testing.T) {
 	if gotPath != "/v1/messages" || gotKey != "sk" || gotVer != "2023-01-01" || gotCustom != "ez" {
 		t.Fatalf("path=%s key=%s ver=%s org=%s", gotPath, gotKey, gotVer, gotCustom)
 	}
-	if !strings.Contains(string(body), `"max_tokens":16384`) {
+	if !strings.Contains(string(body), `"max_tokens":65536`) {
 		t.Fatalf("max_tokens default: %s", body)
 	}
 }
