@@ -38,6 +38,10 @@ type Options struct {
 	// ReplayTool 回放工具名（如 read_file）：摘要尾部提示模型用它读回
 	// 卸载文件全文，该工具的结果自动免卸载。空串（默认）不提示。
 	ReplayTool string
+	// Abs 把 FS 内相对路径渲染为提示里给出的路径（宿主注入，如按 cwd
+	// 转绝对路径）。nil 时提示原样给相对路径——模型通常不知道 FS 的
+	// 挂载基准，会按自己的工作目录拼错，故宿主应注入。
+	Abs func(fsPath string) string
 }
 
 type Hook struct {
@@ -62,6 +66,11 @@ func WithSkip(names ...string) func(*Options) {
 /* WithReplayTool 指定回放工具名（如 read_file），摘要尾部提示模型用它回放全文。 */
 func WithReplayTool(name string) func(*Options) {
 	return func(o *Options) { o.ReplayTool = name }
+}
+
+/* WithAbs 注入路径渲染函数（提示里给可直接打开的绝对路径）。 */
+func WithAbs(fn func(string) string) func(*Options) {
+	return func(o *Options) { o.Abs = fn }
 }
 
 func (h *Hook) Name() string { return "offload" }
@@ -94,7 +103,11 @@ func (h *Hook) OnToolEnd(ctx context.Context, _ *types.LoopState, result *types.
 	if h.opts.ReplayTool != "" {
 		tail = "可使用 tool " + h.opts.ReplayTool + " 进行全量内容回放"
 	}
+	hint := path
+	if h.opts.Abs != nil {
+		hint = h.opts.Abs(path)
+	}
 	result.Content = fmt.Sprintf("%s\n\n[输出共 %d 字节，超出 %d 字节阈值，已卸载到 %s，%s]",
-		head, len(result.Content), h.opts.Threshold, path, tail)
+		head, len(result.Content), h.opts.Threshold, hint, tail)
 	return nil
 }
