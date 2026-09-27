@@ -169,6 +169,41 @@ func TestTerminalTool(t *testing.T) {
 	}
 }
 
+// 挂起命令按 timeout_s 杀树终止：已产出输出 + 超时标记作为正常结果返回
+// （不是工具错误，模型据此换 term_* 或加时重跑）。
+func TestTerminalTimeout(t *testing.T) {
+	if testing.Short() {
+		t.Skip("spawns a real shell")
+	}
+	fsys := fs.NewLocal(t.TempDir())
+	hook := New(fsys)
+	hang := "sleep 30"
+	if runtime.GOOS == "windows" {
+		hang = "ping -n 30 127.0.0.1 > nul"
+	}
+	p := testutil.Scripted(
+		testutil.ToolCalls(testutil.Call("1", "terminal", `{"command":"`+hang+`","timeout_s":1}`)),
+		testutil.Text("done"),
+	)
+	state, err := core.NewAgent(p, core.WithHooks(hook)).Run(context.Background(), "hi")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	for _, m := range state.Messages {
+		if m.Role != types.RoleTool {
+			continue
+		}
+		if m.Err != "" {
+			t.Fatalf("timeout must not be tool error: %q", m.Err)
+		}
+		if !strings.Contains(m.Content, "[超时") {
+			t.Fatalf("timeout marker missing: %q", m.Content)
+		}
+		return
+	}
+	t.Fatal("no tool result message")
+}
+
 // 引号参数原样执行：Windows 上 EscapeArg 的 \" 转义 cmd 不认，带引号
 // 的参数（findstr /C:"…"、含空格路径）曾整条损坏——回归护栏。
 func TestTerminalQuotedArgs(t *testing.T) {

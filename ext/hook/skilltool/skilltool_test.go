@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/xuanlv2002/ezloop/ext/fs"
+	"github.com/xuanlv2002/ezloop/ext/hook/skill"
 	"github.com/xuanlv2002/ezloop/types"
 )
 
@@ -97,6 +98,38 @@ func TestSkillToolLoad(t *testing.T) {
 	r, _ = tool.Invoke(ctx, []byte(`{"name":"nope"}`))
 	if !strings.Contains(r, "pdf") {
 		t.Fatalf("unknown skill should list available: %q", r)
+	}
+}
+
+/* 内嵌来源（非文件系统）与目录技能同表：可加载、进可用列表、不提磁盘路径。 */
+func TestSkillToolExtra(t *testing.T) {
+	ctx := context.Background()
+	fsys := memFS{}
+	_ = fsys.Write(ctx, "memory/skills/pdf/SKILL.md", []byte("---\nname: pdf---\n\nPDF 步骤"))
+
+	embedded := skill.ParseSkill("mcp-config", []byte("---\nname: mcp-config\ndescription: 配 MCP\n---\n\n改 mcp.json"))
+	h := New(fsys, "memory/skills", nil, WithExtra(func() []skill.Skill { return []skill.Skill{embedded} }))
+	state := newTestState(nil)
+	if err := h.OnStart(ctx, state); err != nil {
+		t.Fatal(err)
+	}
+	tool, err := state.Tools.Lookup(ToolName)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	r, _ := tool.Invoke(ctx, []byte(`{"name":"mcp-config"}`))
+	if !strings.Contains(r, "改 mcp.json") || !strings.Contains(r, "内建技能") {
+		t.Fatalf("embedded skill should load by name: %q", r)
+	}
+	if strings.Contains(r, "路径: ") {
+		t.Fatalf("embedded skill must not report a disk path: %q", r)
+	}
+
+	// 未知名列表里两来源都在
+	r, _ = tool.Invoke(ctx, []byte(`{"name":"nope"}`))
+	if !strings.Contains(r, "pdf") || !strings.Contains(r, "mcp-config") {
+		t.Fatalf("available list should merge both sources: %q", r)
 	}
 }
 

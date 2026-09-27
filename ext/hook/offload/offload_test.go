@@ -109,3 +109,28 @@ func TestReplayTool(t *testing.T) {
 		t.Fatal("replay tool output must be whitelisted from offload")
 	}
 }
+
+// WithAbs：提示路径经注入函数渲染（宿主给绝对路径），未注入时原样相对路径。
+func TestAbsHint(t *testing.T) {
+	hook := New(fs.NewLocal(t.TempDir()), WithAbs(func(p string) string { return "/data/" + p }))
+	result := &types.ToolResult{Name: "dump", Content: strings.Repeat("x", 10_000)}
+	if err := hook.OnToolEnd(context.Background(), newTestLoopState(), result); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.Content, "已卸载到 /data/.ezloop/offload/dump-") {
+		t.Fatalf("abs hint: %q", result.Content)
+	}
+
+	bare := New(fs.NewLocal(t.TempDir()))
+	result2 := &types.ToolResult{Name: "dump", Content: strings.Repeat("x", 10_000)}
+	if err := bare.OnToolEnd(context.Background(), newTestLoopState(), result2); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result2.Content, "已卸载到 .ezloop/offload/dump-") {
+		t.Fatalf("bare hint: %q", result2.Content)
+	}
+}
+
+func newTestLoopState() *types.LoopState {
+	return &types.LoopState{Messages: []types.Message{{Role: types.RoleUser, Content: "hi"}}}
+}

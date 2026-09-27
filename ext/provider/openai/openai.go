@@ -20,7 +20,7 @@ import (
 
 const DefaultBaseURL = "https://api.openai.com/v1"
 
-/* DefaultTimeout 是单次请求（含流式全程）的默认超时。 */
+/* DefaultTimeout 是默认超时：流式=空闲超时（两批 SSE 数据之间），非流式=单次请求全程。 */
 const DefaultTimeout = 5 * time.Minute
 
 type Options struct {
@@ -32,7 +32,7 @@ type Options struct {
 	Headers map[string]string
 	// Client 可选，默认 http.DefaultClient。
 	Client *http.Client
-	// Timeout 单次请求（含流式全程读 body）的超时，默认 5 分钟。
+	// Timeout 流式=空闲超时（连续无数据的时长，超长思考不受限）；非流式=单次请求全程超时。默认 5 分钟。
 	// 与调用方 ctx 的 deadline 取更早者；需要更长的流式任务请显式调大。
 	Timeout time.Duration
 }
@@ -272,8 +272,8 @@ type HTTPError = provutil.HTTPError
 
 /* Invoke 非流式调用。 */
 func (p *Provider) Invoke(ctx context.Context, req *types.ModelRequest) (*types.ModelResponse, error) {
-	// 超时包住整个调用（含读 body）；不用 http.Client.Timeout 是因为它对
-	// 流式不友好，这里 Invoke / Stream 统一用 context 控制。
+	// 全程超时包住非流式调用（含读 body）；不用 http.Client.Timeout 是
+	// 因为它对流式不友好。流式为空闲超时（见 Stream）。
 	ctx, cancel := context.WithTimeout(ctx, p.opts.Timeout)
 	defer cancel()
 	chatReq := &chatRequest{
@@ -306,9 +306,11 @@ Stream 流式调用：content 增量经 onChunk 实时透出，
 tool call 参数分片在内部聚合，最终返回完整响应。
 */
 func (p *Provider) Stream(ctx context.Context, req *types.ModelRequest, onChunk provider.ModelChunkHandler) (*types.ModelResponse, error) {
-	// 超时覆盖流式全程（建连 + SSE 读到 [DONE]），防服务端挂起拖死 loop。
-	ctx, cancel := context.WithTimeout(ctx, p.opts.Timeout)
-	defer cancel()
+	// 空闲超时：连续 Timeout 无任何数据（断流/网关挂死）才取消请求；
+	// 数据持续到达则不限总时长（超长思考合法）。等响应头阶段无保护，
+	// 由调用方 ctx cancel 兜底（前端取消轮）。
+	iw, ictx := provutil.NewIdleWatch(ctx, p.opts.Timeout)
+	defer iw.Stop()
 	chatReq := &chatRequest{
 		Model:         p.opts.Model,
 		Messages:      toChatMessages(req.Messages),
@@ -316,7 +318,7 @@ func (p *Provider) Stream(ctx context.Context, req *types.ModelRequest, onChunk 
 		Stream:        true,
 		StreamOptions: &streamOptions{IncludeUsage: true},
 	}
-	resp, err := p.post(ctx, chatReq)
+	resp, err := p.post(ictx, chatReq)
 	if err != nil {
 		return nil, err
 	}
@@ -324,6 +326,7 @@ func (p *Provider) Stream(ctx context.Context, req *types.ModelRequest, onChunk 
 	if err := provutil.CheckStatus("openai", resp); err != nil {
 		return nil, err
 	}
+	iw.Touch()
 
 	final := types.ModelResponse{}
 	// tool call 增量按 index 聚合。
@@ -334,6 +337,7 @@ func (p *Provider) Stream(ctx context.Context, req *types.ModelRequest, onChunk 
 
 	scanner := provutil.SSEScanner(resp.Body)
 	for scanner.Scan() {
+		iw.Touch()
 		line := scanner.Bytes()
 		if !bytes.HasPrefix(line, []byte("data:")) {
 			continue
@@ -394,7 +398,7 @@ func (p *Provider) Stream(ctx context.Context, req *types.ModelRequest, onChunk 
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("openai: read stream: %w", err)
+		return nil, provutil.WrapStreamErr("openai", err, iw, p.opts.Timeout)
 	}
 
 	for i := 0; i < len(acc); i++ {

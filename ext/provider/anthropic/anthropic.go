@@ -22,7 +22,7 @@ import (
 
 const DefaultBaseURL = "https://api.anthropic.com"
 
-/* DefaultTimeout 是单次请求（含流式全程）的默认超时。 */
+/* DefaultTimeout 是默认超时：流式=空闲超时（两批 SSE 数据之间），非流式=单次请求全程。 */
 const DefaultTimeout = 5 * time.Minute
 
 /* DefaultMaxTokens 是 max_tokens 必填字段的默认值（协议要求）。
@@ -44,7 +44,7 @@ type Options struct {
 	Headers map[string]string
 	// Client 可选，默认 http.DefaultClient。
 	Client *http.Client
-	// Timeout 单次请求（含流式全程读 body）的超时，默认 5 分钟。
+	// Timeout 流式=空闲超时（连续无数据的时长，超长思考不受限）；非流式=单次请求全程超时。默认 5 分钟。
 	Timeout time.Duration
 	// MaxTokens 单次响应生成上限（协议必填），默认 16384。
 	MaxTokens int
@@ -320,10 +320,13 @@ content_block_start 即以 NameDelta 透出（对齐 openai 协议的流式契�
 message_start（input 侧）与 message_delta（output 侧）两段。
 */
 func (p *Provider) Stream(ctx context.Context, req *types.ModelRequest, onChunk provider.ModelChunkHandler) (*types.ModelResponse, error) {
-	ctx, cancel := context.WithTimeout(ctx, p.opts.Timeout)
-	defer cancel()
+	// 空闲超时：连续 Timeout 无任何数据（断流/网关挂死）才取消请求；
+	// 数据持续到达则不限总时长（超长思考合法）。等响应头阶段无保护，
+	// 由调用方 ctx cancel 兜底（前端取消轮）。
+	iw, ictx := provutil.NewIdleWatch(ctx, p.opts.Timeout)
+	defer iw.Stop()
 	system, messages := toAnthropic(req.Messages)
-	resp, err := p.post(ctx, &antRequest{
+	resp, err := p.post(ictx, &antRequest{
 		Model: p.opts.Model, System: system, MaxTokens: p.opts.MaxTokens,
 		Messages: messages, Tools: toAntTools(req.Tools), Stream: true,
 	})
@@ -334,6 +337,7 @@ func (p *Provider) Stream(ctx context.Context, req *types.ModelRequest, onChunk 
 	if err := provutil.CheckStatus("anthropic", resp); err != nil {
 		return nil, err
 	}
+	iw.Touch()
 
 	final := types.ModelResponse{}
 	usage := antUsage{}
@@ -354,6 +358,7 @@ func (p *Provider) Stream(ctx context.Context, req *types.ModelRequest, onChunk 
 	scanner := provutil.SSEScanner(resp.Body)
 stream:
 	for scanner.Scan() {
+		iw.Touch()
 		line := scanner.Bytes()
 		if !bytes.HasPrefix(line, []byte("data:")) {
 			continue
@@ -436,7 +441,7 @@ stream:
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("anthropic: read stream: %w", err)
+		return nil, provutil.WrapStreamErr("anthropic", err, iw, p.opts.Timeout)
 	}
 
 	final.Usage = toUsage(&usage)
