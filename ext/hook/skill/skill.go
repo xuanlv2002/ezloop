@@ -71,23 +71,37 @@ func LoadDir(ctx context.Context, fsys fs.FileSystem, dir string) ([]Skill, erro
 			continue // 无 SKILL.md 的目录不是技能
 		}
 		meta, rest := splitFrontmatter(string(data))
-		name := strings.TrimSpace(meta["name"])
-		if name == "" {
-			name = e.Name
-		}
-		// 块标量多行值折叠单行（清单展示语境换行无意义）
-		desc := strings.Join(strings.Fields(meta["description"]), " ")
-		if desc == "" {
-			desc = firstLine(rest) // 容错：frontmatter 漏写时回落正文首行
-		}
-		skills = append(skills, Skill{
-			Name:         name,
-			Description:  desc,
-			Instructions: rest,
-			Path:         p,
-		})
+		skills = append(skills, parseSkill(e.Name, meta, rest, p))
 	}
 	return skills, nil
+}
+
+/*
+ParseSkill 从 SKILL.md 内容解析技能，供宿主内嵌技能加载（go:embed 等
+非 FileSystem 来源）。dir 是技能目录名（name 缺省回落与 Path 用）。
+*/
+func ParseSkill(dir string, data []byte) Skill {
+	meta, rest := splitFrontmatter(string(data))
+	return parseSkill(dir, meta, rest, dir+"/"+SkillFile)
+}
+
+/* parseSkill 是 LoadDir 与 ParseSkill 的公共组装。 */
+func parseSkill(dir string, meta map[string]string, rest, path string) Skill {
+	name := strings.TrimSpace(meta["name"])
+	if name == "" {
+		name = dir
+	}
+	// 块标量多行值折叠单行（清单展示语境换行无意义）
+	desc := strings.Join(strings.Fields(meta["description"]), " ")
+	if desc == "" {
+		desc = firstLine(rest) // 容错：frontmatter 漏写时回落正文首行
+	}
+	return Skill{
+		Name:         name,
+		Description:  desc,
+		Instructions: rest,
+		Path:         path,
+	}
 }
 
 /*
