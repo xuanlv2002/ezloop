@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"sync"
 	"time"
 
@@ -168,7 +169,84 @@ func (a *Agent) Run(ctx context.Context, input string, runOpts ...RunOption) (st
 			state.StopReason = types.StopMaxIteration
 		}
 	}
+	// 迭代上限软收尾：不硬截断——注入收尾提醒再调一次模型（不带工具），
+	// 让它基于已做的一切给用户一个总结性答复。StopReason 保持不变。
+	if state.StopReason == types.StopMaxIteration && ctx.Err() == nil {
+		if err := a.finalWrap(ctx, model, state); err != nil {
+			return state, a.fail(ctx, state, err)
+		}
+	}
 	return state, nil
+}
+
+/*
+EventFinalWrap 是软收尾开始事件（Data 为 MaxIterations）——消费方据此
+在 UI 上标明"正在总结收尾"（否则与普通模型调用无区别，看不出轮即将结束）。
+*/
+const EventFinalWrap = event.EventType("final_wrap")
+
+/*
+finalWrap 迭代上限到达后的收尾调用：追加一条 user 提醒（工具到此为止、
+直接输出最终总结），随后发一次不带工具的模型请求，答复入史。失败按模型
+调用失败处理（软收尾是尽力而为，但静默丢弃收尾会让轮以半截状态落盘）。
+*/
+func (a *Agent) finalWrap(ctx context.Context, model provider.ModelProvider, state *types.LoopState) error {
+	a.emit(state, EventFinalWrap, state.MaxIterations)
+	state.AppendMessage(types.Message{Role: types.RoleUser, Content: wrapNotice(state.MaxIterations)})
+	resp, err := a.callModelNoTools(ctx, model, state)
+	if err != nil {
+		return err
+	}
+	state.Usage.Add(resp.Usage)
+	state.AppendMessage(types.Message{
+		Role:      types.RoleAssistant,
+		Content:   resp.Content,
+		Reasoning: resp.Reasoning,
+	})
+	a.emit(state, event.EventModelEnd, resp)
+	return nil
+}
+
+/* wrapNotice 渲染收尾提醒（role=user 的系统记录，随轮落盘）。 */
+func wrapNotice(maxIter int) string {
+	return "（系统提醒：本轮已达到最大迭代次数 " + strconv.Itoa(maxIter) +
+		"，工具调用到此为止。请基于以上全部过程，直接输出给用户的最终总结答复——" +
+		"说明已完成什么、还剩什么未完成，不要再请求任何工具。）"
+}
+
+/*
+callModelNoTools 与 callModel 同构但请求不带工具：收尾调用专用的强制收敛——
+模型没有任何工具可调，只能输出文本结束。
+*/
+func (a *Agent) callModelNoTools(ctx context.Context, model provider.ModelProvider, state *types.LoopState) (*types.ModelResponse, error) {
+	req := &types.ModelRequest{Messages: state.Messages}
+	a.emit(state, event.EventModelStart, nil)
+	if a.streaming {
+		if sp, ok := model.(provider.StreamProvider); ok {
+			var partial types.ModelResponse
+			resp, err := sp.Stream(ctx, req, func(c types.ModelChunk) error {
+				if c.ReasoningDelta != "" {
+					partial.Reasoning += c.ReasoningDelta
+					a.emit(state, event.EventReasoningChunk, c.ReasoningDelta)
+				}
+				if c.ContentDelta != "" {
+					partial.Content += c.ContentDelta
+					a.emit(state, event.EventModelChunk, c.ContentDelta)
+				}
+				return nil
+			})
+			if err != nil && ctx.Err() != nil &&
+				(partial.Content != "" || partial.Reasoning != "") {
+				state.AppendMessage(types.Message{
+					Role:      types.RoleAssistant,
+					Content:   partial.Content,
+					Reasoning: partial.Reasoning,
+				})
+			}
+			return resp, err
+		}
+	}
+	return model.Invoke(ctx, req)
 }
 
 /*

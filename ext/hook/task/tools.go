@@ -12,7 +12,8 @@ import (
 )
 
 type taskArgs struct {
-	Task string `json:"task" desc:"子任务的完整描述，包含目标与验收标准"`
+	Task  string `json:"task" desc:"子任务的完整描述，包含目标与验收标准"`
+	Model string `json:"model,omitempty" desc:"可选：分身使用的模型名，取值以 system <models> 段的可用模型清单为准（省略 = 当前主模型；视觉子任务选标着支持视觉的）"`
 }
 
 /*
@@ -21,7 +22,7 @@ Invoke 不会被走到（防呆：未挂 Hook 时尽早暴露装配错误）。
 */
 func Tool() types.Tool {
 	return types.NewTool(ToolName,
-		"在隔离上下文中求解子任务：复刻当前模型与上下文独立运行，只把最终结果带回主对话。适合需要多步工具调用、过程细节无需回流的子问题。",
+		"在隔离上下文中求解子任务：复刻当前上下文独立运行，只把最终结果带回主对话。适合需要多步工具调用、过程细节无需回流的子问题；可用 model 参数指定分身模型（视觉任务选多模态、批量任务选小模型）。",
 		func(_ context.Context, _ *taskArgs) (string, error) {
 			return "", errors.New("task: hook not registered (task is intercepted by task.Hook)")
 		})

@@ -38,6 +38,10 @@ type Options struct {
 	MaxAttempts int
 	// BaseDelay 首次重试前等待，默认 500ms，之后指数翻倍。
 	BaseDelay time.Duration
+	// TotalBudget 重试总等待预算（不含请求本身的耗时），0 = 不限。
+	// 指数退避撞到剩余预算即封顶等待；预算耗尽放弃重试。并发分身
+	// 挤出 429 的场景靠它把重试拉长到分钟级而不是秒级连撞。
+	TotalBudget time.Duration
 	// RetryIf 决定一个错误是否重试，可按错误类型/文本/状态码任意匹配。
 	// 默认策略（见 defaultRetryable）：
 	//   - context 取消不重试；
@@ -50,6 +54,8 @@ type RetryProvider struct {
 	inner provider.ModelProvider
 	opts  Options
 	em    event.Emitter // 引擎组装时注入，可为 nil（直接 New 构造时）
+
+	waited time.Duration // 已用于退避的累计等待（TotalBudget 用）
 }
 
 /* New 返回包装后的 provider；若 inner 支持 Stream 则包装后同样支持。 */
@@ -149,11 +155,21 @@ func (r *RetryProvider) Stream(ctx context.Context, req *types.ModelRequest, onC
 	return nil, fmt.Errorf("modelretry: giving up: %w", lastErr)
 }
 
-/* backoff 发出重试事件后等待退避时间；cause 是上一次尝试的失败原因。 */
+/* backoff 发出重试事件后等待退避时间；cause 是上一次尝试的失败原因。
+TotalBudget 生效时按剩余预算封顶单次等待，预算耗尽返回错误放弃重试。 */
 func (r *RetryProvider) backoff(ctx context.Context, attempt int, cause error) error {
 	delay := r.opts.BaseDelay << (attempt - 1)
 	// 加 20% 抖动，避免并发重试形成共振。
 	delay += time.Duration(float64(delay) * 0.2 * rand.Float64())
+	if r.opts.TotalBudget > 0 {
+		remain := r.opts.TotalBudget - r.waited
+		if remain <= 0 {
+			return fmt.Errorf("modelretry: retry budget (%s) exhausted: %w", r.opts.TotalBudget, cause)
+		}
+		if delay > remain {
+			delay = remain
+		}
+	}
 	if r.em != nil {
 		r.em(EventRetry, &RetryInfo{
 			Attempt:     attempt + 1,
@@ -168,6 +184,7 @@ func (r *RetryProvider) backoff(ctx context.Context, attempt int, cause error) e
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-timer.C:
+		r.waited += delay
 		return nil
 	}
 }

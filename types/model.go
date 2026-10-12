@@ -4,6 +4,9 @@ package types
 type ModelRequest struct {
 	Messages []Message
 	Tools    []Tool
+	// ReasoningEffort 思考强度档位：空 = 不控制（用服务端默认）；
+	// none = 关闭思考；low/high/max = 强度档。各协议在请求侧自行映射。
+	ReasoningEffort string
 }
 
 /* ModelResponse 是模型单次响应：纯文本，或附带 tool calls 触发下一轮循环。 */

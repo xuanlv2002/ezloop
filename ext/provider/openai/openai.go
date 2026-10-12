@@ -62,11 +62,12 @@ func New(opts Options) *Provider {
 // ---- 协议结构 ----
 
 type chatRequest struct {
-	Model         string         `json:"model"`
-	Messages      []chatMessage  `json:"messages"`
-	Tools         []chatTool     `json:"tools,omitempty"`
-	Stream        bool           `json:"stream,omitempty"`
-	StreamOptions *streamOptions `json:"stream_options,omitempty"`
+	Model           string         `json:"model"`
+	Messages        []chatMessage  `json:"messages"`
+	Tools           []chatTool     `json:"tools,omitempty"`
+	Stream          bool           `json:"stream,omitempty"`
+	StreamOptions   *streamOptions `json:"stream_options,omitempty"`
+	ReasoningEffort string         `json:"reasoning_effort,omitempty"`
 }
 
 type streamOptions struct {
@@ -281,6 +282,7 @@ func (p *Provider) Invoke(ctx context.Context, req *types.ModelRequest) (*types.
 		Messages: toChatMessages(req.Messages),
 		Tools:    toChatTools(req.Tools),
 	}
+	provutil.ApplyEffort(&chatReq.ReasoningEffort, req.ReasoningEffort, false)
 	resp, err := p.post(ctx, chatReq)
 	if err != nil {
 		return nil, err
@@ -318,6 +320,7 @@ func (p *Provider) Stream(ctx context.Context, req *types.ModelRequest, onChunk 
 		Stream:        true,
 		StreamOptions: &streamOptions{IncludeUsage: true},
 	}
+	provutil.ApplyEffort(&chatReq.ReasoningEffort, req.ReasoningEffort, false)
 	resp, err := p.post(ictx, chatReq)
 	if err != nil {
 		return nil, err

@@ -64,11 +64,26 @@ func New(opts Options) *Provider {
 // ---- 协议结构 ----
 
 type respRequest struct {
-	Model        string      `json:"model"`
-	Instructions string      `json:"instructions,omitempty"`
-	Input        []inputItem `json:"input"`
-	Tools        []respTool  `json:"tools,omitempty"`
-	Stream       bool        `json:"stream,omitempty"`
+	Model        string            `json:"model"`
+	Instructions string            `json:"instructions,omitempty"`
+	Input        []inputItem       `json:"input"`
+	Tools        []respTool        `json:"tools,omitempty"`
+	Stream       bool              `json:"stream,omitempty"`
+	OutputConfig *respOutputConfig `json:"output_config,omitempty"`
+}
+
+/* respOutputConfig 思考强度（effort 经归一为 none/low/high/max；空 = 不控制不发）。 */
+type respOutputConfig struct {
+	Effort string `json:"effort"`
+}
+
+/* respEffortOf 归一档位 → output_config（空 = 不控制；none 是协议合法值）。 */
+func respEffortOf(effort string) *respOutputConfig {
+	e := provutil.NormalizeEffort(effort)
+	if e == "" {
+		return nil
+	}
+	return &respOutputConfig{Effort: e}
 }
 
 type inputItem struct {
@@ -278,6 +293,7 @@ func (p *Provider) Invoke(ctx context.Context, req *types.ModelRequest) (*types.
 	instr, input := toInput(req.Messages)
 	resp, err := p.post(ctx, &respRequest{
 		Model: p.opts.Model, Instructions: instr, Input: input, Tools: toRespTools(req.Tools),
+		OutputConfig: respEffortOf(req.ReasoningEffort),
 	})
 	if err != nil {
 		return nil, err
@@ -309,6 +325,7 @@ func (p *Provider) Stream(ctx context.Context, req *types.ModelRequest, onChunk 
 	resp, err := p.post(ictx, &respRequest{
 		Model: p.opts.Model, Instructions: instr, Input: input,
 		Tools: toRespTools(req.Tools), Stream: true,
+		OutputConfig: respEffortOf(req.ReasoningEffort),
 	})
 	if err != nil {
 		return nil, err
