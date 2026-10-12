@@ -84,6 +84,24 @@ type antRequest struct {
 	Messages  []antMessage `json:"messages"`
 	Tools     []antTool    `json:"tools,omitempty"`
 	Stream    bool         `json:"stream,omitempty"`
+	Thinking  *antThinking `json:"thinking,omitempty"`
+}
+
+/* antThinking 思考开关：协议无强度档，归一档位映射为 enabled/disabled。 */
+type antThinking struct {
+	Type string `json:"type"`
+}
+
+/* antThinkingOf 归一档位 → thinking 开关（空 = 不控制不发字段；协议无强度档，非空一律 enabled）。 */
+func antThinkingOf(effort string) *antThinking {
+	switch provutil.NormalizeEffort(effort) {
+	case "":
+		return nil
+	case "none":
+		return &antThinking{Type: "disabled"}
+	default:
+		return &antThinking{Type: "enabled"}
+	}
 }
 
 type antMessage struct {
@@ -295,7 +313,7 @@ func (p *Provider) Invoke(ctx context.Context, req *types.ModelRequest) (*types.
 	system, messages := toAnthropic(req.Messages)
 	resp, err := p.post(ctx, &antRequest{
 		Model: p.opts.Model, System: system, MaxTokens: p.opts.MaxTokens,
-		Messages: messages, Tools: toAntTools(req.Tools),
+		Messages: messages, Tools: toAntTools(req.Tools), Thinking: antThinkingOf(req.ReasoningEffort),
 	})
 	if err != nil {
 		return nil, err
@@ -328,7 +346,7 @@ func (p *Provider) Stream(ctx context.Context, req *types.ModelRequest, onChunk 
 	system, messages := toAnthropic(req.Messages)
 	resp, err := p.post(ictx, &antRequest{
 		Model: p.opts.Model, System: system, MaxTokens: p.opts.MaxTokens,
-		Messages: messages, Tools: toAntTools(req.Tools), Stream: true,
+		Messages: messages, Tools: toAntTools(req.Tools), Stream: true, Thinking: antThinkingOf(req.ReasoningEffort),
 	})
 	if err != nil {
 		return nil, err
