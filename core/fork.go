@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 
+	"github.com/xuanlv2002/ezloop/provider"
 	"github.com/xuanlv2002/ezloop/types"
 )
 
@@ -34,7 +35,24 @@ toolWarps / systemPrompt 是私有字段，扩展层无法从外部跳过组装�
 经子 state 发出，全部带标）。
 */
 func (a *Agent) Fork(ctx context.Context, forkID string, seed []types.Message, tools []types.Tool, input string) (*types.LoopState, error) {
+	return a.fork(ctx, forkID, nil, seed, tools, input)
+}
+
+/*
+ForkWithModel 与 Fork 相同，但子循环换用指定 provider（同样套本 Agent 的
+model warp 链：重试/档位控制等对分身照常生效）。task 按名派发分身用——
+如视觉子任务交给多模态模型、廉价批量任务交给小模型。model 为 nil 时
+退化为普通 Fork。
+*/
+func (a *Agent) ForkWithModel(ctx context.Context, forkID string, model provider.ModelProvider, seed []types.Message, tools []types.Tool, input string) (*types.LoopState, error) {
+	return a.fork(ctx, forkID, model, seed, tools, input)
+}
+
+func (a *Agent) fork(ctx context.Context, forkID string, model provider.ModelProvider, seed []types.Message, tools []types.Tool, input string) (*types.LoopState, error) {
 	sub := *a
+	if model != nil {
+		sub.provider = model
+	}
 	sub.startHooks = nil
 	sub.tools = tools
 	sub.toolWarps = nil

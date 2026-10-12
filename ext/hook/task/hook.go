@@ -33,6 +33,7 @@ import (
 	"github.com/xuanlv2002/ezloop/core"
 	"github.com/xuanlv2002/ezloop/event"
 	"github.com/xuanlv2002/ezloop/hook"
+	"github.com/xuanlv2002/ezloop/provider"
 	"github.com/xuanlv2002/ezloop/types"
 )
 
@@ -61,6 +62,9 @@ type Options struct {
 	// InheritTools 为 true（默认）时，fork 继承主 Agent 当前 state 的全部
 	// 工具（task 自身被剔除，保证单层）。设为 false 则仅用 Tools。
 	InheritTools bool
+	// ModelOf 按模型名构造分身 provider（找不到返回 nil，task 报错回传）。
+	// 可空：不注入时 task 的 model 参数被忽略，分身恒用主模型。
+	ModelOf func(name string) provider.ModelProvider
 }
 
 /* Option 配置 fork 的工具集。 */
@@ -75,6 +79,11 @@ func WithTools(t ...types.Tool) Option { return func(o *Options) { o.Tools = app
 
 /* WithInheritTools 控制是否继承主 Agent 当前 state 的工具（默认 true）。 */
 func WithInheritTools(b bool) Option { return func(o *Options) { o.InheritTools = b } }
+
+/* WithModelFactory 注入按名取分身 provider 的工厂（见 Options.ModelOf）。 */
+func WithModelFactory(fn func(name string) provider.ModelProvider) Option {
+	return func(o *Options) { o.ModelOf = fn }
+}
 
 /* Hook 拦截 task 工具调用，复刻当前 Agent 与上下文跑一次隔离子循环。 */
 type Hook struct {
@@ -107,7 +116,8 @@ func (h *Hook) OnStart(_ context.Context, state *types.LoopState) error {
 		state.Messages[0].Content += "\n\n<tool-guide>\ntask：可并行、相互独立、或会产生大量中间输出的子任务交给 task 分身隔离执行" +
 			"（工具集相同、过程互不干扰，最终结果直接回传），主上下文只留结论不留过程——" +
 			"检索类、批量生成类、多方案试探类子任务尤其适合；超长任务同样适合，分身可自行压缩上下文持续运行。" +
-			"任务描述必须自包含（分身看不到本轮对话之外的语境）：写清目标、输入、涉及的文件绝对路径与期望的返回格式。" +
+			"任务描述必须自包含（分身看不到本轮对话之外的语境）：写清目标、输入、涉及的文件绝对路径与期望的返回格式；" +
+			"需要视觉能力（看图/截图）或适合小模型的批量活，可用 model 参数指定分身模型——可选模型名以 system 的 <models> 段清单为准（不要臆造）。" +
 			"同批无依赖的子任务一次并行发多个。\n</tool-guide>"
 	}
 	return nil
@@ -146,7 +156,20 @@ func (h *Hook) OnToolStart(ctx context.Context, state *types.LoopState, call *ty
 	tools := h.forkTools(state)
 
 	h.emit(state, EventStart, call, forkID)
-	sub, err := agent.Fork(ctx, forkID, seed, tools, TaskInputPrefix+args.Task)
+	var mp provider.ModelProvider
+	if args.Model != "" && h.opts.ModelOf != nil {
+		mp = h.opts.ModelOf(args.Model)
+		if mp == nil {
+			return hook.Skip("task: unknown model "+args.Model), nil
+		}
+	}
+	var sub *types.LoopState
+	var err error
+	if mp != nil {
+		sub, err = agent.ForkWithModel(ctx, forkID, mp, seed, tools, TaskInputPrefix+args.Task)
+	} else {
+		sub, err = agent.Fork(ctx, forkID, seed, tools, TaskInputPrefix+args.Task)
+	}
 	h.emit(state, EventEnd, sub, forkID)
 
 	if err != nil {
