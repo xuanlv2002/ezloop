@@ -204,12 +204,12 @@ func TestAuthRequiredAndHookRetry(t *testing.T) {
 		t.Fatalf("auth request event: %+v", got)
 	}
 
-	// 取消/拒绝：结果回错误文本，不再重试。
+	// 取消/拒绝：结果为"用户已取消"（不含 needs_auth——那是待办，这是用户的决定），指示模型停手。
 	fc2 := &flakyAuthClient{}
 	h2, decisions2 := NewHook(Config{Servers: []ServerConfig{{Name: "s", Factory: func(ServerConfig) (Client, error) { return fc2, nil }}}})
 	go func() { decisions2 <- AuthDecision{CallID: "c1", OK: false} }()
 	a2, err := h2.OnToolStart(context.Background(), state, call)
-	if err != nil || a2.Kind != hook.KindSkip || !strings.Contains(a2.Result, "needs_auth") {
+	if err != nil || a2.Kind != hook.KindSkip || strings.Contains(a2.Result, "needs_auth") || !strings.Contains(a2.Result, "declined") {
 		t.Fatalf("declined: action=%v result=%q err=%v", a2.Kind, a2.Result, err)
 	}
 }

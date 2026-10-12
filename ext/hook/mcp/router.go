@@ -429,3 +429,21 @@ func (r *Router) errJSONAuth(server, msg string) string {
 	})
 	return string(out)
 }
+
+/*
+authDenied 渲染"用户取消了 OAuth 授权"的工具结果。与 errJSONAuth 关键区别：
+这不是"要你去认证再重试"的待办，而是**用户的决定**——因此不带 needs_auth，
+且 hint 明确要求模型停手、不要重试、不要绕道用别的工具，只在用户明确要求时再调。
+*/
+func (r *Router) authDenied(server, reason string) string {
+	msg := fmt.Sprintf("调用 %s 需要 OAuth 授权，用户已取消", server)
+	if reason != "" && reason != "已取消" {
+		msg += "：" + reason
+	}
+	out, _ := json.Marshal(callError{
+		Error:  msg,
+		Hint:   "the user declined authorization — do NOT retry and do NOT work around it with other tools; stop and tell the user the call was skipped. Retry only if the user explicitly asks.",
+		Server: server,
+	})
+	return string(out)
+}
