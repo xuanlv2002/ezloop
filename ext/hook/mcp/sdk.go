@@ -81,7 +81,9 @@ legacy 版本，server 会按自身支持下修。
 func handshake(c *client.Client) (Client, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), connectTimeout)
 	defer cancel()
-	if err := c.Start(ctx); err != nil {
+	// Start 的 ctx 绑定子进程寿命（exec.CommandContext 语义），传超时 ctx
+	// 会让 defer cancel 在握手结束后立即杀死子进程。超时只约束 Initialize。
+	if err := c.Start(context.WithoutCancel(ctx)); err != nil {
 		_ = c.Close()
 		return nil, fmt.Errorf("connect: %w", err)
 	}
