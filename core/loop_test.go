@@ -707,3 +707,25 @@ func TestWithInputImages(t *testing.T) {
 		t.Fatalf("unexpected images: %+v", last2.Images)
 	}
 }
+
+// 迭代上限软收尾：到达 MaxIterations 后追加收尾提醒并再调一次模型（无工具），
+// 最终答复入史而非硬截断。
+func TestRunMaxIterationFinalWrap(t *testing.T) {
+	a := NewAgent(testutil.Scripted(
+		testutil.ToolCalls(testutil.Call("1", "echo", `{"m":"a"}`)),
+		testutil.ToolCalls(testutil.Call("2", "echo", `{"m":"b"}`)),
+		testutil.Text("总结收尾"),
+	), WithTools(testutil.EchoTool{}), WithMaxIterations(2))
+
+	state, err := a.Run(context.Background(), "hi")
+	if err != nil || state.StopReason != types.StopMaxIteration {
+		t.Fatalf("state: %+v err=%v", state, err)
+	}
+	n := len(state.Messages)
+	if n < 2 || state.Messages[n-1].Role != types.RoleAssistant || state.Messages[n-1].Content != "总结收尾" {
+		t.Fatalf("final wrap reply missing: %+v", state.Messages[n-1])
+	}
+	if state.Messages[n-2].Role != types.RoleUser || !strings.Contains(state.Messages[n-2].Content, "最大迭代次数") {
+		t.Fatalf("wrap notice missing: %+v", state.Messages[n-2])
+	}
+}
