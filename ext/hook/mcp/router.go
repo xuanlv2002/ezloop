@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"sort"
@@ -36,6 +37,53 @@ type serverEntry struct {
 type callError struct {
 	Error string `json:"error"`
 	Hint  string `json:"hint,omitempty"`
+	// NeedsAuth 标记该 server 未授权（前端/快应用据此引导 OAuth 认证）。
+	NeedsAuth bool   `json:"needs_auth,omitempty"`
+	Server    string `json:"server,omitempty"`
+}
+
+/*
+AuthRequired 表示某 server 需要 OAuth 授权且当前无有效令牌。
+Router 的 *WithAuth 方法返回它；工具执行路径则渲染成含 needs_auth 的文本。
+*/
+type AuthRequired struct {
+	Server string
+	// MetadataURL 是 401 通告的 RFC9728 资源元数据地址（可能为空）；直指
+	// /.well-known 发现文档，授权流程据此发现授权服务器，最权威。
+	MetadataURL string
+}
+
+func (e *AuthRequired) Error() string {
+	return "mcp server " + e.Server + " requires OAuth authorization"
+}
+
+/*
+authError 把底层错误转成 *AuthRequired（非"需 OAuth"错误返回 nil）。三种来源：
+401 带资源元数据 / 已装 handler 的未授权（均直接判定）；裸 401 则请宿主探测
+发现文档（ServerConfig.DiscoverOAuth）作兜底——覆盖只在 well-known 暴露、
+401 不带元数据的服务。
+*/
+func (r *Router) authError(ctx context.Context, err error, server string) error {
+	if u, ok := authRequired(err); ok {
+		return &AuthRequired{Server: server, MetadataURL: u}
+	}
+	if bareAuthRequired(err) {
+		if u, ok := r.discoverOAuth(ctx, server); ok {
+			return &AuthRequired{Server: server, MetadataURL: u}
+		}
+	}
+	return nil
+}
+
+/* discoverOAuth 请宿主探测 server 的 OAuth 发现文档（无钩子返回 false）。 */
+func (r *Router) discoverOAuth(ctx context.Context, server string) (string, bool) {
+	r.mu.RLock()
+	cfg, ok := r.servers[server]
+	r.mu.RUnlock()
+	if !ok || cfg.DiscoverOAuth == nil {
+		return "", false
+	}
+	return cfg.DiscoverOAuth(ctx)
 }
 
 /*
@@ -197,14 +245,23 @@ func (r *Router) mcpList() string {
 	return string(out)
 }
 
-/* toolList 连接（或复用）server 拉取该 server 的工具清单（含 schema，ACL 过滤）。 */
-func (r *Router) toolList(ctx context.Context, server string) (string, error) {
-	client, err := r.client(server)
+/*
+toolListAuth 连接（或复用）server 拉取工具清单（含 schema，ACL 过滤）。
+OAuth 未授权返回 *AuthRequired，其余失败作为文本结果（nil 错误）。
+*/
+func (r *Router) toolListAuth(ctx context.Context, server string) (string, error) {
+	c, err := r.client(server)
 	if err != nil {
+		if ar := r.authError(ctx, err, server); ar != nil {
+			return "", ar
+		}
 		return r.errJSON(err.Error(), "call mcp_list to see available servers"), nil
 	}
-	defs, err := client.ListTools(ctx)
+	defs, err := c.ListTools(ctx)
 	if err != nil {
+		if ar := r.authError(ctx, err, server); ar != nil {
+			return "", ar
+		}
 		return r.errJSON(fmt.Sprintf("list %s failed: %v", server, err), "check server status or config"), nil
 	}
 	entries := make([]toolEntry, 0, len(defs))
@@ -220,16 +277,29 @@ func (r *Router) toolList(ctx context.Context, server string) (string, error) {
 	return string(out), nil
 }
 
-func (r *Router) callTool(ctx context.Context, args routerArgs) (string, error) {
+/* toolList 是工具执行路径：认证错误渲染为 needs_auth 文本。 */
+func (r *Router) toolList(ctx context.Context, server string) (string, error) {
+	out, err := r.toolListAuth(ctx, server)
+	if err != nil {
+		var ar *AuthRequired
+		if errors.As(err, &ar) {
+			return r.errJSONAuth(ar.Server, fmt.Sprintf("server %s requires OAuth authorization", ar.Server)), nil
+		}
+		return "", err
+	}
+	return out, nil
+}
+
+/*
+callToolAuth 执行 tool_call 全流程（ACL 校验 + 参数归一 + 调用）。
+参数/调用失败作为文本结果（nil 错误）交模型自纠；OAuth 未授权返回 *AuthRequired。
+*/
+func (r *Router) callToolAuth(ctx context.Context, args routerArgs) (string, error) {
 	if args.Server == "" || args.Tool == "" {
 		return r.errJSON("server and tool are required", "call tool_list first"), nil
 	}
 	if !r.allowed(args.Server, args.Tool) {
 		return r.errJSON(fmt.Sprintf("tool %s/%s is not allowed", args.Server, args.Tool), "it is not in the server allow list"), nil
-	}
-	client, err := r.client(args.Server)
-	if err != nil {
-		return r.errJSON(err.Error(), "call mcp_list to see available servers"), nil
 	}
 	// args 是 JSON 文本串：空串/null/引号空串统一为 {}；非 JSON 文本
 	// 回错误让模型自纠（部分 server 的 arguments 字段不接受裸字符串）。
@@ -240,11 +310,64 @@ func (r *Router) callTool(ctx context.Context, args routerArgs) (string, error) 
 	if !json.Valid([]byte(t)) {
 		return r.errJSON("args must be a JSON object string (e.g. \"{\\\"tz\\\":\\\"Asia/Shanghai\\\"}\")", "pass args as a string containing JSON"), nil
 	}
-	result, err := client.CallTool(ctx, args.Tool, json.RawMessage(t))
+	c, err := r.client(args.Server)
 	if err != nil {
+		if ar := r.authError(ctx, err, args.Server); ar != nil {
+			return "", ar
+		}
+		return r.errJSON(err.Error(), "call mcp_list to see available servers"), nil
+	}
+	result, err := c.CallTool(ctx, args.Tool, json.RawMessage(t))
+	if err != nil {
+		if ar := r.authError(ctx, err, args.Server); ar != nil {
+			return "", ar
+		}
 		return r.errJSON(fmt.Sprintf("call %s/%s failed: %v", args.Server, args.Tool, err), "check tool name and args schema from tool_list"), nil
 	}
 	return result, nil
+}
+
+/* callTool 是工具执行路径：认证错误渲染为 needs_auth 文本。 */
+func (r *Router) callTool(ctx context.Context, args routerArgs) (string, error) {
+	out, err := r.callToolAuth(ctx, args)
+	if err != nil {
+		var ar *AuthRequired
+		if errors.As(err, &ar) {
+			return r.errJSONAuth(ar.Server, fmt.Sprintf("call %s/%s requires OAuth authorization", ar.Server, args.Tool)), nil
+		}
+		return "", err
+	}
+	return out, nil
+}
+
+/*
+CallWithAuth 直调一个工具（不做 allow 过滤）；server 需要 OAuth 且未授权
+时返回 *AuthRequired，供 hook 与宿主 HTTP/页面路径识别并引导认证。
+*/
+func (r *Router) CallWithAuth(ctx context.Context, server, tool string, args json.RawMessage) (string, error) {
+	return r.callToolAuth(ctx, routerArgs{Action: "tool_call", Server: server, Tool: tool, Args: string(args)})
+}
+
+/*
+ToolsWithAuth 拉取工具清单（不做 allow 过滤）；server 需要 OAuth 且未授权
+时返回 *AuthRequired。
+*/
+func (r *Router) ToolsWithAuth(ctx context.Context, server string) ([]ToolDef, error) {
+	c, err := r.client(server)
+	if err != nil {
+		if ar := r.authError(ctx, err, server); ar != nil {
+			return nil, ar
+		}
+		return nil, err
+	}
+	defs, err := c.ListTools(ctx)
+	if err != nil {
+		if ar := r.authError(ctx, err, server); ar != nil {
+			return nil, ar
+		}
+		return nil, err
+	}
+	return defs, nil
 }
 
 func (r *Router) client(name string) (Client, error) {
@@ -293,5 +416,34 @@ func (r *Router) allowed(server, tool string) bool {
 
 func (r *Router) errJSON(msg, hint string) string {
 	out, _ := json.Marshal(callError{Error: msg, Hint: hint})
+	return string(out)
+}
+
+/* errJSONAuth 渲染"需 OAuth 授权"标记文本（含 needs_auth/server，供前端与快应用识别）。 */
+func (r *Router) errJSONAuth(server, msg string) string {
+	out, _ := json.Marshal(callError{
+		Error: msg,
+		Hint:  "complete OAuth authorization for this server, then retry",
+		NeedsAuth: true,
+		Server:    server,
+	})
+	return string(out)
+}
+
+/*
+authDenied 渲染"用户取消了 OAuth 授权"的工具结果。与 errJSONAuth 关键区别：
+这不是"要你去认证再重试"的待办，而是**用户的决定**——因此不带 needs_auth，
+且 hint 明确要求模型停手、不要重试、不要绕道用别的工具，只在用户明确要求时再调。
+*/
+func (r *Router) authDenied(server, reason string) string {
+	msg := fmt.Sprintf("调用 %s 需要 OAuth 授权，用户已取消", server)
+	if reason != "" && reason != "已取消" {
+		msg += "：" + reason
+	}
+	out, _ := json.Marshal(callError{
+		Error:  msg,
+		Hint:   "the user declined authorization — do NOT retry and do NOT work around it with other tools; stop and tell the user the call was skipped. Retry only if the user explicitly asks.",
+		Server: server,
+	})
 	return string(out)
 }

@@ -7,6 +7,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -24,18 +25,46 @@ const (
 )
 
 /*
+Option 是 HTTP 类工厂（StreamableHTTP / SSE）的通用选项。
+*/
+type Option func(*factoryOptions)
+
+type factoryOptions struct {
+	oauth *OAuthConfig
+}
+
+/* WithOAuth 为 http/sse server 启用 OAuth（stdio 忽略该选项）。 */
+func WithOAuth(cfg OAuthConfig) Option {
+	return func(o *factoryOptions) { o.oauth = &cfg }
+}
+
+func applyOptions(opts []Option) factoryOptions {
+	var fo factoryOptions
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&fo)
+		}
+	}
+	return fo
+}
+
+/*
 StreamableHTTP 返回连接 Streamable HTTP MCP server 的 Factory。
 headers 会附加到每个 HTTP 请求（如 Authorization）。mcp-go 默认不建立
 standalone GET SSE 流（WithContinuousListening 才开启），ezloop 只消费
-ListTools/CallTool 的请求-响应，恰好够用。
+ListTools/CallTool 的请求-响应，恰好够用。WithOAuth 时按 OAuth 取令牌。
 */
-func StreamableHTTP(endpoint string, headers map[string]string) func(ServerConfig) (Client, error) {
+func StreamableHTTP(endpoint string, headers map[string]string, opts ...Option) func(ServerConfig) (Client, error) {
 	return func(ServerConfig) (Client, error) {
-		var opts []transport.StreamableHTTPCOption
+		fo := applyOptions(opts)
+		var topts []transport.StreamableHTTPCOption
 		if len(headers) > 0 {
-			opts = append(opts, transport.WithHTTPHeaders(headers))
+			topts = append(topts, transport.WithHTTPHeaders(headers))
 		}
-		tr, err := transport.NewStreamableHTTP(endpoint, opts...)
+		if fo.oauth != nil {
+			topts = append(topts, transport.WithHTTPOAuth(toTransportOAuth(*fo.oauth)))
+		}
+		tr, err := transport.NewStreamableHTTP(endpoint, topts...)
 		if err != nil {
 			return nil, fmt.Errorf("connect: %w", err)
 		}
@@ -43,19 +72,99 @@ func StreamableHTTP(endpoint string, headers map[string]string) func(ServerConfi
 	}
 }
 
-/* SSE 返回连接旧协议 HTTP SSE MCP server 的 Factory。 */
-func SSE(endpoint string, headers map[string]string) func(ServerConfig) (Client, error) {
+/* SSE 返回连接旧协议 HTTP SSE MCP server 的 Factory。WithOAuth 时按 OAuth 取令牌。 */
+func SSE(endpoint string, headers map[string]string, opts ...Option) func(ServerConfig) (Client, error) {
 	return func(ServerConfig) (Client, error) {
-		var opts []transport.ClientOption
+		fo := applyOptions(opts)
+		var topts []transport.ClientOption
 		if len(headers) > 0 {
-			opts = append(opts, transport.WithHeaders(headers))
+			topts = append(topts, transport.WithHeaders(headers))
 		}
-		tr, err := transport.NewSSE(endpoint, opts...)
+		if fo.oauth != nil {
+			topts = append(topts, transport.WithOAuth(toTransportOAuth(*fo.oauth)))
+		}
+		tr, err := transport.NewSSE(endpoint, topts...)
 		if err != nil {
 			return nil, fmt.Errorf("connect: %w", err)
 		}
 		return handshake(client.NewClient(tr))
 	}
+}
+
+/* toTransportOAuth 把自有 OAuthConfig 转为 mcp-go 的配置（token store 走适配器）。 */
+func toTransportOAuth(c OAuthConfig) transport.OAuthConfig {
+	return transport.OAuthConfig{
+		ClientID:              c.ClientID,
+		ClientSecret:          c.ClientSecret,
+		RedirectURI:           c.RedirectURI,
+		Scopes:                c.Scopes,
+		AuthServerMetadataURL: c.AuthServerMetadataURL,
+		PKCEEnabled:           c.PKCEEnabled,
+		TokenStore:            tokenStoreAdapter{c.TokenStore},
+	}
+}
+
+/* tokenStoreAdapter 在 ezloop 的 TokenStore 与 mcp-go 的 TokenStore 间搬运字段。 */
+type tokenStoreAdapter struct{ inner TokenStore }
+
+func (a tokenStoreAdapter) GetToken(ctx context.Context) (*transport.Token, error) {
+	if a.inner == nil {
+		return nil, transport.ErrNoToken
+	}
+	t, err := a.inner.GetToken(ctx)
+	if err != nil {
+		if errors.Is(err, ErrNoToken) {
+			return nil, transport.ErrNoToken
+		}
+		return nil, err
+	}
+	return &transport.Token{
+		AccessToken:  t.AccessToken,
+		TokenType:    t.TokenType,
+		RefreshToken: t.RefreshToken,
+		ExpiresIn:    t.ExpiresIn,
+		Scope:        t.Scope,
+		ExpiresAt:    t.ExpiresAt,
+	}, nil
+}
+
+func (a tokenStoreAdapter) SaveToken(ctx context.Context, t *transport.Token) error {
+	if a.inner == nil {
+		return nil
+	}
+	return a.inner.SaveToken(ctx, &Token{
+		AccessToken:  t.AccessToken,
+		TokenType:    t.TokenType,
+		RefreshToken: t.RefreshToken,
+		ExpiresIn:    t.ExpiresIn,
+		Scope:        t.Scope,
+		ExpiresAt:    t.ExpiresAt,
+	})
+}
+
+/*
+authRequired 报告错误是否表示"需要 OAuth 授权"，并返回 RFC9728 资源元数据
+URL（可能为空）。两种来源都算：
+  - 传输已预装 OAuth handler 但无有效令牌（OAuthAuthorizationRequiredError）；
+  - 未预装 handler，仅凭 401 判定——此时只有通告了资源元数据（WWW-Authenticate
+    的 resource_metadata，直指 /.well-known 发现文档）才算数：静态密钥错误
+    的 401 不带元数据，据此与真正的 OAuth 需求区分开。
+*/
+func authRequired(err error) (metadataURL string, ok bool) {
+	if client.IsOAuthAuthorizationRequiredError(err) {
+		return client.GetResourceMetadataURL(err), true
+	}
+	if client.IsAuthorizationRequiredError(err) {
+		if u := client.GetResourceMetadataURL(err); u != "" {
+			return u, true
+		}
+	}
+	return "", false
+}
+
+/* bareAuthRequired 报告错误是否为"裸 401"（未预装 handler、且未带资源元数据）。 */
+func bareAuthRequired(err error) bool {
+	return client.IsAuthorizationRequiredError(err) && client.GetResourceMetadataURL(err) == ""
 }
 
 /*
@@ -81,7 +190,9 @@ legacy 版本，server 会按自身支持下修。
 func handshake(c *client.Client) (Client, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), connectTimeout)
 	defer cancel()
-	if err := c.Start(ctx); err != nil {
+	// Start 的 ctx 绑定子进程寿命（exec.CommandContext 语义），传超时 ctx
+	// 会让 defer cancel 在握手结束后立即杀死子进程。超时只约束 Initialize。
+	if err := c.Start(context.WithoutCancel(ctx)); err != nil {
 		_ = c.Close()
 		return nil, fmt.Errorf("connect: %w", err)
 	}

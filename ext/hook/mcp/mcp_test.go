@@ -3,15 +3,19 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
 
 	mcpclient "github.com/mark3labs/mcp-go/client"
+	"github.com/mark3labs/mcp-go/client/transport"
 	mcpserver "github.com/mark3labs/mcp-go/server"
 	"github.com/mark3labs/mcp-go/mcp"
 
 	"github.com/xuanlv2002/ezloop/core"
+	"github.com/xuanlv2002/ezloop/event"
+	"github.com/xuanlv2002/ezloop/hook"
 	"github.com/xuanlv2002/ezloop/internal/testutil"
 	"github.com/xuanlv2002/ezloop/types"
 )
@@ -112,6 +116,7 @@ func TestHookFullLoop(t *testing.T) {
 		reload++
 		return cfg.Servers, nil
 	}
+	h, _ := NewHook(cfg)
 	a := core.NewAgent(
 		testutil.Scripted(
 			testutil.ToolCalls(testutil.Call("c1", RouterToolName, `{"action":"mcp_list"}`)),
@@ -119,7 +124,7 @@ func TestHookFullLoop(t *testing.T) {
 			testutil.ToolCalls(testutil.Call("c3", RouterToolName, `{"action":"tool_call","server":"fs","tool":"read","args":"{\"path\":\"x\"}"}`)),
 			testutil.Text("done"),
 		),
-		core.WithHooks(NewHook(cfg)),
+		core.WithHooks(h),
 	)
 	state, err := a.Run(context.Background(), "use mcp")
 	if err != nil || state.StopReason != types.StopCompleted {
@@ -139,7 +144,7 @@ func TestHookWithRouterKeepsConnections(t *testing.T) {
 
 	r := NewRouter(nil)
 	r.clients["db"] = &mockClient{tools: []ToolDef{{Name: "query"}}}
-	h := NewHookWithRouter(r, nil)
+	h, _ := NewHookWithRouter(r, nil)
 	if err := h.OnEnd(context.Background(), state); err != nil {
 		t.Fatalf("onend: %v", err)
 	}
@@ -147,7 +152,7 @@ func TestHookWithRouterKeepsConnections(t *testing.T) {
 		t.Fatal("injected router must keep connections after hook OnEnd")
 	}
 
-	owned := NewHook(Config{})
+	owned, _ := NewHook(Config{})
 	owned.router.clients["db"] = &mockClient{}
 	if err := owned.OnEnd(context.Background(), state); err != nil {
 		t.Fatalf("owned onend: %v", err)
@@ -169,6 +174,107 @@ func TestReplaceServersDropsRemoved(t *testing.T) {
 	if !r.Connected("b") {
 		t.Fatal("kept server connection must survive")
 	}
+}
+
+// 需 OAuth 的 server：CallWithAuth 报 *AuthRequired；Hook 拦截后等决策、授权重试成功。
+func TestAuthRequiredAndHookRetry(t *testing.T) {
+	fcDirect := &flakyAuthClient{}
+	r := NewRouter([]ServerConfig{{Name: "s", Factory: func(ServerConfig) (Client, error) { return fcDirect, nil }}})
+	_, err := r.CallWithAuth(context.Background(), "s", "read", json.RawMessage(`{}`))
+	var ar *AuthRequired
+	if !errors.As(err, &ar) || ar.Server != "s" {
+		t.Fatalf("want *AuthRequired for s, got %v", err)
+	}
+
+	fc := &flakyAuthClient{}
+	h, decisions := NewHook(Config{Servers: []ServerConfig{{Name: "s", Factory: func(ServerConfig) (Client, error) { return fc, nil }}}})
+	var got []event.Event
+	state := &types.LoopState{Tools: types.NewToolRegistry(), Metadata: map[string]any{},
+		Emitter: func(e event.Event) { got = append(got, e) }}
+	call := &types.ToolCall{ID: "c1", Name: RouterToolName, Args: json.RawMessage(`{"action":"tool_call","server":"s","tool":"read","args":"{}"}`)}
+
+	// 首次调用必失败（calls==1）→ 发请求 → 等决策；授权决策回传后重试（calls==2）成功。
+	// 决策早于 Await 到达也无妨：await.Router 按 key 暂存。
+	go func() { decisions <- AuthDecision{CallID: "c1", OK: true} }()
+	action, err := h.OnToolStart(context.Background(), state, call)
+	if err != nil || action.Kind != hook.KindSkip || action.Result != `read({})` {
+		t.Fatalf("action=%v result=%q err=%v", action.Kind, action.Result, err)
+	}
+	if len(got) != 1 || got[0].Type != EventAuthRequest {
+		t.Fatalf("auth request event: %+v", got)
+	}
+
+	// 取消/拒绝：结果为"用户已取消"（不含 needs_auth——那是待办，这是用户的决定），指示模型停手。
+	fc2 := &flakyAuthClient{}
+	h2, decisions2 := NewHook(Config{Servers: []ServerConfig{{Name: "s", Factory: func(ServerConfig) (Client, error) { return fc2, nil }}}})
+	go func() { decisions2 <- AuthDecision{CallID: "c1", OK: false} }()
+	a2, err := h2.OnToolStart(context.Background(), state, call)
+	if err != nil || a2.Kind != hook.KindSkip || strings.Contains(a2.Result, "needs_auth") || !strings.Contains(a2.Result, "declined") {
+		t.Fatalf("declined: action=%v result=%q err=%v", a2.Kind, a2.Result, err)
+	}
+}
+
+// 未预装 handler 的 401：通告了 RFC9728 资源元数据才判定需 OAuth，否则按普通错误。
+func TestAuthRequiredSignal(t *testing.T) {
+	if _, ok := authRequired(&transport.AuthorizationRequiredError{}); ok {
+		t.Fatal("裸 401（无 resource_metadata）不应判定为需 OAuth")
+	}
+	withMeta := &transport.AuthorizationRequiredError{ResourceMetadataURL: "https://x/.well-known/oauth-protected-resource"}
+	if u, ok := authRequired(withMeta); !ok || u == "" {
+		t.Fatalf("带 resource_metadata 的 401 应判定需 OAuth，got %q %v", u, ok)
+	}
+}
+
+// 裸 401（无资源元数据）：有 DiscoverOAuth 钩子命中则判定需 OAuth，否则按普通错误。
+func TestBareAuthDiscoveryFallback(t *testing.T) {
+	makeRouter := func(discover func(context.Context) (string, bool)) *Router {
+		return NewRouter([]ServerConfig{{
+			Name:          "s",
+			Factory:       func(ServerConfig) (Client, error) { return &bareAuthClient{}, nil },
+			DiscoverOAuth: discover,
+		}})
+	}
+
+	// 无发现钩子：裸 401 按普通错误文本（nil error）返回
+	out, err := makeRouter(nil).CallWithAuth(context.Background(), "s", "read", json.RawMessage(`{}`))
+	if err != nil || !strings.Contains(out, "call s/read failed") {
+		t.Fatalf("no discover hook: out=%q err=%v", out, err)
+	}
+
+	// 钩子命中：判定需 OAuth，带出发现文档 URL
+	r := makeRouter(func(context.Context) (string, bool) { return "https://h/.well-known/oauth-protected-resource", true })
+	var ar *AuthRequired
+	if _, err := r.CallWithAuth(context.Background(), "s", "read", json.RawMessage(`{}`)); !errors.As(err, &ar) || ar.MetadataURL == "" {
+		t.Fatalf("discover hit should yield *AuthRequired with metadata, got %v", err)
+	}
+
+	// 钩子未命中：仍按普通错误
+	if out, err := makeRouter(func(context.Context) (string, bool) { return "", false }).CallWithAuth(context.Background(), "s", "read", json.RawMessage(`{}`)); err != nil || !strings.Contains(out, "call s/read failed") {
+		t.Fatalf("discover miss: out=%q err=%v", out, err)
+	}
+}
+
+// bareAuthClient 始终返回裸 401（无资源元数据）。
+type bareAuthClient struct{}
+
+func (c *bareAuthClient) ListTools(context.Context) ([]ToolDef, error) { return nil, nil }
+func (c *bareAuthClient) CallTool(context.Context, string, json.RawMessage) (string, error) {
+	return "", &transport.AuthorizationRequiredError{}
+}
+
+// flakyAuthClient 首次调用报 OAuth 未授权，之后正常返回（确定性：不依赖 goroutine 时序）。
+type flakyAuthClient struct{ calls int }
+
+func (c *flakyAuthClient) ListTools(context.Context) ([]ToolDef, error) {
+	return []ToolDef{{Name: "read"}}, nil
+}
+
+func (c *flakyAuthClient) CallTool(_ context.Context, name string, args json.RawMessage) (string, error) {
+	c.calls++
+	if c.calls == 1 {
+		return "", &transport.OAuthAuthorizationRequiredError{Handler: transport.NewOAuthHandler(transport.OAuthConfig{})}
+	}
+	return fmt.Sprintf("%s(%s)", name, string(args)), nil
 }
 
 // mcp-go in-process 会话：真实协议栈的 list/call。
