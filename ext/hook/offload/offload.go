@@ -55,7 +55,15 @@ func New(fsys fs.FileSystem, opts ...func(*Options)) *Hook {
 	for _, fn := range opts {
 		fn(&o)
 	}
+	if o.Threshold <= 0 { // 0/负数回默认：0 会让所有结果都触发卸载
+		o.Threshold = DefaultThreshold
+	}
 	return &Hook{fsys: fsys, opts: o}
+}
+
+/* WithThreshold 设置触发阈值（字节），非正数回默认 4096。 */
+func WithThreshold(n int) func(*Options) {
+	return func(o *Options) { o.Threshold = n }
 }
 
 /* WithSkip 设置免卸载名单：名单内工具的结果不做大卸载。 */
