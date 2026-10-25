@@ -14,13 +14,28 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
 	"golang.org/x/text/encoding/simplifiedchinese"
 
+	"github.com/xuanlv2002/ezloop/event"
 	"github.com/xuanlv2002/ezloop/types"
 )
+
+/* EventToolOutput 是 terminal 执行中的实时输出事件（Data 为 ToolOutputData）。 */
+const EventToolOutput = event.EventType("tool.output")
+
+/* ToolOutputData 是 tool.output 的载荷：本次调用 + 增量文本。 */
+type ToolOutputData struct {
+	CallID string `json:"callId"`
+	Name   string `json:"name"`
+	Text   string `json:"text"`
+}
+
+/* termLiveInterval 是实时输出的最小事件间隔：长任务高频输出不塞满事件队列。 */
+const termLiveInterval = 150 * time.Millisecond
 
 const readDefaultLines = 2000     // 默认读取行数，防大文件一次撑爆上下文
 const readMaxChars = 200_000      // 单次结果字符上限：分页限行不限字节，单行超长（minified）文件需另行设防
@@ -211,7 +226,12 @@ func terminalTool(workDir string) types.Tool {
 			tctx, cancel := context.WithTimeout(ctx, timeout)
 			defer cancel()
 			cmd := terminalCmd(tctx, in.Command, workDir)
-			out, err := cmd.CombinedOutput()
+			// 边跑边发 tool.output（宿主实时展示），全量字节仍留给最终结果
+			stream := newStreamWriter(ctx)
+			cmd.Stdout, cmd.Stderr = stream, stream
+			err := cmd.Run()
+			stream.close()
+			out := stream.bytes()
 			text := strings.TrimSpace(decodeOutput(out))
 			if errors.Is(tctx.Err(), context.DeadlineExceeded) {
 				// 超时与退出码同权：作为正常结果返回（已产出输出 + 标记），
@@ -238,6 +258,97 @@ func clampTimeoutS(s int) time.Duration {
 		s = 3600
 	}
 	return time.Duration(s) * time.Second
+}
+
+/*
+streamWriter 接管 terminal 的 stdout/stderr：全量字节留给最终结果，同时
+每 termLiveInterval 把新增文本作为 tool.output 发给宿主（长构建不再像
+卡死）。stdout/stderr 由不同 goroutine 写，加锁；截断在多字节字符中间
+的尾部留在 pending 等下一批，避免实时区闪出乱码。
+*/
+type streamWriter struct {
+	ctx     context.Context
+	mu      sync.Mutex
+	all     bytes.Buffer
+	pending []byte
+	done    chan struct{}
+}
+
+func newStreamWriter(ctx context.Context) *streamWriter {
+	w := &streamWriter{ctx: ctx, done: make(chan struct{})}
+	go w.tick()
+	return w
+}
+
+func (w *streamWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.all.Write(p)
+	w.pending = append(w.pending, p...)
+	return len(p), nil
+}
+
+/* tick 定时冲刷 pending：没有换行的进度条/慢输出也能持续可见。 */
+func (w *streamWriter) tick() {
+	t := time.NewTicker(termLiveInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-w.done:
+			return
+		case <-t.C:
+			w.mu.Lock()
+			w.flushLocked()
+			w.mu.Unlock()
+		}
+	}
+}
+
+func (w *streamWriter) flushLocked() {
+	if len(w.pending) == 0 {
+		return
+	}
+	prefix, rest := splitCompleteUTF8(w.pending)
+	if len(prefix) == 0 {
+		return
+	}
+	w.pending = append([]byte(nil), rest...)
+	text := decodeOutput(prefix)
+	if strings.TrimSpace(text) == "" {
+		return
+	}
+	inv := types.ToolInvocationFromContext(w.ctx)
+	if inv == nil || inv.Call == nil {
+		return // 无宿主事件出口（直接 Invoke/测试）：只留全量结果
+	}
+	types.EmitEvent(w.ctx, EventToolOutput, ToolOutputData{CallID: inv.Call.ID, Name: "terminal", Text: text})
+}
+
+/* splitCompleteUTF8 切出完整 UTF-8 前缀；尾部若停在多字节字符中间则留下。 */
+func splitCompleteUTF8(b []byte) ([]byte, []byte) {
+	if utf8.Valid(b) {
+		return b, nil
+	}
+	for i := 1; i <= 3 && i < len(b); i++ {
+		if utf8.Valid(b[:len(b)-i]) {
+			return b[:len(b)-i], b[len(b)-i:]
+		}
+	}
+	return b, nil
+}
+
+/* close 停止定时器并冲刷残余。 */
+func (w *streamWriter) close() {
+	close(w.done)
+	w.mu.Lock()
+	w.flushLocked()
+	w.mu.Unlock()
+}
+
+func (w *streamWriter) bytes() []byte {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return append([]byte(nil), w.all.Bytes()...)
 }
 
 /*

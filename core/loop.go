@@ -334,7 +334,12 @@ func (a *Agent) execToolCalls(ctx context.Context, state *types.LoopState) error
 					result.Err = err
 					return
 				}
-				content, err := tool.Invoke(callCtx, call.Args)
+				// 调用信息与事件出口进 ctx：工具可发带 CallID 的流式观察事件。
+				inv := &types.ToolInvocation{
+					Call: call,
+					Emit: func(typ event.EventType, data any) { a.emit(state, typ, data) },
+				}
+				content, err := tool.Invoke(types.WithToolInvocation(callCtx, inv), call.Args)
 				if err != nil {
 					result.Err = err
 					return
