@@ -82,11 +82,13 @@ assistant 停止（批内 tool_use 的载体）。批内全部标记对应的图
 
 	<image_loaded>
 	C:/路径1
+	目的：这次看图要确认什么
 	C:/路径2
 	</image_loaded>
 
 （Images 携带 base64），插在批的最后一条 tool 消息之后，随历史落盘
-——重启后 provider 直接带图。
+——重启后 provider 直接带图。目的行紧跟在对应路径之后，让模型后续
+回看时知道每张图当时为何存在。
 
 已入史的 tool 结果不改写：标记文本自解释（图片消息紧随其后），加载
 失败的标记留着（模型见标记无图自会重读）。不会重复加载：先有
@@ -108,24 +110,31 @@ func (h *Hook) OnLoop(ctx context.Context, state *types.LoopState) error {
 	}
 	slices.Reverse(toolIdx) // 恢复批内时间序（与 tool_use 对应顺序一致）
 	var imgs []types.ImagePart
-	var paths []string
+	var paths, notes []string
 	for _, i := range toolIdx {
 		for _, match := range imageMarkRe.FindAllStringSubmatch(state.Messages[i].Content, -1) {
 			if img, ok := h.loadImage(ctx, match[1]); ok {
 				imgs = append(imgs, img)
 				paths = append(paths, match[1])
+				notes = append(notes, match[2])
 			}
 		}
 	}
 	if len(imgs) == 0 {
 		return nil
 	}
+	var body strings.Builder
+	for i, p := range paths {
+		body.WriteString("\n" + p)
+		if notes[i] != "" {
+			body.WriteString("\n目的：" + notes[i])
+		}
+	}
 	last := toolIdx[len(toolIdx)-1] // 恢复正序后，末位即批内最大下标
 	msg := types.Message{
-		Role: types.RoleUser,
-		Content: "<" + imageLoadedTag + ">\n" + strings.Join(paths, "\n") +
-			"\n</" + imageLoadedTag + ">",
-		Images: imgs,
+		Role:    types.RoleUser,
+		Content: "<" + imageLoadedTag + ">" + body.String() + "\n</" + imageLoadedTag + ">",
+		Images:  imgs,
 	}
 	state.Messages = slices.Insert(state.Messages, last+1, msg)
 	return nil
