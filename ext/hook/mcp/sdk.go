@@ -170,11 +170,19 @@ func bareAuthRequired(err error) bool {
 /*
 Stdio 返回通过子进程 stdio 连接 MCP server 的 Factory。command 是要
 执行的命令，args 是传给它的参数；env 是附加环境变量——在继承父进程
-环境的基础上合并（同名以附加为准），调用方只需填增量。
+环境的基础上合并（同名以附加为准），调用方只需填增量。宿主的
+EZHARNESS_TOKEN 不继承：第三方 server 不应拿到本机 API 令牌。
 */
 func Stdio(command string, env map[string]string, args ...string) func(ServerConfig) (Client, error) {
 	return func(ServerConfig) (Client, error) {
-		merged := os.Environ()
+		parent := os.Environ()
+		merged := make([]string, 0, len(parent)+len(env))
+		for _, e := range parent {
+			if strings.HasPrefix(e, "EZHARNESS_TOKEN=") {
+				continue
+			}
+			merged = append(merged, e)
+		}
 		for k, v := range env {
 			merged = append(merged, k+"="+v)
 		}

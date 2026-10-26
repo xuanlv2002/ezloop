@@ -45,6 +45,7 @@ type readArgs struct {
 	Path   string `json:"path" desc:"文件路径"`
 	Offset int    `json:"offset,omitempty" desc:"起始行号，1 起，默认 1"`
 	Limit  int    `json:"limit,omitempty" desc:"读取行数，默认 2000"`
+	Note   string `json:"note,omitempty" desc:"读取图片时写明这次看图要确认什么；目的会随图片一起写入上下文。文本读取忽略"`
 }
 
 /*
@@ -59,7 +60,7 @@ user 图片消息（全协议经 user+Images 通道携带）；装配 WithImageH
 */
 func readTool(h *Hook) types.Tool {
 	fsys := h.fsys
-	return types.NewTool("read_file", "按行读取文件内容（默认第 1 行起 2000 行，可指定 offset/limit 翻页；单次最多返回 200000 字符，超出截断；图片文件作为图片消息进入上下文，不返回文本；二进制文件（pdf/ppt/压缩包/可执行等）暂不支持读取）",
+	return types.NewTool("read_file", "按行读取文件内容（默认第 1 行起 2000 行，可指定 offset/limit 翻页；单次最多返回 200000 字符，超出截断；图片文件作为图片消息进入上下文，不返回文本——用 note 写明这次看图要确认什么，目的会随图片一起写入上下文；二进制文件（pdf/ppt/压缩包/可执行等）暂不支持读取）",
 		func(ctx context.Context, in *readArgs) (string, error) {
 			if in.Path == "" {
 				return "", errors.New("path is required")
@@ -84,7 +85,7 @@ func readTool(h *Hook) types.Tool {
 						return text, nil
 					}
 				}
-				return imageLoadedMark(in.Path), nil
+				return imageLoadedMark(in.Path, in.Note), nil
 			}
 			// 二进制兜底：乱码干爆上下文，直接拒读
 			if kind, bin := binaryKind(in.Path, data); bin {
@@ -111,19 +112,38 @@ func readTool(h *Hook) types.Tool {
 		})
 }
 
-/* imageLoadedTag 是图片消息的包裹标签名：user 消息形如
+/*
+	imageLoadedTag 是图片消息的包裹标签名：user 消息形如
+
 <image_loaded>\n路径…\n</image_loaded>，Images 携带 base64（前端按
-它识别渲染缩略图行）。工具结果内的机器标记是自闭合变体（见下）。 */
+它识别渲染缩略图行）。工具结果内的机器标记是自闭合变体（见下）。
+*/
 const imageLoadedTag = "image_loaded"
 
-/* imageLoadedMark 是工具结果内的机器标记：OnLoop 识别并转换为
-user 图片消息（只在"结果入史→回边"窗口存在，历史里保留原样）。 */
-func imageLoadedMark(path string) string {
+/*
+	imageLoadedMark 是工具结果内的机器标记：OnLoop 识别并转换为
+
+user 图片消息（只在"结果入史→回边"窗口存在，历史里保留原样）。
+note 非空时写入标记，OnLoop 会把它带到图片消息里。
+*/
+func imageLoadedMark(path, note string) string {
+	if note = markerNote(note); note != "" {
+		return fmt.Sprintf(`<%s path=%q note="%s"/>`, imageLoadedTag, path, note)
+	}
 	return fmt.Sprintf(`<%s path=%q/>`, imageLoadedTag, path)
 }
 
-/* imageMarkRe 解析标记里的路径。 */
-var imageMarkRe = regexp.MustCompile(`<image_loaded path="([^"]*)"/>`)
+/*
+	markerNote 把看图目的压成单行标记属性值（空白折叠、双引号换单引号，
+
+属性正则才安全）。
+*/
+func markerNote(s string) string {
+	return strings.ReplaceAll(strings.Join(strings.Fields(s), " "), `"`, `'`)
+}
+
+/* imageMarkRe 解析标记里的路径与可选目的。 */
+var imageMarkRe = regexp.MustCompile(`<image_loaded path="([^"]*)"(?: note="([^"]*)")?\s*/>`)
 
 /* imageMime 按魔数判定常见图片格式（覆盖多模态 API 的主流接受集）。 */
 func imageMime(b []byte) string {

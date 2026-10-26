@@ -69,8 +69,8 @@ func TestOnLoopMergesBatchMarks(t *testing.T) {
 	h := New(fakeFS{files: map[string][]byte{"/tmp/a.png": png1x1, "/tmp/b.png": png1x1}})
 	state := &types.LoopState{Messages: []types.Message{
 		{Role: types.RoleAssistant, ToolCalls: []types.ToolCall{{ID: "c1"}, {ID: "c2"}}},
-		{Role: types.RoleTool, ToolCallID: "c1", Content: imageLoadedMark("/tmp/a.png")},
-		{Role: types.RoleTool, ToolCallID: "c2", Content: imageLoadedMark("/tmp/b.png")},
+		{Role: types.RoleTool, ToolCallID: "c1", Content: imageLoadedMark("/tmp/a.png", "")},
+		{Role: types.RoleTool, ToolCallID: "c2", Content: imageLoadedMark("/tmp/b.png", "")},
 	}}
 	if err := h.OnLoop(context.Background(), state); err != nil {
 		t.Fatalf("onloop: %v", err)
@@ -91,11 +91,11 @@ func TestOnLoopMergesBatchMarks(t *testing.T) {
 func TestOnLoopStopsAtAssistantBoundary(t *testing.T) {
 	h := New(fakeFS{files: map[string][]byte{"/tmp/a.png": png1x1}})
 	state := &types.LoopState{Messages: []types.Message{
-		{Role: types.RoleTool, ToolCallID: "c0", Content: imageLoadedMark("/tmp/a.png")}, // 上批残留
+		{Role: types.RoleTool, ToolCallID: "c0", Content: imageLoadedMark("/tmp/a.png", "")}, // 上批残留
 		{Role: types.RoleAssistant, Content: "answer"},
 		{Role: types.RoleUser, Content: "q"},
 		{Role: types.RoleAssistant, ToolCalls: []types.ToolCall{{ID: "c1"}}},
-		{Role: types.RoleTool, ToolCallID: "c1", Content: imageLoadedMark("/tmp/a.png")},
+		{Role: types.RoleTool, ToolCallID: "c1", Content: imageLoadedMark("/tmp/a.png", "")},
 	}}
 	if err := h.OnLoop(context.Background(), state); err != nil {
 		t.Fatalf("onloop: %v", err)
@@ -116,7 +116,7 @@ func TestOnLoopMissingFile(t *testing.T) {
 	h := New(fakeFS{files: map[string][]byte{}})
 	state := &types.LoopState{Messages: []types.Message{
 		{Role: types.RoleAssistant, ToolCalls: []types.ToolCall{{ID: "c1"}}},
-		{Role: types.RoleTool, ToolCallID: "c1", Content: imageLoadedMark("/gone.png")},
+		{Role: types.RoleTool, ToolCallID: "c1", Content: imageLoadedMark("/gone.png", "")},
 	}}
 	if err := h.OnLoop(context.Background(), state); err != nil {
 		t.Fatalf("onloop: %v", err)
@@ -124,7 +124,7 @@ func TestOnLoopMissingFile(t *testing.T) {
 	if len(state.Messages) != 2 {
 		t.Fatalf("missing file should not insert, got %d", len(state.Messages))
 	}
-	if state.Messages[1].Content != imageLoadedMark("/gone.png") {
+	if state.Messages[1].Content != imageLoadedMark("/gone.png", "") {
 		t.Fatalf("tool result should be untouched: %q", state.Messages[1].Content)
 	}
 }
