@@ -65,6 +65,9 @@ type Options struct {
 	// ModelOf 按模型名构造分身 provider（找不到返回 nil，task 报错回传）。
 	// 可空：不注入时 task 的 model 参数被忽略，分身恒用主模型。
 	ModelOf func(name string) provider.ModelProvider
+	// SessionRef 按 forkID 返回子会话存档地址（如宿主的绝对路径）。
+	// 非空时附在工具结果末尾，主循环可据此回查子任务的完整过程。
+	SessionRef func(forkID string) string
 }
 
 /* Option 配置 fork 的工具集。 */
@@ -83,6 +86,11 @@ func WithInheritTools(b bool) Option { return func(o *Options) { o.InheritTools 
 /* WithModelFactory 注入按名取分身 provider 的工厂（见 Options.ModelOf）。 */
 func WithModelFactory(fn func(name string) provider.ModelProvider) Option {
 	return func(o *Options) { o.ModelOf = fn }
+}
+
+/* WithSessionRef 注入子会话存档地址解析（见 Options.SessionRef）。 */
+func WithSessionRef(fn func(forkID string) string) Option {
+	return func(o *Options) { o.SessionRef = fn }
 }
 
 /* Hook 拦截 task 工具调用，复刻当前 Agent 与上下文跑一次隔离子循环。 */
@@ -178,10 +186,10 @@ func (h *Hook) OnToolStart(ctx context.Context, state *types.LoopState, call *ty
 		}
 		// 子循环出错不终止主循环：与"工具错误回传模型自纠"同语义，
 		// 错误作为工具结果进入历史，主模型据此重试或调整。
-		return hook.Skip("task failed: " + err.Error()), nil
+		return hook.Skip("task failed: " + err.Error() + h.sessionRefSuffix(forkID)), nil
 	}
 	h.accumulateUsage(state, sub.Usage)
-	return hook.Skip(formatResult(sub)), nil
+	return hook.Skip(h.formatResult(sub, forkID)), nil
 }
 
 /* newForkID 生成任务标识。并发安全（同一轮多个 task 调用并发 fork）。 */
@@ -264,19 +272,30 @@ func (h *Hook) accumulateUsage(state *types.LoopState, u types.Usage) {
 formatResult 取子循环的最终回答作为工具结果；非正常结束附上说明，
 供主模型判断子任务是否真正完成。
 */
-func formatResult(sub *types.LoopState) string {
+func (h *Hook) formatResult(sub *types.LoopState, forkID string) string {
 	ans := lastAssistantContent(sub)
 	if ans == "" {
 		ans = "(subtask completed with no output)"
 	}
 	switch sub.StopReason {
 	case types.StopMaxIteration:
-		return ans + "\n\n[subtask reached max iterations, result may be incomplete]"
+		ans += "\n\n[subtask reached max iterations, result may be incomplete]"
 	case types.StopAborted, types.StopCancelled:
-		return ans + "\n\n[subtask stopped: " + string(sub.StopReason) + "]"
-	default:
-		return ans
+		ans += "\n\n[subtask stopped: " + string(sub.StopReason) + "]"
 	}
+	return ans + h.sessionRefSuffix(forkID)
+}
+
+/* sessionRefSuffix 返回附在工具结果末尾的子会话存档地址（未注入时为空）。 */
+func (h *Hook) sessionRefSuffix(forkID string) string {
+	if h.opts.SessionRef == nil {
+		return ""
+	}
+	ref := h.opts.SessionRef(forkID)
+	if ref == "" {
+		return ""
+	}
+	return "\n\n[子会话存档：" + ref + "（如需回查子任务过程，可用 read_file 读取其中的 trace.jsonl）]"
 }
 
 func lastAssistantContent(sub *types.LoopState) string {
