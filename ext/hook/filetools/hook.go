@@ -64,13 +64,20 @@ func WithImageHandler(fn func(path, mime string) (text string, loadAsImage bool)
 
 func (h *Hook) Name() string { return "filetools" }
 
+/* OnStart 注册文件四件套工具（OS 提示走 Guide 声明）。 */
 func (h *Hook) OnStart(_ context.Context, state *types.LoopState) error {
 	state.Tools.Register(readTool(h))
 	state.Tools.Register(writeTool(h))
 	state.Tools.Register(editTool(h))
 	state.Tools.Register(terminalTool(h.workDir))
-	injectOSHint(state)
 	return nil
+}
+
+/* Guide 声明系统环境提示：terminal 按当前 OS 的原生 shell 语法写命令（引擎组装期统一追加）。 */
+func (h *Hook) Guide() string {
+	return "# 系统环境\n当前操作系统：" + runtime.GOOS +
+		"（terminal 工具用系统原生 shell 执行，Windows 请写 cmd 语法 dir/type/findstr，" +
+		"类 Unix 请写 POSIX 语法 ls/cat/grep）"
 }
 
 /*
@@ -151,25 +158,6 @@ func (h *Hook) loadImage(ctx context.Context, path string) (types.ImagePart, boo
 		return types.ImagePart{}, false
 	}
 	return types.ImagePart{MimeType: mime, Data: base64.StdEncoding.EncodeToString(data)}, true
-}
-
-/*
-injectOSHint 把当前系统信息拼进 system（单条 system 政策，与 skill 同
-拼接模式）：terminal 工具执行于原生 shell，模型据此书写对应语法。
-GOOS 进程内恒定，注入内容每轮一致，不影响前缀缓存。
-*/
-func injectOSHint(state *types.LoopState) {
-	hint := "# 系统环境\n当前操作系统：" + runtime.GOOS +
-		"（terminal 工具用系统原生 shell 执行，Windows 请写 cmd 语法 dir/type/findstr，" +
-		"类 Unix 请写 POSIX 语法 ls/cat/grep）"
-	if len(state.Messages) > 0 && state.Messages[0].Role == types.RoleSystem {
-		state.Messages[0].Content += "\n\n" + hint
-		return
-	}
-	state.Messages = append([]types.Message{{
-		Role:    types.RoleSystem,
-		Content: hint,
-	}}, state.Messages...)
 }
 
 /* lockPath 返回路径级修改队列锁：同一文件的修改串行，不同文件并行。 */

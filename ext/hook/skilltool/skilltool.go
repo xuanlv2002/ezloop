@@ -57,16 +57,18 @@ func New(fsys fs.FileSystem, dir string, disabled func() []string, opts ...Optio
 
 func (h *Hook) Name() string { return "skilltool" }
 
-/* OnStart 注册 load_skill 工具并注入使用说明（sys 首位重写 base 后追加，每轮重拼幂等）。 */
+/* OnStart 注册 load_skill 工具（组装期动态职责；使用说明走 Guide 声明）。 */
 func (h *Hook) OnStart(_ context.Context, state *types.LoopState) error {
 	state.Tools.Register(&skillTool{fsys: h.fsys, dir: h.dir, disabled: h.disabled, extra: h.extra})
-	if len(state.Messages) > 0 && state.Messages[0].Role == types.RoleSystem {
-		state.Messages[0].Content += "\n\n<tool-guide>\n" +
-			"load_skill：接任务的第一个动作是对照 system 里的技能清单——命中就先调用本工具加载（返回完整指令与脚本路径），" +
-			"严格按其指引执行，不要绕过现成技能自己造流程；清单没命中再自行设计。" +
-			"改过技能文件后要重新加载，拿到的才是最新版。\n</tool-guide>"
-	}
 	return nil
+}
+
+/* Guide 声明 load_skill 的使用说明（引擎组装期统一追加，幂等由引擎保证）。 */
+func (h *Hook) Guide() string {
+	return "<tool-guide>\n" +
+		"load_skill：接任务的第一个动作是对照 system 里的技能清单——命中就先调用本工具加载（返回完整指令与脚本路径），" +
+		"严格按其指引执行，不要绕过现成技能自己造流程；清单没命中再自行设计。" +
+		"改过技能文件后要重新加载，拿到的才是最新版。\n</tool-guide>"
 }
 
 /* skillTool 是 load_skill 工具本体：解析名称 → 返回 SKILL.md 全文 + 路径 + 目录结构。 */

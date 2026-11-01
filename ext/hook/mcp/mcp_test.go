@@ -10,8 +10,8 @@ import (
 
 	mcpclient "github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/client/transport"
-	mcpserver "github.com/mark3labs/mcp-go/server"
 	"github.com/mark3labs/mcp-go/mcp"
+	mcpserver "github.com/mark3labs/mcp-go/server"
 
 	"github.com/xuanlv2002/ezloop/core"
 	"github.com/xuanlv2002/ezloop/event"
@@ -130,8 +130,9 @@ func TestHookFullLoop(t *testing.T) {
 	if err != nil || state.StopReason != types.StopCompleted {
 		t.Fatalf("state: %s err=%v", state.StopReason, err)
 	}
-	if state.Messages[6].Content != `read({"path":"x"})` {
-		t.Fatalf("mcp result: %s", state.Messages[6].Content)
+	// mcp 的 Guide 声明使 system 恒在 [0]，工具结果顺移一位。
+	if state.Messages[7].Content != `read({"path":"x"})` {
+		t.Fatalf("mcp result: %s", state.Messages[7].Content)
 	}
 	if reload != 3 {
 		t.Fatalf("reloads: %d", reload)

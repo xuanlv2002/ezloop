@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,8 +19,8 @@ import (
 Run 驱动整个 loop：model ↔ tool 循环，直到模型不再发起 tool call、
 
 达到 MaxIterations、hook 置 Stop 或出错。EndHook 无论成败都会执行。
-消息序列构造顺序：system 提示词 → WithHistory 历史 → 本次 input，
-随后 startHook 可继续注入（如 skill）。
+消息序列构造顺序：system 提示词 → WithHistory 历史 → 本次 input →
+startHook 组装（工具注册、skill 等动态注入）→ GuideHook 声明统一追加。
 */
 func (a *Agent) Run(ctx context.Context, input string, runOpts ...RunOption) (state *types.LoopState, err error) {
 	// 把自身注入 ctx：hook 经 AgentFromContext 取回引擎能力（如 task 的 Fork）。
@@ -101,6 +102,7 @@ func (a *Agent) Run(ctx context.Context, input string, runOpts ...RunOption) (st
 			return state, a.fail(ctx, state, err)
 		}
 	}
+	a.appendGuides(state)
 
 	for state.Iteration < state.MaxIterations && !state.Stop {
 		if ctx.Err() != nil {
@@ -177,6 +179,35 @@ func (a *Agent) Run(ctx context.Context, input string, runOpts ...RunOption) (st
 		}
 	}
 	return state, nil
+}
+
+/*
+appendGuides 组装期收集 GuideHook 声明的静态附录：按注册序拼到 system
+
+尾部；system 缺席且有附录时创建（guide 依附 system——无 system 的组装
+里 filetools 的 OS 提示同样成立）。幂等是结构性的：每次 Run 的 system
+刚被 WithSystemPrompt 或 startHook 重建，追加恰发生一次；fork 的 seed
+已含附录且 guideHooks 已置空，不会重复。
+*/
+func (a *Agent) appendGuides(state *types.LoopState) {
+	parts := make([]string, 0, len(a.guideHooks))
+	for _, h := range a.guideHooks {
+		if s := h.Guide(); s != "" {
+			parts = append(parts, s)
+		}
+	}
+	if len(parts) == 0 {
+		return
+	}
+	joined := strings.Join(parts, "\n\n")
+	if len(state.Messages) > 0 && state.Messages[0].Role == types.RoleSystem {
+		state.Messages[0].Content += "\n\n" + joined
+		return
+	}
+	state.Messages = append([]types.Message{{
+		Role:    types.RoleSystem,
+		Content: joined,
+	}}, state.Messages...)
 }
 
 /*
@@ -416,12 +447,14 @@ func (a *Agent) execToolCalls(ctx context.Context, state *types.LoopState) error
 	return hookErr
 }
 
-/* callModel 发起一次模型调用：流式时 chunk 经事件实时透出（正文与思考分路）。
+/*
+	callModel 发起一次模型调用：流式时 chunk 经事件实时透出（正文与思考分路）。
 
 取消抢救：ctx 打断流式时，provider 不会返回部分响应——已流到消费方的
 半截内容若不入史，用户"看过模型说过的话"下轮却消失。回调侧累积正文
 与思考，取消时以 assistant 消息补入历史（残缺的工具调用参数不可执行、
-协议要求 tool_calls 与结果成对，一律丢弃）。 */
+协议要求 tool_calls 与结果成对，一律丢弃）。
+*/
 func (a *Agent) callModel(ctx context.Context, model provider.ModelProvider, state *types.LoopState) (*types.ModelResponse, error) {
 	req := &types.ModelRequest{Messages: state.Messages, Tools: state.Tools.List()}
 	a.emit(state, event.EventModelStart, nil)

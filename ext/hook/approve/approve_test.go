@@ -42,8 +42,9 @@ func TestApproveDecisions(t *testing.T) {
 	if state.StopReason != types.StopCompleted {
 		t.Fatalf("deny must continue loop: %s", state.StopReason)
 	}
-	if !strings.Contains(state.Messages[2].Content, "denied by user: readonly env") {
-		t.Fatalf("denied msg: %q", state.Messages[2].Content)
+	// approve 的 Guide 声明使 system 恒在 [0]（无 WithSystemPrompt 也创建），索引从 system 起数。
+	if !strings.Contains(state.Messages[3].Content, "denied by user: readonly env") {
+		t.Fatalf("denied msg: %q", state.Messages[4].Content)
 	}
 
 	approved, okCh := New(nil)
@@ -60,8 +61,8 @@ func TestApproveDecisions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if state2.Messages[2].Content != `ran {"a":1}` {
-		t.Fatalf("approved msg: %q", state2.Messages[2].Content)
+	if state2.Messages[3].Content != `ran {"a":1}` {
+		t.Fatalf("approved msg: %q", state2.Messages[3].Content)
 	}
 }
 
@@ -86,11 +87,11 @@ func TestApproveNeedsFilter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if state.Messages[2].Content != "ran" {
-		t.Fatalf("safe msg: %q", state.Messages[2].Content)
+	if state.Messages[3].Content != "ran" {
+		t.Fatalf("safe msg: %q", state.Messages[3].Content)
 	}
-	if !strings.Contains(state.Messages[3].Content, "denied by user") {
-		t.Fatalf("denied msg: %q", state.Messages[3].Content)
+	if !strings.Contains(state.Messages[4].Content, "denied by user") {
+		t.Fatalf("denied msg: %q", state.Messages[4].Content)
 	}
 }
 
@@ -117,7 +118,7 @@ func TestApproveCancel(t *testing.T) {
 	if err == nil || state.StopReason != types.StopCancelled {
 		t.Fatalf("stop=%s err=%v", state.StopReason, err)
 	}
-	if len(state.Messages) != 3 || state.Messages[2].ToolCallID != "1" {
+	if len(state.Messages) != 4 || state.Messages[3].ToolCallID != "1" {
 		t.Fatalf("history incomplete: %d messages", len(state.Messages))
 	}
 }
@@ -154,8 +155,8 @@ func TestConcurrentApprovals(t *testing.T) {
 	}
 	for i := 0; i < 5; i++ {
 		want := fmt.Sprintf(`ran {"n":%d}`, i+1)
-		if state.Messages[2+i].Content != want {
-			t.Fatalf("msg[%d]=%q want %q", i, state.Messages[2+i].Content, want)
+		if state.Messages[3+i].Content != want {
+			t.Fatalf("msg[%d]=%q want %q", i, state.Messages[3+i].Content, want)
 		}
 	}
 }

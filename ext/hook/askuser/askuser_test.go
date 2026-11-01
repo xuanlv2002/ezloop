@@ -44,8 +44,9 @@ func TestAskUserAnswerBecomesResult(t *testing.T) {
 	if len(requests) != 1 || !strings.Contains(requests[0], "用哪个端口?") {
 		t.Fatalf("requests: %v", requests)
 	}
-	if state.Messages[2].Content != "8080" {
-		t.Fatalf("answer msg: %q", state.Messages[2].Content)
+	// askuser 的 Guide 声明使 system 恒在 [0]（无 WithSystemPrompt 也创建），索引从 system 起数。
+	if state.Messages[3].Content != "8080" {
+		t.Fatalf("answer msg: %q", state.Messages[3].Content)
 	}
 }
 
