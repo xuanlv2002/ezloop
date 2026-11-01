@@ -57,14 +57,14 @@ func TestTaskForkReturnsResult(t *testing.T) {
 	if len(forkIDs) != 1 || forkIDs[0] == "" {
 		t.Fatalf("task.start should carry forkID: %v", forkIDs)
 	}
-	if state.Messages[2].Role != types.RoleTool || state.Messages[2].ToolCallID != "1" {
-		t.Fatalf("msg shape: %+v", state.Messages[2])
+	if state.Messages[3].Role != types.RoleTool || state.Messages[3].ToolCallID != "1" {
+		t.Fatalf("msg shape: %+v", state.Messages[3])
 	}
-	if state.Messages[2].Content != "sub result" {
-		t.Fatalf("result: %q", state.Messages[2].Content)
+	if state.Messages[3].Content != "sub result" {
+		t.Fatalf("result: %q", state.Messages[3].Content)
 	}
-	if state.Messages[3].Content != "done" {
-		t.Fatalf("parent final: %q", state.Messages[3].Content)
+	if state.Messages[4].Content != "done" {
+		t.Fatalf("parent final: %q", state.Messages[4].Content)
 	}
 }
 
@@ -100,8 +100,8 @@ func TestTaskInheritsParentTools(t *testing.T) {
 	if rec.calls != 1 {
 		t.Fatalf("fork should invoke inherited tool once, got %d", rec.calls)
 	}
-	if state.Messages[2].Content != "sub done" {
-		t.Fatalf("result: %q", state.Messages[2].Content)
+	if state.Messages[3].Content != "sub done" {
+		t.Fatalf("result: %q", state.Messages[3].Content)
 	}
 }
 
@@ -135,8 +135,8 @@ func TestForkDoesNotLeakIntermediateContext(t *testing.T) {
 		t.Fatalf("stop: %s", state.StopReason)
 	}
 	// 主历史只应看到最终答案，不含 fork 的 echo 中间结果。
-	if state.Messages[2].Content != "final answer" {
-		t.Fatalf("result should be fork final: %q", state.Messages[2].Content)
+	if state.Messages[3].Content != "final answer" {
+		t.Fatalf("result should be fork final: %q", state.Messages[3].Content)
 	}
 	for _, m := range state.Messages {
 		if strings.Contains(m.Content, "echo:") {
@@ -154,11 +154,11 @@ func TestTaskForkErrorBecomesResult(t *testing.T) {
 	if state.StopReason != types.StopCompleted {
 		t.Fatalf("fork error must not abort parent: %s", state.StopReason)
 	}
-	if !strings.Contains(state.Messages[2].Content, "task failed") {
-		t.Fatalf("result should carry fork error: %q", state.Messages[2].Content)
+	if !strings.Contains(state.Messages[3].Content, "task failed") {
+		t.Fatalf("result should carry fork error: %q", state.Messages[3].Content)
 	}
-	if state.Messages[3].Content != "recovered" {
-		t.Fatalf("parent should continue: %q", state.Messages[3].Content)
+	if state.Messages[4].Content != "recovered" {
+		t.Fatalf("parent should continue: %q", state.Messages[4].Content)
 	}
 }
 
@@ -229,8 +229,8 @@ func TestForkCannotForkAgain(t *testing.T) {
 		t.Fatalf("stop: %s", state.StopReason)
 	}
 	// fork 的最终答案（nested 调用被拒后继续）。
-	if state.Messages[2].Content != "after failed nested" {
-		t.Fatalf("result: %q", state.Messages[2].Content)
+	if state.Messages[3].Content != "after failed nested" {
+		t.Fatalf("result: %q", state.Messages[3].Content)
 	}
 }
 
@@ -256,8 +256,8 @@ func TestTaskForkRunsParentToolStartHooks(t *testing.T) {
 	if guard.skipped != 1 {
 		t.Fatalf("parent toolStart hook should run inside fork, got %d", guard.skipped)
 	}
-	if state.Messages[2].Content != "sub done" {
-		t.Fatalf("result: %q", state.Messages[2].Content)
+	if state.Messages[3].Content != "sub done" {
+		t.Fatalf("result: %q", state.Messages[3].Content)
 	}
 }
 
@@ -272,8 +272,8 @@ func TestTaskEmptyDescription(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if !strings.Contains(state.Messages[2].Content, "empty task") {
-		t.Fatalf("result: %q", state.Messages[2].Content)
+	if !strings.Contains(state.Messages[3].Content, "empty task") {
+		t.Fatalf("result: %q", state.Messages[3].Content)
 	}
 }
 
@@ -360,9 +360,17 @@ func TestForkSeedExcludesTriggeringUser(t *testing.T) {
 		}
 	}
 	// input 带包装前缀：分身以自包含的最终结果收尾（引导回传质量）。
+	// seed 承接主循环 system（Guide 附录在内），input 是其后的首条 user。
 	wantInput := TaskInputPrefix + "go"
-	if subMsgs[0].Role != types.RoleUser || subMsgs[0].Content != wantInput {
-		t.Fatalf("fork input should carry prefix: %q", subMsgs[0].Content)
+	var subInput *types.Message
+	for i := range subMsgs {
+		if subMsgs[i].Role == types.RoleUser {
+			subInput = &subMsgs[i]
+			break
+		}
+	}
+	if subInput == nil || subInput.Content != wantInput {
+		t.Fatalf("fork input should carry prefix: %v", subInput)
 	}
 	last := subMsgs[len(subMsgs)-1]
 	if last.Role != types.RoleAssistant || last.Content != "sub" {

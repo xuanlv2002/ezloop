@@ -3,963 +3,387 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ezloop · 简单，不简陋</title>
+<title>ezloop · Go Agent 循环引擎</title>
 <style>
   :root {
-    --bg: #05070d;
-    --bg-soft: #0a101d;
-    --panel: #0b1322;
-    --sidebar: #04060c;
-    --sidebar-hover: #0e1830;
-    --text: #e8edf6;
-    --muted: #8b98b0;
-    --accent: #7dd3fc;
-    --accent-deep: #38bdf8;
-    --border: #16213a;
-    --border-soft: #1c2942;
-    --code-bg: #070d1a;
-    --code-text: #dbe4f0;
-    --hook: #fbbf24;
-    --model: #00add8;
-    --tool: #34d399;
-    --asm: #a78bfa;
-    --white: #ffffff;
+    --bg: #fbfcfe;
+    --bg-soft: #f3f5f9;
+    --fg: #26272d;
+    --muted: #626a78;
+    --faint: #98a1b0;
+    --line: #e8eaf1;
+    --line-strong: #43474f;
+    --accent: #2563eb;
+    --accent-deep: #1d4ed8;
+    --accent-soft: #dbeafe;
+    --code-bg: #0d1424;
+    --code-fg: #dbe4f0;
+    --font-ui: 'Segoe UI Variable Text', 'Segoe UI', 'Microsoft YaHei UI', 'Microsoft YaHei', system-ui, -apple-system, sans-serif;
+    --font-mono: 'Cascadia Mono', 'Cascadia Code', Consolas, 'Microsoft YaHei UI', ui-monospace, monospace;
+    --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+    --shadow-sm: 0 2px 8px rgb(22 34 51 / 4%);
+    --shadow-md: 0 10px 30px rgb(22 34 51 / 7%);
+    --shadow-lg: 0 22px 60px rgb(22 34 51 / 12%);
   }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
   html { scroll-behavior: smooth; }
-  body {
-    font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-    color: var(--text); background: var(--bg); line-height: 1.75;
-  }
+  body { font-family: var(--font-ui); font-size: 14px; line-height: 1.75; color: var(--fg); background: var(--bg); }
   a { color: var(--accent); text-decoration: none; }
-  a:hover { text-decoration: underline; }
-  ::selection { background: rgba(56,189,248,.3); }
+  code { font-family: var(--font-mono); font-size: 12px; color: var(--fg); background: var(--bg-soft); padding: 1px 5px; border-radius: 4px; }
+  .wrap { width: 100%; max-width: 1060px; margin: 0 auto; padding: 0 32px; }
+  [hidden] { display: none !important; }
 
-  /* ─── 左侧导航 ─── */
-  nav {
-    position: fixed; top: 0; left: 0; bottom: 0; width: 268px; z-index: 50;
-    background: rgba(4,6,12,.92); backdrop-filter: blur(12px);
-    color: #cbd5e1; padding: 28px 0; overflow-y: auto;
-    border-right: 1px solid var(--border);
-  }
-  .brand { padding: 0 24px 20px; border-bottom: 1px solid var(--border); }
-  .brand .logo-mini { display: flex; align-items: center; gap: 12px; }
-  .brand h1 {
-    color: var(--white); font-size: 24px; letter-spacing: 1px; font-weight: 300;
-  }
-  .brand h1 b { font-weight: 700; }
-  .brand p { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
-  .nav-group { margin-top: 18px; }
-  .nav-group .label {
-    font-size: 11.5px; letter-spacing: 2px; color: #4b5a75;
-    padding: 8px 24px 4px; text-transform: uppercase;
-  }
-  nav a.item {
-    display: block; padding: 7px 24px; color: #94a3b8; font-size: 14px;
-    border-left: 3px solid transparent; transition: all .15s;
-  }
-  nav a.item:hover { background: var(--sidebar-hover); color: var(--white); text-decoration: none; }
-  nav a.item.active {
-    background: var(--sidebar-hover); color: var(--accent);
-    border-left-color: var(--accent);
-  }
-  .nav-footer {
-    margin-top: 28px; padding: 16px 24px 0; border-top: 1px solid var(--border);
-    font-size: 12.5px; color: var(--muted);
-  }
-  .nav-footer a { color: #94a3b8; }
+  /* 顶栏 */
+  .site-head { position: sticky; top: 0; z-index: 30; background: color-mix(in srgb, var(--bg) 82%, transparent); backdrop-filter: blur(18px) saturate(1.4); border-bottom: 1px solid var(--line); }
+  .site-head .wrap { display: flex; align-items: center; gap: 26px; height: 58px; }
+  .brand { display: flex; align-items: center; gap: 9px; color: var(--fg); }
+  .brand img { width: 26px; height: 26px; border-radius: 7px; }
+  .brand b { font-size: 14px; font-weight: 700; letter-spacing: .2px; }
+  .site-nav { display: flex; gap: 20px; font-size: 13px; }
+  .site-nav a { color: var(--muted); }
+  .site-nav a:hover { color: var(--fg); }
+  .site-nav a.on { color: var(--fg); font-weight: 600; }
+  .site-head .right { margin-left: auto; display: flex; gap: 10px; }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 34px; padding: 0 16px; border-radius: 9px; font-size: 13px; font-weight: 500; color: var(--fg); border: 1px solid var(--line); background: #fff; box-shadow: var(--shadow-sm); transition: border-color 160ms var(--ease-out), background 160ms var(--ease-out), transform 160ms var(--ease-out); }
+  .btn:hover { border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); transform: translateY(-1px); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.primary:hover { background: var(--accent-deep); border-color: var(--accent-deep); }
 
-  /* ─── 右侧内容：居中于导航右侧的剩余空间（268 + (剩余-900)/2）─── */
-  main {
-    max-width: 900px;
-    margin-left: max(268px, calc(268px + (100% - 1168px) / 2));
-    margin-right: auto;
-    padding: 72px 56px 96px;
-  }
-  section { margin-bottom: 88px; scroll-margin-top: 24px; }
-  h2 {
-    font-size: 26px; padding-bottom: 12px; border-bottom: 1px solid var(--border);
-    margin-bottom: 8px; display: flex; align-items: baseline; gap: 12px;
-    color: var(--white); font-weight: 650;
-  }
-  h2 .no {
-    color: var(--accent); font-size: 15px; font-weight: 700; letter-spacing: 1px;
-  }
-  h3 { font-size: 18.5px; margin: 34px 0 12px; color: var(--white); font-weight: 600; }
-  section .ext h3 { margin-top: 18px; }
-  p { margin: 10px 0; color: #c4cede; }
-  .sub { color: var(--muted); font-size: 14.5px; margin-bottom: 22px; }
-  ul, ol { padding-left: 24px; margin: 10px 0; color: #c4cede; }
-  li { margin: 5px 0; }
-  li::marker { color: var(--accent); }
-  strong { color: var(--white); }
-  code.inline {
-    background: rgba(56,189,248,.12); color: var(--accent);
-    padding: 1.5px 7px; border-radius: 5px;
-    font-family: Consolas, "JetBrains Mono", monospace; font-size: 87%;
-  }
+  /* Hero */
+  .hero { padding: 80px 0 64px; background: radial-gradient(720px 360px at 78% 12%, color-mix(in srgb, var(--accent) 7%, transparent), transparent 70%), radial-gradient(600px 300px at 12% 0%, color-mix(in srgb, #7dd3fc 6%, transparent), transparent 70%); }
+  .hero .wrap { display: grid; grid-template-columns: minmax(0, .95fr) minmax(0, 1.05fr); gap: 56px; align-items: center; }
+  .eyebrow { display: inline-flex; align-items: center; gap: 7px; font-size: 11.5px; letter-spacing: 1.4px; text-transform: uppercase; color: var(--accent); }
+  .eyebrow::before { content: ""; width: 18px; height: 1px; background: currentColor; opacity: .6; }
+  .hero h1 { margin-top: 16px; font-size: 38px; line-height: 1.34; font-weight: 650; letter-spacing: -.5px; text-wrap: balance; }
+  .hero .lede { margin-top: 18px; font-size: 15px; line-height: 1.85; color: var(--muted); max-width: 470px; }
+  .cta { display: flex; gap: 10px; margin-top: 28px; flex-wrap: wrap; }
+  .facts { margin-top: 20px; display: flex; gap: 8px; flex-wrap: wrap; font-size: 12px; color: var(--faint); }
+  .facts span + span::before { content: "·"; color: var(--line-strong); opacity: .35; margin-right: 8px; }
 
-  /* ─── HERO：粒子 + 光子 logo（块级自适应宽度，不使用 100vw 避免横向滚动条）─── */
-  .hero {
-    position: relative; margin-left: 268px;
-    min-height: 100vh;
-    display: flex; flex-direction: column; align-items: center; justify-content: center;
-    text-align: center; overflow: hidden; padding: 60px 30px 90px;
-    background: radial-gradient(ellipse 900px 520px at 50% 30%, rgba(14,42,66,.55), transparent 70%);
-    border-bottom: 1px solid var(--border);
-  }
-  #particles { position: absolute; inset: 0; width: 100%; height: 100%; }
-  .hero-inner { position: relative; z-index: 2; display: flex; flex-direction: column; align-items: center; }
-  .hero .logo-lg { width: 200px; height: 200px; margin-bottom: 6px; filter: drop-shadow(0 0 32px rgba(56,189,248,.35)); }
-  .hero .slogan {
-    font-size: 15px; letter-spacing: 8px; color: #bfe7f8; margin: 18px 0 4px;
-    font-weight: 500; text-indent: 8px;
-  }
-  .hero h1 {
-    font-size: 62px; letter-spacing: 3px; line-height: 1.12; color: var(--white);
-    font-weight: 300;
-  }
-  .hero h1 b { font-weight: 750; }
-  .hero .tagline { font-size: 17px; color: #a9b7cc; margin-top: 12px; }
-  .hero .tagline b { color: var(--white); }
-  .hero-cards {
-    display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 40px;
-    width: min(760px, 100%);
-  }
-  .hero-cards .card {
-    background: rgba(255,255,255,.035); border: 1px solid rgba(255,255,255,.09);
-    border-radius: 14px; padding: 16px 15px 13px; backdrop-filter: blur(6px);
-    transition: all .25s;
-  }
-  .hero-cards .card:hover {
-    background: rgba(56,189,248,.07); border-color: rgba(56,189,248,.35);
-    transform: translateY(-3px);
-  }
-  .card .ico { width: 22px; height: 22px; color: var(--accent); display: block; }
-  .card .t { font-weight: 600; font-size: 14.5px; margin-top: 6px; color: var(--white); }
-  .card .d { font-size: 12.5px; color: var(--muted); line-height: 1.55; margin-top: 3px; }
+  /* 代码窗口 */
+  .window { background: var(--code-bg); border-radius: 14px; box-shadow: var(--shadow-lg); overflow: hidden; }
+  .winbar { display: flex; align-items: center; gap: 6px; height: 36px; padding: 0 14px; background: rgb(255 255 255 / 4%); border-bottom: 1px solid rgb(255 255 255 / 7%); }
+  .winbar i { width: 8px; height: 8px; border-radius: 50%; background: #39445c; }
+  .winbar span { margin-left: 10px; font-size: 11.5px; color: #64748f; font-family: var(--font-mono); }
+  .window pre { padding: 18px 20px; overflow-x: auto; font-family: var(--font-mono); font-size: 12.5px; line-height: 1.8; color: var(--code-fg); }
+  .window pre .c { color: #5b6b8c; }
+  .window pre .k { color: #7dd3fc; }
+  .window pre .s { color: #a5d6a7; }
+  .window pre .f { color: #fbbf24; }
 
-  .install {
-    display: flex; align-items: center; gap: 12px; margin-top: 38px;
-    background: rgba(7,13,26,.85); border: 1px solid var(--border-soft);
-    border-radius: 10px; padding: 12px 22px;
-    color: #a5f3fc; font-family: Consolas, monospace; font-size: 14px;
-    backdrop-filter: blur(6px);
-  }
-  .install .prompt { color: #34d399; }
-  .install .path { color: #93c5fd; }
-  .scroll-hint {
-    position: absolute; bottom: 26px; left: 50%; transform: translateX(-50%);
-    color: #5b6b87; font-size: 12px; letter-spacing: 3px; z-index: 2;
-    animation: floaty 2.6s ease-in-out infinite;
-  }
-  @keyframes floaty { 0%,100% { transform: translate(-50%,0); } 50% { transform: translate(-50%,7px); } }
+  /* 通用区块 */
+  .section { padding: 70px 0; }
+  .section + .section { border-top: 1px solid var(--line); }
+  .section-head { max-width: 720px; }
+  .kicker { font-size: 11.5px; letter-spacing: 1.4px; text-transform: uppercase; color: var(--accent); }
+  .section-head h2 { margin-top: 10px; font-size: 26px; line-height: 1.4; font-weight: 650; letter-spacing: -.4px; text-wrap: balance; }
+  .section-head p { margin-top: 12px; font-size: 14.5px; color: var(--muted); }
 
-  /* ─── 代码块 ─── */
-  .codeblock {
-    background: var(--code-bg); border: 1px solid var(--border-soft); border-radius: 10px;
-    margin: 16px 0 22px; overflow: hidden;
-  }
-  .codeblock .bar {
-    display: flex; align-items: center; gap: 8px;
-    padding: 9px 16px; background: rgba(255,255,255,.025);
-    border-bottom: 1px solid rgba(255,255,255,.06);
-  }
-  .codeblock .bar .dot { width: 11px; height: 11px; border-radius: 50%; }
-  .dot.r { background: #f87171; } .dot.y { background: #fbbf24; } .dot.g { background: #34d399; }
-  .codeblock .bar .name {
-    margin-left: 6px; color: #7c8db0; font-size: 12.5px;
-    font-family: Consolas, monospace;
-  }
-  .codeblock pre {
-    padding: 16px 20px; overflow-x: auto; font-size: 13.5px; line-height: 1.72;
-    color: var(--code-text); font-family: Consolas, "JetBrains Mono", monospace;
-  }
-  pre .k { color: #c792ea; }
-  pre .s { color: #c3e88d; }
-  pre .c { color: #5c6f94; font-style: italic; }
-  pre .f { color: #82aaff; }
-  pre .t { color: #ffcb6b; }
-  pre .n { color: #f78c6c; }
+  .feature-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 30px; }
+  .feature { padding: 20px; border: 1px solid var(--line); border-radius: 12px; background: #fff; box-shadow: var(--shadow-sm); transition: transform 180ms var(--ease-out), box-shadow 180ms var(--ease-out), border-color 180ms var(--ease-out); }
+  .feature:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); border-color: color-mix(in srgb, var(--accent) 26%, var(--line)); }
+  .feature .ico { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 9px; background: var(--accent-soft); color: var(--accent); }
+  .feature .ico svg { width: 16px; height: 16px; }
+  .feature h3 { margin-top: 13px; font-size: 13.5px; font-weight: 600; }
+  .feature p { margin-top: 5px; font-size: 12.5px; color: var(--muted); line-height: 1.7; }
 
-  /* ─── 表格 ─── */
-  table { width: 100%; border-collapse: collapse; margin: 14px 0 24px; font-size: 14.5px; }
-  th {
-    text-align: left; padding: 10px 14px; background: rgba(255,255,255,.035);
-    border-bottom: 1px solid var(--border-soft); font-size: 13px; color: #9fb0c8;
-    letter-spacing: .5px;
-  }
-  td { padding: 9px 14px; border-bottom: 1px solid var(--border); vertical-align: top; color: #c4cede; }
-  tr:hover td { background: rgba(56,189,248,.045); }
-  td code, th code {
-    font-family: Consolas, monospace; font-size: 87%;
-    background: rgba(56,189,248,.12); color: var(--accent);
-    padding: 1px 6px; border-radius: 5px;
-  }
+  .numbers { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 30px; padding: 22px; border: 1px solid var(--line); border-radius: 14px; background: #fff; }
+  .numbers .n { font-size: 24px; font-weight: 650; letter-spacing: -.4px; }
+  .numbers .l { margin-top: 2px; font-size: 12px; color: var(--faint); }
 
-  /* ─── 原则卡片 ─── */
-  .principles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin: 22px 0; }
-  .principles .p {
-    border: 1px solid var(--border-soft); border-radius: 12px; padding: 18px;
-    background: linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.008));
-  }
-  .p .num {
-    display: inline-flex; width: 26px; height: 26px; border-radius: 8px;
-    align-items: center; justify-content: center;
-    background: rgba(56,189,248,.14); color: var(--accent);
-    font-weight: 700; font-size: 13.5px;
-  }
-  .p .t { font-weight: 600; margin: 10px 0 6px; font-size: 15.5px; color: var(--white); }
-  .p .d { font-size: 13.5px; color: var(--muted); line-height: 1.65; }
+  .body { margin-top: 26px; }
+  .body ul { margin: 14px 0 0; padding: 0; list-style: none; display: grid; gap: 7px; }
+  .body li { position: relative; padding-left: 16px; font-size: 13.5px; color: var(--muted); }
+  .body li::before { content: ""; position: absolute; left: 2px; top: .72em; width: 4px; height: 4px; border-radius: 50%; background: var(--faint); }
+  .body li b { color: var(--fg); font-weight: 600; }
 
-  /* ─── 提示框 ─── */
-  .tip {
-    border-left: 4px solid var(--accent-deep);
-    background: rgba(56,189,248,.07); border-radius: 0 10px 10px 0;
-    padding: 12px 18px; margin: 18px 0; font-size: 14px; color: #c8dced;
-  }
-  .tip b { color: var(--accent); }
-  .tip.warn { border-left-color: var(--hook); background: rgba(251,191,36,.07); color: #e8dcc0; }
-  .tip.warn b { color: var(--hook); }
+  /* 文档卡片 */
+  .doc-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 30px; }
+  .doc-card { display: flex; gap: 12px; align-items: baseline; padding: 15px 16px; border: 1px solid var(--line); border-radius: 11px; background: #fff; color: var(--fg); box-shadow: var(--shadow-sm); transition: border-color 160ms var(--ease-out), transform 160ms var(--ease-out); }
+  .doc-card:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); transform: translateY(-1px); }
+  .doc-card .n { font-family: var(--font-mono); font-size: 10.5px; color: var(--accent); }
+  .doc-card .t { font-size: 13px; font-weight: 600; }
+  .doc-card .d { font-size: 11.5px; color: var(--faint); margin-top: 1px; }
+  .doc-card .content { min-width: 0; }
 
-  /* ─── mermaid 架构图 ─── */
-  .diagram-card {
-    border: 1px solid var(--border-soft); border-radius: 14px; padding: 16px 8px 4px;
-    background: var(--bg-soft); margin: 18px 0 10px; overflow-x: auto;
-  }
-  .diagram-card svg { max-width: 100%; height: auto; display: block; margin: 0 auto; }
-  .diagram-cap { text-align: center; font-size: 13px; color: var(--muted); padding: 10px 0 12px; }
+  /* 文章阅读 */
+  .doc-tabs { display: flex; gap: 8px; overflow-x: auto; padding: 18px 0 4px; scrollbar-width: none; }
+  .doc-tabs::-webkit-scrollbar { display: none; }
+  .doc-tabs a { flex: none; padding: 6px 15px; border-radius: 999px; border: 1px solid var(--line); background: #fff; color: var(--muted); font-size: 12.5px; box-shadow: var(--shadow-sm); transition: color 140ms var(--ease-out), border-color 140ms var(--ease-out), background 140ms var(--ease-out); }
+  .doc-tabs a:hover { color: var(--fg); border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
+  .doc-tabs a.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .doc-wrap { max-width: 860px; margin: 0 auto; padding: 0 32px 110px; }
+  .doc-head { display: flex; align-items: baseline; gap: 14px; border-bottom: 1px solid var(--line); padding-bottom: 18px; margin-bottom: 30px; }
+  .doc-head .num { font-family: var(--font-mono); font-size: 12px; color: var(--accent); }
+  .doc-head h1 { font-size: 25px; font-weight: 650; letter-spacing: -.3px; }
+  .doc-back { margin-top: 18px; font-size: 13px; color: var(--faint); display: inline-flex; gap: 6px; }
+  .doc-back:hover { color: var(--fg); }
+  .doc-loading { margin-top: 60px; text-align: center; color: var(--faint); font-size: 13px; }
+  .markdown { font-size: 14px; line-height: 1.85; }
+  .markdown h2 { margin: 40px 0 14px; font-size: 20px; font-weight: 650; letter-spacing: -.2px; padding-top: 10px; }
+  .markdown h3 { margin: 30px 0 10px; font-size: 15.5px; font-weight: 650; }
+  .markdown p { margin: 10px 0; color: var(--fg); }
+  .markdown ul, .markdown ol { margin: 10px 0 10px 22px; color: var(--fg); }
+  .markdown li { margin: 4px 0; }
+  .markdown blockquote { margin: 14px 0; padding: 10px 16px; border-left: 3px solid var(--accent-soft); background: var(--bg-soft); border-radius: 0 8px 8px 0; color: var(--muted); }
+  .markdown pre { margin: 14px 0; padding: 16px 18px; background: var(--code-bg); color: var(--code-fg); border-radius: 12px; overflow-x: auto; font-family: var(--font-mono); font-size: 12.5px; line-height: 1.75; }
+  .markdown pre code { background: none; padding: 0; font-size: 12.5px; color: inherit; }
+  .markdown table { width: 100%; margin: 16px 0; border-collapse: collapse; background: #fff; border: 1px solid var(--line); font-size: 13px; }
+  .markdown th { text-align: left; font-size: 12px; font-weight: 600; color: var(--faint); padding: 9px 14px; background: var(--bg-soft); border-bottom: 1px solid var(--line); }
+  .markdown td { padding: 9px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .markdown tr:last-child td { border-bottom: 0; }
+  .markdown td:first-child, .markdown th:first-child { white-space: nowrap; }
+  .markdown hr { border: 0; border-top: 1px solid var(--line); margin: 34px 0; }
+  .table-wrap { overflow-x: auto; }
 
-  /* ─── 扩展指南小节 ─── */
-  .ext {
-    border: 1px solid var(--border-soft); border-radius: 12px; padding: 4px 22px 8px;
-    margin: 16px 0; background: var(--panel);
-  }
-  .ext h3 { margin-top: 18px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-  .badge {
-    font-size: 11px; font-weight: 700; letter-spacing: 1px; padding: 2.5px 9px;
-    border-radius: 999px; text-transform: uppercase;
-  }
-  .badge.model { background: rgba(0,173,216,.16); color: #67e0f9; }
-  .badge.tool   { background: rgba(52,211,153,.14); color: #6ee7b7; }
-  .badge.hook   { background: rgba(251,191,36,.13); color: #fcd34d; }
-  .badge.warp   { background: rgba(167,139,250,.15); color: #c4b5fd; }
-  .badge.base   { background: rgba(255,255,255,.08); color: #cbd5e1; }
+  /* 页脚 */
+  .site-foot { border-top: 1px solid var(--line); padding: 32px 0 44px; }
+  .site-foot .wrap { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; font-size: 12.5px; color: var(--faint); }
+  .site-foot .right { margin-left: auto; display: flex; gap: 20px; }
+  .site-foot a { color: var(--muted); }
+  .site-foot a:hover { color: var(--fg); }
 
-  footer {
-    margin-left: max(268px, calc(268px + (100% - 1168px) / 2));
-    margin-right: auto;
-    padding: 26px 56px; border-top: 1px solid var(--border);
-    color: var(--muted); font-size: 13.5px; text-align: center;
-  }
-
-  @media (max-width: 1168px) {
-    nav { display: none; }
-    main, footer {
-      margin-left: 0; margin-right: 0; padding-left: 22px; padding-right: 22px;
-    }
-    .hero { margin-left: 0; padding: 50px 22px 80px; min-height: 100vh; }
-    .hero h1 { font-size: 42px; }
-    .hero-cards { grid-template-columns: repeat(2, 1fr); }
-    .principles { grid-template-columns: 1fr; }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    html { scroll-behavior: auto; }
-    .scroll-hint { animation: none; }
+  @media (max-width: 860px) {
+    .hero .wrap { grid-template-columns: 1fr; gap: 36px; }
+    .hero h1 { font-size: 28px; }
+    .feature-grid, .doc-grid { grid-template-columns: 1fr; }
+    .numbers { grid-template-columns: repeat(2, 1fr); }
+    .site-nav { display: none; }
+    .section { padding: 50px 0; }
   }
 </style>
 </head>
 <body>
 
-<nav id="nav">
-  <div class="brand">
-    <div class="logo-mini">
-      <svg width="40" height="40" viewBox="0 0 100 100" aria-hidden="true">
-        <defs>
-          <linearGradient id="mring" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0" stop-color="#7dd3fc"/><stop offset=".55" stop-color="#38bdf8"/><stop offset="1" stop-color="#a78bfa"/>
-          </linearGradient>
-        </defs>
-        <circle cx="50" cy="50" r="33" fill="none" stroke="url(#mring)" stroke-width="4"
-                stroke-linecap="round" stroke-dasharray="160 42" transform="rotate(-35 50 50)"/>
-        <circle cx="50" cy="50" r="5" fill="#fff"/>
-        <circle cx="50" cy="50" r="9" fill="rgba(255,255,255,.25)"/>
-        <circle cx="77" cy="31" r="3.6" fill="#fff">
-          <animate attributeName="opacity" values="1;.5;1" dur="2.2s" repeatCount="indefinite"/>
-        </circle>
-      </svg>
-      <h1><b>ez</b>loop</h1>
-    </div>
-    <p>简单，不简陋。</p>
+<header class="site-head">
+  <div class="wrap">
+    <a class="brand" href="#top"><img src="logo.svg" alt="ezloop"><b>ezloop</b></a>
+    <nav class="site-nav">
+      <a href="#ideas" data-nav="ideas">理念</a>
+      <a href="#docs" data-nav="docs">文档</a>
+      <a href="https://pkg.go.dev/github.com/xuanlv2002/ezloop" target="_blank" rel="noreferrer">API</a>
+    </nav>
+    <div class="right"><a class="btn" href="https://github.com/xuanlv2002/ezloop">GitHub</a></div>
   </div>
-  <div class="nav-group">
-    <div class="label">入门</div>
-    <a class="item" href="#idea">设计理念</a>
-    <a class="item" href="#quickstart">快速开始</a>
-  </div>
-  <div class="nav-group">
-    <div class="label">详细介绍</div>
-    <a class="item" href="#hooks">钩子使用</a>
-    <a class="item" href="#warp">Warp 使用</a>
-    <a class="item" href="#ext">官方扩展能力</a>
-    <a class="item" href="#local-agent">本地 Agent · 事件与上下文</a>
-    <a class="item" href="#multi-tenant">多租户 Agent · 事件与上下文</a>
-  </div>
-  <div class="nav-footer">
-    <a href="https://github.com/xuanlv2002/ezloop" target="_blank">GitHub</a> ·
-    <a href="https://pkg.go.dev/github.com/xuanlv2002/ezloop" target="_blank">pkg.go.dev</a>
-  </div>
-</nav>
+</header>
 
-<!-- ═══════════════ HERO ═══════════════ -->
-<div class="hero">
-  <canvas id="particles"></canvas>
-  <div class="hero-inner">
-    <svg class="logo-lg" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="ezloop logo">
-      <defs>
-        <linearGradient id="ringGrad" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stop-color="#7dd3fc"/>
-          <stop offset=".5" stop-color="#38bdf8"/>
-          <stop offset="1" stop-color="#a78bfa"/>
-        </linearGradient>
-      </defs>
+<div id="home">
 
-      <g>
-        <circle cx="100" cy="100" r="60" fill="none" stroke="url(#ringGrad)" stroke-width="4"
-                stroke-linecap="round" stroke-dasharray="290 87" transform="rotate(-35 100 100)"/>
-        <circle cx="146" cy="61" r="12" fill="rgba(255,255,255,.16)"/>
-        <circle cx="146" cy="61" r="6" fill="#ffffff"/>
-        <animateTransform attributeName="transform" type="rotate" from="0 100 100" to="360 100 100"
-                          dur="16s" repeatCount="indefinite"/>
-      </g>
-
-      <circle cx="100" cy="100" r="13" fill="rgba(255,255,255,.15)"/>
-      <circle cx="100" cy="100" r="7" fill="#ffffff"/>
-    </svg>
-
-    <div class="slogan">简 单 ， 不 简 陋 。</div>
-    <h1><b>ez</b>loop</h1>
-    <div class="tagline"><b>一个 Loop · 两个节点 · 七个钩子</b> —— 用节点装饰器与流式插件组装任意智能体</div>
-
-    <div class="hero-cards">
-      <div class="card">
-        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><polyline points="20 3.5 20 7 16.5 7"/></svg>
-        <div class="t">极简引擎</div><div class="d">引擎只负责流转，不理解任何具体能力</div>
+<section class="hero" id="top">
+  <div class="wrap">
+    <div>
+      <div class="eyebrow">Go Agent Loop Engine</div>
+      <h1>一个干净的 Go Agent 循环引擎</h1>
+      <p class="lede">你提供模型 provider 和工具，ezloop 驱动「模型 → 工具 → 模型」的循环直到任务完成，并保证消息历史全程协议完整、可直接存盘恢复。重试、限流、审批、MCP、会话持久化全部是可选扩展，引擎本身零第三方依赖。</p>
+      <div class="cta">
+        <a class="btn primary" href="#doc=快速开始">快速开始</a>
+        <a class="btn" href="#doc=设计理念">为什么这样设计</a>
       </div>
-      <div class="card">
-        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><line x1="17.5" y1="14" x2="17.5" y2="21"/><line x1="14" y1="17.5" x2="21" y2="17.5"/></svg>
-        <div class="t">一切皆插件</div><div class="d">重试、MCP、审批、会话，全部是 Warp / Hook</div>
-      </div>
-      <div class="card">
-        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2.5H6.5a2 2 0 0 0-2 2v15a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V8z"/><polyline points="14 2.5 14 8 19.5 8"/><line x1="8.5" y1="13" x2="15.5" y2="13"/><line x1="8.5" y1="17" x2="15.5" y2="17"/></svg>
-        <div class="t">状态即消息</div><div class="d">LoopState.Messages 可序列化、可恢复</div>
-      </div>
-      <div class="card">
-        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 4 14 11 14 10.5 22 20 10 13 10"/></svg>
-        <div class="t">流式 + 异步</div><div class="d">SSE chunk 事件、RunAsync 双轨 API</div>
+      <div class="facts">
+        <span>Go 1.25+</span><span>框架层零第三方依赖</span><span>Apache-2.0</span><span><code>go test ./... -race</code> 全绿</span>
       </div>
     </div>
-
-    <div class="install">
-      <span class="prompt">$</span>
-      <span>go get</span><span class="path">github.com/xuanlv2002/ezloop</span>
-    </div>
-  </div>
-  <div class="scroll-hint">▼ SCROLL</div>
-</div>
-
-<main>
-
-  <!-- ═══════════════ 01 设计理念 ═══════════════ -->
-  <section id="idea">
-    <h2><span class="no">01</span>设计理念</h2>
-    <p class="sub">大多数 Agent 框架把重试、MCP、审批、日志焊死在引擎里，能力越多引擎越重。ezloop 反其道而行：<b>引擎不理解任何具体能力，它只负责流转。</b></p>
-
-    <table>
-      <tr><th>概念</th><th>关注点</th><th>扩展方式</th></tr>
-      <tr><td><b>model</b></td><td>节点本身：模型调用</td><td>实现 <code>provider.ModelProvider</code> + <code>WithModelWarp</code> 中间件</td></tr>
-      <tr><td><b>tool</b></td><td>节点本身：工具执行</td><td>实现 <code>types.Tool</code> + <code>WithToolWarp</code> 中间件</td></tr>
-      <tr><td><b>hook</b></td><td>流的前后：生命周期与控制流</td><td>实现 hook 小接口 + <code>WithHooks</code> 插入</td></tr>
-    </table>
-
-    <h3>一个 Loop 的解剖</h3>
-    <p class="sub">七个 hook（黄）挂在循环的节点外，按时机触发；两个节点（青 / 绿）被各自的 warp 壳（紫虚线框）包住——引擎只负责这条流转，其余全是扩展。</p>
-    <div class="diagram-card">
-<pre class="mermaid">
-flowchart TD
-    IN(["Run(input)"]):::misc --> SH
-    SH["① OnStart&lt;br/&gt;注册工具 · 修理历史&lt;br/&gt;组装期一次"]:::hook --> MS
-    EH["⑦ OnEnd&lt;br/&gt;成败都跑 · defer 语义"]:::hook --> OUT(["LoopState · Messages"]):::misc
-
-    subgraph LOOP["⭕ loop 循环 · 每轮一个 iteration"]
-        MS["② OnModelStart&lt;br/&gt;可置 Stop 提前终止"]:::hook --> MW
-        subgraph MN["model 节点 · warp 壳"]
-            MW["modelretry"]:::warp --> MC["model 调用"]:::model
-        end
-        MC --> ME["③ OnModelEnd"]:::hook
-        ME --> DEC{"发起 tool_call?"}:::misc
-        DEC -->|"无 → 完成"| EXIT["StopReason = completed"]:::misc
-        DEC -->|"有 · N 个独立并发"| TS["④ OnToolStart&lt;br/&gt;Proceed / Skip / Abort"]:::hook
-        subgraph TOOLS["工具段 · 每个调用是独立单元"]
-            TS --> TW
-            subgraph TN["tool 节点 · warp 壳"]
-                TW["limit · safetool"]:::warp --> TC["tool 执行"]:::tool
-            end
-            TC --> TE["⑤ OnToolEnd&lt;br/&gt;可改写结果入史"]:::hook
-        end
-        TE --> LH["⑥ OnLoop&lt;br/&gt;回边守卫"]:::hook
-        LH -->|"下一轮"| MS
-        EXIT --> EH
-    end
-
-    classDef hook fill:#291f06,stroke:#fbbf24,color:#fde68a,stroke-width:1.5px
-    classDef warp fill:#1d1636,stroke:#a78bfa,color:#ddd3fc,stroke-dasharray:5 3
-    classDef model fill:#072331,stroke:#00add8,color:#9be5f7
-    classDef tool fill:#07281b,stroke:#34d399,color:#a7f3d0
-    classDef misc fill:#0b1322,stroke:#33496e,color:#c4cede
-    style LOOP fill:#0a101d,stroke:#33496e,stroke-dasharray:6 4
-    style MN fill:transparent,stroke:#a78bfa,stroke-dasharray:4 3
-    style TN fill:transparent,stroke:#a78bfa,stroke-dasharray:4 3
-    style TOOLS fill:transparent,stroke:#263449
-</pre>
-    </div>
-    <div class="diagram-cap">model ↔ tool 循环：无 tool_call 即完成；每次工具调用是独立单元（判定 → warp 壳执行 → 后处理），并发跑完整链后按原序入史。</div>
-
-    <div class="principles">
-      <div class="p"><b>节点与流分离</b><span>model / tool 是循环的节点，用 Warp 装饰（怎么执行）；hook 是循环的切面，按时机插入（什么时候做什么）。两者互不越界。</span></div>
-      <div class="p"><b>扩展永不入核</b><span>重试是 warp，MCP 是 hook，审批是 hook，会话持久化也是 hook。引擎零扩展依赖，不用不引入。</span></div>
-      <div class="p"><b>状态即消息</b><span>loop 的全部状态是 LoopState，其中 Messages 可序列化、可恢复、可直接作为下一轮历史。没有隐藏的内存中间态。</span></div>
-    </div>
-
-    <div class="tip">
-      <b>并行分身（fork）：</b>需要提速与压缩上下文时，不是雇佣一个陌生 subagent，而是
-      <b>fork 同一个自我</b>——引擎原语 <code>core.Agent.Fork</code> 复刻当前 Agent（provider / warp / 超参 / 全部运行期 hook）
-      与上下文快照并行干活，过程不回流主上下文、只回传最终结果；事件与 session 按
-      <code>ForkID</code> 区分归属。官方 <code>ext/hook/task</code> 工具开箱即用。
-    </div>
-  </section>
-
-  <!-- ═══════════════ 02 快速开始 ═══════════════ -->
-  <section id="quickstart">
-    <h2><span class="no">02</span>快速开始</h2>
-    <p class="sub">十行代码跑起来 —— OpenAI 兼容接口（DeepSeek / SiliconFlow / vLLM / Ollama 通用）。</p>
-
-    <div class="codeblock">
-      <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">main.go</span></div>
-<pre>agent := core.<span class="f">NewAgent</span>(p,
-    core.<span class="f">WithSystemPrompt</span>(<span class="s">"你是一个严谨的助手"</span>),
-    core.<span class="f">WithModelWarp</span>(modelretry.<span class="f">Warp</span>()),   <span class="c">// 模型节点：重试</span>
-    core.<span class="f">WithToolWarp</span>(limit.<span class="f">Warp</span>(<span class="n">4</span>), safetool.<span class="f">Warp</span>()), <span class="c">// 工具节点：并发闸 + 防护</span>
-    core.<span class="f">WithHooks</span>(filetools.<span class="f">New</span>(fsys)),      <span class="c">// 流：文件工具</span>
-    core.<span class="f">WithStreaming</span>(<span class="k">true</span>),
+    <div class="window">
+      <div class="winbar"><i></i><i></i><i></i><span>agent.go</span></div>
+      <pre>fsys := fs.<span class="f">NewLocal</span>(<span class="s">"."</span>)
+agent := core.<span class="f">NewAgent</span>(p,
+    core.WithSystemPrompt(<span class="s">"你是 ezloop 驱动的命令行助手"</span>),
+    core.WithModelWarp(modelretry.<span class="f">Warp</span>()),              <span class="c">// 模型调用：重试</span>
+    core.WithToolWarp(limit.<span class="f">Warp</span>(4), safetool.<span class="f">Warp</span>()),  <span class="c">// 工具执行：并发闸 + 防护</span>
+    core.WithHooks(
+        contextfix.New(),          <span class="c">// 修理外部带入的破损历史</span>
+        filetools.New(fsys),       <span class="c">// read/write/edit/terminal 四件套</span>
+        askuser.New(),             <span class="c">// 模型向用户提问</span>
+        task.New(),                <span class="c">// 并行分身</span>
+    ),
+    core.WithStreaming(<span class="k">true</span>),
 )
 
-<span class="c">// 同步单轮</span>
-state, err := agent.<span class="f">Run</span>(ctx, <span class="s">"帮我读一下 hello.txt"</span>)
-
-<span class="c">// 多轮：上一轮 Messages 直接作为历史（system 自动过滤，不重复注入）</span>
-state, err = agent.<span class="f">Run</span>(ctx, <span class="s">"再总结一下"</span>, core.<span class="f">WithHistory</span>(state.Messages...))</pre>
+state, err := agent.<span class="f">Run</span>(ctx, <span class="s">"帮我看看当前目录有什么"</span>)</pre>
     </div>
+  </div>
+</section>
 
-    <h3>流式与异步（服务端场景）</h3>
-    <div class="codeblock">
-      <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">async.go</span></div>
-<pre>h := agent.<span class="f">RunAsync</span>(ctx, <span class="s">"长任务"</span>)
-<span class="k">defer</span> h.<span class="f">Cancel</span>()                      <span class="c">// per-request 取消传播</span>
-<span class="k">for</span> e := <span class="k">range</span> h.<span class="f">Events</span>() { render(e) } <span class="c">// loop 结束自动 close；channel 天然并发安全</span>
-state, err := h.<span class="f">Wait</span>()
-
-<span class="c">// 或回调式（CLI 直渲）：实现必须并发安全且快速返回</span>
-core.<span class="f">WithOnEvent</span>(<span class="k">func</span>(e event.Event) {
-    <span class="k">switch</span> e.Type {
-    <span class="k">case</span> event.EventModelChunk:     <span class="f">print</span>(e.Data.(<span class="k">string</span>)) <span class="c">// 正文增量</span>
-    <span class="k">case</span> event.EventReasoningChunk: <span class="f">print</span>(e.Data.(<span class="k">string</span>)) <span class="c">// 思考增量</span>
-    }
-})</pre>
+<section class="section" id="ideas">
+  <div class="wrap">
+    <div class="section-head">
+      <div class="kicker">理念</div>
+      <h2>引擎只做三件事：循环、历史、事件</h2>
+      <p>驱动模型与工具的循环；在任何退出路径下保证消息历史协议完整（每个 tool_call 必有对应结果，可直接存盘恢复）；执行过程以事件流实时透出。除此之外的能力全部外挂，不进引擎。</p>
     </div>
-
-    <div class="tip">
-      <b>完整示例：</b><code>examples/chat</code> 集成全部官方能力（流式渲染节流 / 工具审批 / 分身 task / 会话持久化恢复），
-      <code>cp .env.example .env && go run ./examples/chat</code> 直接体验。
+    <div class="feature-grid">
+      <div class="feature">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M8 10l-2 2 2 2M13 14h4"/></svg></div>
+        <h3>model · 节点</h3>
+        <p>实现 <code>provider.ModelProvider</code> 接入任意模型；<code>WithModelWarp</code> 给每次调用包上重试、降级、路由等中间件。流式可选实现 <code>StreamProvider</code>。</p>
+      </div>
+      <div class="feature">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a5 5 0 0 0-7 7l-4 4 1.4 1.4 4-4a5 5 0 0 0 7-7l-2.4 2.4 1 1-4 4"/></svg></div>
+        <h3>tool · 节点</h3>
+        <p><code>types.NewTool</code> 从参数结构体反射生成 schema；<code>WithToolWarp</code> 给每次执行包上限流、防护。多个调用默认并发，结果按原始顺序写入历史。</p>
+      </div>
+      <div class="feature">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/></svg></div>
+        <h3>hook · 切面</h3>
+        <p>七个生命周期时机点，外加 <code>GuideHook</code> 静态声明。注册工具、拦截审批、压缩上下文、保存会话——实现对应小接口，按注册序插在对应时机。</p>
+      </div>
     </div>
-  </section>
-
-  <!-- ═══════════════ 03 钩子使用 ═══════════════ -->
-  <section id="hooks">
-    <h2><span class="no">03</span>详细介绍 · 钩子（Hook）</h2>
-    <p class="sub">hook 是横向切面：挂在循环的节点前后，拿得到完整 state —— 拦截、注入、改写、收尾。</p>
-
-    <table>
-      <tr><th>接口</th><th>时机</th><th>典型用途</th></tr>
-      <tr><td><code>StartHook</code></td><td>Run 开始（组装期，一次）</td><td>注册工具（mcp/filetools/task）、修理历史（contextfix）</td></tr>
-      <tr><td><code>ModelStartHook</code></td><td>每次模型调用前</td><td>置 <code>state.Stop</code> 提前终止、上下文预压缩</td></tr>
-      <tr><td><code>ModelEndHook</code></td><td>模型调用后</td><td>响应审计、用量记账</td></tr>
-      <tr><td><code>ToolStartHook</code></td><td>每个工具调用前（跨调用并发）</td><td>审批拦截、权限判定</td></tr>
-      <tr><td><code>ToolEndHook</code></td><td>调用后、入史前（跨调用并发）</td><td>改写结果（offload 卸载大结果）</td></tr>
-      <tr><td><code>LoopHook</code></td><td>迭代回边</td><td>max-iteration 守卫、配置热加载</td></tr>
-      <tr><td><code>EndHook</code></td><td>Run 结束（defer 语义，成败都跑）</td><td>会话快照（localsession）、摘要（summary）</td></tr>
-    </table>
-
-    <h3>短路语义：Action</h3>
-    <p class="sub">ToolStartHook 返回 <code>Action</code>——<b>决策与结果是一体的</b>，不分离两处：</p>
-    <div class="codeblock">
-      <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">action.go</span></div>
-<pre><span class="k">return</span> hook.<span class="f">Proceed</span>, <span class="k">nil</span>            <span class="c">// 正常执行</span>
-<span class="k">return</span> hook.<span class="f">Abort</span>, <span class="k">nil</span>              <span class="c">// 终止整个 loop（StopReason = aborted）</span>
-<span class="k">return</span> hook.<span class="f">Skip</span>(<span class="s">"denied by policy"</span>), <span class="k">nil</span> <span class="c">// 跳过本次调用，文案作为工具结果入史，循环继续</span></pre>
+    <div class="numbers">
+      <div><div class="n">2</div><div class="l">类装饰器（模型 / 工具）</div></div>
+      <div><div class="n">7+1</div><div class="l">个时机钩子 + Guide 声明</div></div>
+      <div><div class="n">1</div><div class="l">个 Fork 派生原语</div></div>
+      <div><div class="n">0</div><div class="l">引擎对扩展的 import</div></div>
     </div>
-    <div class="tip"><b>引擎不变量：</b>任何退出路径（完成 / skip / abort / hook 错误 / 取消）下，每个 tool_call 必有结果消息——发给模型的序列永远协议完整，持久化恢复无需理解断点。</div>
-
-    <h3>自定义 hook：参数级审批</h3>
-    <div class="codeblock">
-      <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">guard.go</span></div>
-<pre><span class="k">type</span> Guard <span class="k">struct</span>{}
-
-<span class="k">func</span> (Guard) <span class="f">Name</span>() <span class="k">string</span> { <span class="k">return</span> <span class="s">"guard"</span> }
-
-<span class="k">func</span> (Guard) <span class="f">OnToolStart</span>(_ context.Context, _ *types.LoopState, call *types.ToolCall) (hook.Action, <span class="k">error</span>) {
-    <span class="k">if</span> call.Name == <span class="s">"terminal"</span> {
-        <span class="k">var</span> a <span class="k">struct</span>{ Command <span class="k">string</span> `json:<span class="s">"command"</span>` }
-        _ = json.<span class="f">Unmarshal</span>(call.Args, &amp;a)
-        <span class="k">if</span> !isReadOnly(a.Command) {
-            <span class="k">return</span> hook.<span class="f">Skip</span>(<span class="s">"terminal: read-only commands only"</span>), <span class="k">nil</span>
-        }
-    }
-    <span class="k">return</span> hook.<span class="f">Proceed</span>, <span class="k">nil</span>
-}
-
-agent := core.<span class="f">NewAgent</span>(p, core.<span class="f">WithHooks</span>(Guard{})) <span class="c">// 实现了哪个接口就挂到哪个时机</span></pre>
+    <div class="body">
+      <ul>
+        <li><b>所有能力都是扩展</b> —— 重试是装饰器，MCP、审批、会话保存都是钩子。引擎代码不 import 任何扩展，不用不引入，升级互不影响。</li>
+        <li><b>状态即消息</b> —— 循环的全部状态是 <code>LoopState.Messages</code>：可序列化、可存盘，下一轮 <code>WithHistory</code> 原样传回。没有隐藏的内存状态，恢复就是重放历史。</li>
+        <li><b>构建后只读</b> —— <code>NewAgent</code> 之后 Agent 不可变：可以做成全局单例被多个 goroutine 并发使用，Fork 派生分身靠浅拷贝完成。</li>
+        <li><b>装饰器在节点内，钩子在节点外</b> —— warp 决定节点怎么执行，hook 决定流程什么时候插入逻辑，两层互不越界。</li>
+      </ul>
     </div>
+  </div>
+</section>
 
-    <div class="tip">
-      <b>两条时序规则：</b>① 同一作用点多个 hook 按注册序执行，先注册先跑；② 除 OnToolStart / OnToolEnd
-      （跨调用并发，多个人工审批同时呈现）外，引擎串行调用全部回调——回调内可放心读写 state，
-      并发回调里写共享数据须自行加锁。
-      <b>fork 分身全继承运行期 hook</b>（审批无旁路、分身可问用户），组装期 hook 不重跑。
+<section class="section" id="docs">
+  <div class="wrap">
+    <div class="section-head">
+      <div class="kicker">文档</div>
+      <h2>从跑通第一个 agent，到理解每一个设计决定</h2>
+      <p>每篇是一个独立主题：先跑起来，再按需深入。API 细节以 <a href="https://pkg.go.dev/github.com/xuanlv2002/ezloop" target="_blank" rel="noreferrer">pkg.go.dev</a> 为准。</p>
     </div>
-  </section>
-
-  <!-- ═══════════════ 04 Warp 使用 ═══════════════ -->
-  <section id="warp">
-    <h2><span class="no">04</span>详细介绍 · Warp（节点装饰器）</h2>
-    <p class="sub">warp 是纵向封装：包住节点本身（在节点内部），管「怎么执行」——重试、防护、限流、缓存。它拿不到 state，只发出观察事件。</p>
-
-    <table>
-      <tr><th></th><th>Hook（横向切面）</th><th>Warp（纵向封装）</th></tr>
-      <tr><td><b>位置</b></td><td>节点外（前后）</td><td>节点内（包住节点）</td></tr>
-      <tr><td><b>能拿到</b></td><td>完整 LoopState</td><td>per-Run event.Emitter（只观察）</td></tr>
-      <tr><td><b>典型</b></td><td>审批、注入、持久化</td><td>重试、panic 防护、并发闸</td></tr>
-    </table>
-
-    <div class="codeblock">
-      <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">warp.go</span></div>
-<pre><span class="c">// 装饰器签名：组装时注入 per-Run 事件出口（类比 net/http middleware）</span>
-<span class="k">type</span> Handler[T <span class="k">any</span>] <span class="k">func</span>(em event.Emitter, node T) T
-
-<span class="c">// 洋葱序：先注册的在外层 —— 请求外→内，结果内→外</span>
-core.<span class="f">WithToolWarp</span>(safetool.<span class="f">Warp</span>(), limit.<span class="f">Warp</span>(<span class="n">4</span>))
-<span class="c">// safetool 在外层才能捕获 limit 与工具本体的 panic</span>
-
-<span class="c">// 自定义：跨全部工具共享的计时 warp（状态在工厂闭包里，per-Run 组装）</span>
-<span class="k">func</span> <span class="f">Timing</span>() warp.ToolHandler {
-    <span class="k">var</span> mu sync.Mutex
-    total := time.<span class="f">Duration</span>(<span class="n">0</span>)
-    <span class="k">return</span> <span class="k">func</span>(_ event.Emitter, inner types.Tool) types.Tool {
-        <span class="k">return</span> toolFunc(<span class="k">func</span>(ctx context.Context, args json.RawMessage) (<span class="k">string</span>, <span class="k">error</span>) {
-            start := time.<span class="f">Now</span>()
-            out, err := inner.<span class="f">Invoke</span>(ctx, args)
-            mu.<span class="f">Lock</span>(); total += time.<span class="f">Since</span>(start); mu.<span class="f">Unlock</span>()
-            <span class="k">return</span> out, err
-        }, inner)
-    }
-}</pre>
+    <div class="doc-grid">
+      <a class="doc-card" href="#doc=设计理念"><span class="n">01</span><span class="content"><span class="t">设计理念</span><span class="d">为什么引擎只做循环，能力全部外挂</span></span></a>
+      <a class="doc-card" href="#doc=快速开始"><span class="n">02</span><span class="content"><span class="t">快速开始</span><span class="d">安装、第一个 agent、多轮对话、事件流</span></span></a>
+      <a class="doc-card" href="#doc=Loop引擎"><span class="n">03</span><span class="content"><span class="t">Loop 引擎</span><span class="d">Run 的执行流程、消息序列、错误语义、恢复</span></span></a>
+      <a class="doc-card" href="#doc=Warp装饰器"><span class="n">04</span><span class="content"><span class="t">Warp 装饰器</span><span class="d">模型与工具的中间件：重试、限流、防护</span></span></a>
+      <a class="doc-card" href="#doc=Hook"><span class="n">05</span><span class="content"><span class="t">Hook</span><span class="d">七个时机点、Guide 声明、短路、并发契约</span></span></a>
+      <a class="doc-card" href="#doc=ForkAgent"><span class="n">06</span><span class="content"><span class="t">ForkAgent</span><span class="d">以当前 Agent 为模板跑隔离子循环</span></span></a>
+      <a class="doc-card" href="#doc=最佳实践"><span class="n">07</span><span class="content"><span class="t">最佳实践</span><span class="d">生产装配清单、多租户、缓存纪律、测试</span></span></a>
     </div>
+  </div>
+</section>
 
-    <div class="tip">
-      <b>挂载点是 ToolRegistry：</b>静态注册（<code>WithTools</code>）与 hook 运行时注入的工具（mcp 等）都会被包装；
-      warp 实例 per-Run 独立，状态不跨 Run 共享。<code>modelretry</code> 默认裸引擎不内置——生产建议必挂。
+</div><!-- /home -->
+
+<div id="docview" hidden>
+  <div class="doc-wrap">
+    <nav class="doc-tabs" id="docTabs">
+      <a data-doc="设计理念" href="#doc=设计理念">设计理念</a>
+      <a data-doc="快速开始" href="#doc=快速开始">快速开始</a>
+      <a data-doc="Loop引擎" href="#doc=Loop引擎">Loop 引擎</a>
+      <a data-doc="Warp装饰器" href="#doc=Warp装饰器">Warp 装饰器</a>
+      <a data-doc="Hook" href="#doc=Hook">Hook</a>
+      <a data-doc="ForkAgent" href="#doc=ForkAgent">ForkAgent</a>
+      <a data-doc="最佳实践" href="#doc=最佳实践">最佳实践</a>
+    </nav>
+    <div class="doc-head">
+      <span class="num" id="docnum"></span>
+      <h1 id="doctitle"></h1>
     </div>
-  </section>
+    <div class="markdown" id="docbody"><p class="doc-loading">加载中…</p></div>
+    <a class="doc-back" href="#top">← 返回主页</a>
+  </div>
+</div>
 
-  <!-- ═══════════════ 05 官方扩展能力 ═══════════════ -->
-  <section id="ext">
-    <h2><span class="no">05</span>详细介绍 · 官方扩展能力</h2>
-    <p class="sub">所有能力都在 ext/ 层，按需引入 —— 不用不依赖，官方 SDK 依赖不进框架层。</p>
-
-    <table>
-      <tr><th>扩展</th><th>类型</th><th>说明</th></tr>
-      <tr><td><code>ext/fs</code></td><td>底座</td><td>唯一 FileSystem 接口（Read/Write/List/Edit）；Local 实现（root 沙箱、查找替换）</td></tr>
-      <tr><td><code>ext/provider/openai</code></td><td>model</td><td>OpenAI 兼容 Provider（Invoke + SSE 流式 + reasoning 思考流），兼容 DeepSeek / SiliconFlow / vLLM / Ollama；缓存命中双协议解析</td></tr>
-      <tr><td><code>ext/warp/model/modelretry</code></td><td>warp</td><td>模型重试：指数退避，流式仅在未发出 chunk 时重试（生产必挂）</td></tr>
-      <tr><td><code>ext/warp/tool/limit</code></td><td>warp</td><td>工具并发闸：跨全部工具共享信号量，限制一轮 fan-out 实际并发</td></tr>
-      <tr><td><code>ext/warp/tool/safetool</code></td><td>warp</td><td>panic 恢复 + error 附加上下文（注册在 limit 外层）</td></tr>
-      <tr><td><code>ext/hook/mcp</code></td><td>hook</td><td>mcpRouter 单工具封装：schema 恒定（KV cache 友好）、配置热加载，内置官方 go-sdk</td></tr>
-      <tr><td><code>ext/hook/skill</code></td><td>hook</td><td>技能注入：代码定义或从 FS 目录加载 *.md（全程单条 system，不滚雪球）</td></tr>
-      <tr><td><code>ext/hook/summary</code></td><td>hook</td><td>会话摘要：阈值跳过短会话；也可直接调 <code>Summarize</code> 按需触发</td></tr>
-      <tr><td><code>ext/hook/approve</code></td><td>hook</td><td>工具审批：channel 决策中断（EventRequest + Decision 回传）</td></tr>
-      <tr><td><code>ext/hook/askuser</code></td><td>hook</td><td>ask_user 工具：模型提问中断等回答</td></tr>
-      <tr><td><code>ext/hook/taskplan</code></td><td>hook</td><td>task_plan 工具：规划提交中断等处置（执行/否决/修订）</td></tr>
-      <tr><td><code>ext/hook/task</code></td><td>hook</td><td>并行分身：基于 <code>core.Fork</code> 复刻当前 Agent 独立跑子循环，只回传最终答案；事件与 session 按 ForkID 区分，单层防递归</td></tr>
-      <tr><td><code>ext/hook/contextfix</code></td><td>hook</td><td>Run 开始修理历史：补缺失 tool 结果、删孤儿 tool 消息（resume 旧存档防悬空）</td></tr>
-      <tr><td><code>ext/hook/offload</code></td><td>hook</td><td>大结果卸载：超阈值写 FS，上下文只留摘要+路径</td></tr>
-      <tr><td><code>ext/hook/filetools</code></td><td>hook</td><td>文件四件套（read/write/edit/terminal，系统原生终端+OS 提示注入），恒注册</td></tr>
-      <tr><td><code>ext/hook/localsession</code></td><td>hook</td><td>会话持久化：滚动快照，Load/List 恢复续聊；分身写独立文件只存增量</td></tr>
-    </table>
-
-    <h3>人机交互三件套：同一套 channel 决策模式</h3>
-    <div class="codeblock">
-      <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">interrupt.go</span></div>
-<pre>approver, approveCh := approve.<span class="f">New</span>(needsFunc)  <span class="c">// 需要审批的调用返回 true</span>
-asker, answerCh   := askuser.<span class="f">New</span>()
-planner, planCh   := taskplan.<span class="f">New</span>()
-
-core.<span class="f">NewAgent</span>(p, core.<span class="f">WithHooks</span>(approver, asker, planner), ...)
-
-<span class="c">// hook 在工具调用前阻塞等决策；渲染层在 OnEvent 里呈现请求、</span>
-<span class="c">// 从独立 goroutine 回传 channel（同步回传会死锁）。</span>
-core.<span class="f">WithOnEvent</span>(<span class="k">func</span>(e event.Event) {
-    <span class="k">if</span> e.Type == approve.EventRequest {
-        call := e.Data.(*types.ToolCall) <span class="c">// 带 CallID 与 ForkID（分身在问也一样工作）</span>
-        <span class="k">go</span> <span class="f">send</span>(ctx, approveCh, approve.Decision{CallID: call.ID, Approve: askHuman(call)})
-    }
-})</pre>
+<footer class="site-foot">
+  <div class="wrap">
+    <span>ezloop · Apache-2.0</span>
+    <div class="right">
+      <a href="https://github.com/xuanlv2002/ezloop">GitHub</a>
+      <a href="https://pkg.go.dev/github.com/xuanlv2002/ezloop">Go Reference</a>
     </div>
-
-    <h3>并行分身：task 工具</h3>
-    <div class="codeblock">
-      <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">fork.go</span></div>
-<pre>core.<span class="f">NewAgent</span>(p, core.<span class="f">WithHooks</span>(task.<span class="f">New</span>()), ...) <span class="c">// 一步到位，task 工具自动注册</span>
-
-<span class="c">// 主模型对可并行的子任务自动调用 task：</span>
-<span class="c">//   同一轮多个 task 并行 fork（工具本就并发）</span>
-<span class="c">//   分身复刻当前 Agent 与上下文快照，过程隔离，只回传最终答案</span>
-<span class="c">//   审批照拦、可问用户；事件带 ForkID（⟨task-N⟩），session 独立可回放</span>
-<span class="c">//   单层：分身不能再 fork</span></pre>
-    </div>
-  </section>
-
-  <!-- ═══════════════ 06 本地 Agent：事件与上下文管理 ═══════════════ -->
-  <section id="local-agent">
-    <h2><span class="no">06</span>详细介绍 · 本地 Agent 开发：事件与上下文管理</h2>
-    <p class="sub">CLI / 桌面场景：回调直渲、stdin 桥接人机中断、本地 session 文件持久化与恢复。</p>
-
-    <h3>事件全景（回调消费）</h3>
-    <table>
-      <tr><th>事件</th><th>时机</th><th>Data</th></tr>
-      <tr><td><code>model_chunk</code> / <code>reasoning_chunk</code></td><td>流式正文 / 思考增量</td><td>string</td></tr>
-      <tr><td><code>tool_start</code> / <code>tool_end</code></td><td>工具调用起止（随调用即时，以 CallID 关联）</td><td>*ToolCall / *ToolResult</td></tr>
-      <tr><td><code>iteration_end</code></td><td>每轮迭代结束</td><td>int</td></tr>
-      <tr><td><code>error</code> / <code>stream_fallback</code></td><td>引擎错误 / 流式降级警告</td><td>error / string</td></tr>
-      <tr><td><code>task.start</code> / <code>task.end</code></td><td>分身起止</td><td>*ToolCall / *LoopState</td></tr>
-      <tr><td><code>approve.request</code> 等</td><td>人机交互请求（带 CallID）</td><td>*ToolCall 等</td></tr>
-    </table>
-    <div class="tip"><b>所有事件带 <code>ForkID</code></b>：空串＝主循环，非空＝对应分身——渲染层据此打 ⟨task-N⟩ 行首标记，把分身的流式输出与提问路由到正确位置。</div>
-
-    <h3>流式渲染节流</h3>
-    <div class="codeblock">
-      <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">render.go</span></div>
-<pre><span class="c">// 碎 delta（每次一两个字符）高频直写终端开销大（Windows console 同步写尤其贵）——</span>
-<span class="c">// 攒缓冲定期整块写出：一次系统调用代替上百次。80ms tick 足够顺滑。</span>
-sb := &amp;streamBuf{}
-ticker := time.<span class="f">NewTicker</span>(<span class="n">80</span> * time.Millisecond)
-<span class="k">go</span> <span class="k">func</span>() { <span class="k">for</span> <span class="k">range</span> ticker.C { sb.<span class="f">flush</span>() } }()
-<span class="c">// 提示类输出用 sb.now(s)：并入缓冲后立即整块写出，与流式内容严格有序</span></pre>
-    </div>
-
-    <h3>上下文管理与会话恢复</h3>
-    <div class="codeblock">
-      <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">session.go</span></div>
-<pre>fsys := fs.<span class="f">NewLocal</span>(<span class="s">"."</span>)                    <span class="c">// 工作区沙箱 = 当前目录</span>
-session := localsession.<span class="f">New</span>(fsys, <span class="s">""</span>)          <span class="c">// 每轮结束滚动快照 sessions/&lt;id&gt;.json</span>
-
-<span class="c">// 恢复 = 新对话：加载历史 + 新输入，模型看历史自己重发调用。</span>
-<span class="c">// system 是 agent 属性，WithHistory 自动过滤不重复注入；</span>
-<span class="c">// 旧存档的悬空 tool_call 由 contextfix 兜底修理。</span>
-s, _ := localsession.<span class="f">Load</span>(ctx, fsys, <span class="s">""</span>, id)
-state, _ := agent.<span class="f">Run</span>(ctx, input, core.<span class="f">WithHistory</span>(s.Messages...))
-
-<span class="c">// 分身过程同样可回放：sessions/&lt;主ID&gt;-task-1.json，只存增量</span></pre>
-    </div>
-
-    <div class="tip">
-      <b>大结果防溢出：</b>offload hook 把超阈值工具输出卸载到 FS（文件名＝工具名+内容哈希，幂等），上下文只留摘要+路径；
-      推理过程同理——<code>reasoning</code> 持久化在消息里供回放，但不回传给模型（协议要求）。
-    </div>
-  </section>
-
-  <!-- ═══════════════ 07 多租户 Agent：事件与上下文管理 ═══════════════ -->
-  <section id="multi-tenant">
-    <h2><span class="no">07</span>详细介绍 · 多租户 Agent 开发：事件与上下文管理</h2>
-    <p class="sub">Web / 服务端场景：一个 Agent 定义、N 个并发会话——事件流、取消、会话按请求隔离。</p>
-
-    <h3>共享构建，按请求运行</h3>
-    <div class="codeblock">
-      <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="name">server.go</span></div>
-<pre><span class="c">// Agent 构建后只读是框架契约：全局单例，并发 Run 安全，</span>
-<span class="c">// 每次运行的全部状态在独立的 LoopState 里，互不可见。</span>
-agent := core.<span class="f">NewAgent</span>(p, ...) <span class="c">// 进程启动时组装一次</span>
-
-<span class="k">func</span> <span class="f">handle</span>(w http.ResponseWriter, r *http.Request) {
-    ctx, cancel := context.<span class="f">WithCancel</span>(r.Context())
-    <span class="k">defer</span> <span class="f">cancel</span>()                       <span class="c">// 客户端断连 → 只取消本次 loop</span>
-
-    <span class="c">// 按请求恢复历史（会话归属在业务层：URL/租户头 → session ID）</span>
-    h := agent.<span class="f">RunAsync</span>(ctx, input, core.<span class="f">WithHistory</span>(load(r)...))
-    <span class="k">defer</span> h.<span class="f">Cancel</span>()
-
-    <span class="k">for</span> e := <span class="k">range</span> h.<span class="f">Events</span>() {         <span class="c">// 每请求独立事件通道，天然隔离</span>
-        <span class="k">switch</span> e.Type {
-        <span class="k">case</span> event.EventModelChunk:
-            <span class="f">writeSSE</span>(w, e.ForkID, e.Data.(<span class="k">string</span>)) <span class="c">// ForkID 非空 = 分身输出，路由标记</span>
-        <span class="k">case</span> approve.EventRequest:
-            <span class="f">pushCard</span>(w, e.Data.(*types.ToolCall)) <span class="c">// 渲染审批卡片，用户点击后回传</span>
-        }
-    }
-    state, _ := h.<span class="f">Wait</span>()
-    save(r, state.Messages)
-}</pre>
-    </div>
-
-    <h3>隔离清单</h3>
-    <table>
-      <tr><th>维度</th><th>做法</th></tr>
-      <tr><td>事件流</td><td>RunAsync 的 Events() 每请求独立；全局回调式 OnEvent 只做度量，不做分发</td></tr>
-      <tr><td>取消</td><td>请求 ctx 断连 → <code>h.Cancel()</code>，只取消该 loop，共享 Agent 不受影响</td></tr>
-      <tr><td>会话存储</td><td>每租户一个 localsession 实例（或 <code>WithDir</code> 按租户分目录）；分身自动写独立文件</td></tr>
-      <tr><td>人机交互</td><td>EventRequest 带 CallID → 前端卡片 → 用户操作从任意 goroutine 回传 Decision channel（select ctx.Done 防悬挂）</td></tr>
-      <tr><td>并发边界</td><td>OnToolStart/OnToolEnd 跨调用并发——hook 写共享数据自行加锁；OnEvent 回调必须并发安全且快速返回</td></tr>
-    </table>
-
-    <div class="tip">
-      <b>分身即并发加速：</b>多租户下 task 分身照常工作——分身的流式 chunk、审批请求都带 ForkID，
-      服务端把它路由到发起请求的那条 SSE 流；分身用量自动累加回主循环，账单不漏。
-    </div>
-  </section>
-</main>
-
-<footer>
-  ezloop — 简单，但不简陋 ·
-  <a href="https://github.com/xuanlv2002/ezloop" target="_blank">GitHub</a>
+  </div>
 </footer>
 
+<script src="assets/marked.umd.js"></script>
 <script>
-  // ── 粒子特效：漂浮光点 + 邻近连线 + 鼠标扰动 ──
-  (function () {
-    var canvas = document.getElementById('particles');
-    if (!canvas) return;
-    var ctx = canvas.getContext('2d');
-    var hero = canvas.parentElement;
-    var dpr = Math.min(window.devicePixelRatio || 1, 2);
-    var W, H, parts = [], bursts = [], trail = [];
-    var mouse = { x: -9999, y: -9999 };
-    var reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  /* 文档阅读：#doc=名称 路由，md/ 下按名取文件，marked 渲染 */
+  const DOCS = {
+    '设计理念':   { n: '01', title: '设计理念' },
+    '快速开始':   { n: '02', title: '快速开始' },
+    'Loop引擎':   { n: '03', title: 'Loop 引擎' },
+    'Warp装饰器': { n: '04', title: 'Warp 装饰器' },
+    'Hook':       { n: '05', title: 'Hook' },
+    'ForkAgent':  { n: '06', title: 'ForkAgent' },
+    '最佳实践':   { n: '07', title: '最佳实践' },
+  };
+  const homeEl = document.getElementById('home');
+  const docviewEl = document.getElementById('docview');
+  const docbodyEl = document.getElementById('docbody');
+  const docnumEl = document.getElementById('docnum');
+  const doctitleEl = document.getElementById('doctitle');
+  const cache = new Map();
 
-    function resize() {
-      W = hero.clientWidth; H = hero.clientHeight;
-      canvas.width = W * dpr; canvas.height = H * dpr;
-      canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      var n = Math.max(36, Math.min(110, Math.round(W * H / 16000)));
-      parts = [];
-      for (var i = 0; i < n; i++) {
-        var big = Math.random() < .07;
-        var vx = (Math.random() - .5) * .35, vy = (Math.random() - .5) * .35;
-        parts.push({
-          x: Math.random() * W, y: Math.random() * H,
-          bvx: vx, bvy: vy, vx: vx, vy: vy,
-          r: big ? 2 + Math.random() * 1.4 : .6 + Math.random() * 1.2,
-          base: big ? .5 + Math.random() * .4 : .12 + Math.random() * .5,
-          phase: Math.random() * Math.PI * 2,
-          speed: .4 + Math.random() * 1.1,
-          big: big,
-          violet: Math.random() < .25
-        });
-      }
-    }
+  marked.setOptions({ gfm: true, breaks: false });
 
-    function step(t) {
-      ctx.clearRect(0, 0, W, H);
-      // 发光叠加模式：重叠处更亮，光子感
-      ctx.globalCompositeOperation = 'lighter';
-      var i, j, p, q;
-
-      // ① 鼠标光晕（光子核心）
-      if (mouse.x > -999) {
-        var mg = ctx.createRadialGradient(mouse.x, mouse.y, 0, mouse.x, mouse.y, 110);
-        mg.addColorStop(0, 'rgba(125,211,252,.16)');
-        mg.addColorStop(.5, 'rgba(125,211,252,.05)');
-        mg.addColorStop(1, 'rgba(125,211,252,0)');
-        ctx.fillStyle = mg;
-        ctx.fillRect(mouse.x - 110, mouse.y - 110, 220, 220);
-      }
-
-      // ② 光子拖尾（鼠标轨迹渐隐）
-      for (i = 1; i < trail.length; i++) {
-        var ta = i / trail.length;
-        ctx.strokeStyle = 'rgba(160,220,255,' + (ta * .32) + ')';
-        ctx.lineWidth = ta * 2.6;
-        ctx.lineCap = 'round';
-        ctx.beginPath();
-        ctx.moveTo(trail[i - 1].x, trail[i - 1].y);
-        ctx.lineTo(trail[i].x, trail[i].y);
-        ctx.stroke();
-      }
-
-      // ③ 粒子更新：基础漂浮 + 鼠标涡旋引力（绕光标螺旋）
-      for (i = 0; i < parts.length; i++) {
-        p = parts[i];
-        p.x += p.vx; p.y += p.vy;
-        var dx = p.x - mouse.x, dy = p.y - mouse.y;
-        var md2 = dx * dx + dy * dy;
-        if (md2 < 25600 && md2 > 25) { // 160px
-          var md = Math.sqrt(md2);
-          var ux = dx / md, uy = dy / md;      // 远离方向
-          var pull = .02 * (1 - md / 160);     // 向心吸引
-          var tang = pull * 1.5;               // 切向 → 旋转
-          p.vx += -ux * pull + -uy * tang;
-          p.vy += -uy * pull + ux * tang;
-          p.vx *= .984; p.vy *= .984;
-          var sp2 = p.vx * p.vx + p.vy * p.vy;
-          if (sp2 > .81) { var sc = .9 / Math.sqrt(sp2); p.vx *= sc; p.vy *= sc; }
-        } else {
-          // 缓慢回归基础漂浮速度
-          p.vx += (p.bvx - p.vx) * .006;
-          p.vy += (p.bvy - p.vy) * .006;
-        }
-        if (p.x < -14) p.x = W + 14; if (p.x > W + 14) p.x = -14;
-        if (p.y < -14) p.y = H + 14; if (p.y > H + 14) p.y = -14;
-      }
-
-      // ④ 粒子绘制：外层光晕 + 内核（双层光子）
-      for (i = 0; i < parts.length; i++) {
-        p = parts[i];
-        var a = p.base * (.55 + .45 * Math.sin(t * .001 * p.speed + p.phase));
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, p.r * (p.big ? 4 : 3), 0, 6.2832);
-        ctx.fillStyle = p.violet ? 'rgba(167,139,250,' + (a * .16) + ')' : 'rgba(125,211,252,' + (a * .18) + ')';
-        ctx.fill();
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, p.r, 0, 6.2832);
-        ctx.fillStyle = p.big ? 'rgba(240,250,255,' + Math.min(1, a + .35) + ')'
-              : p.violet ? 'rgba(196,181,253,' + a + ')' : 'rgba(226,232,240,' + a + ')';
-        ctx.fill();
-      }
-
-      // ⑤ 邻近连线
-      ctx.lineWidth = .6;
-      for (i = 0; i < parts.length; i++) {
-        p = parts[i];
-        for (j = i + 1; j < parts.length; j++) {
-          q = parts[j];
-          var ddx = p.x - q.x, ddy = p.y - q.y;
-          var d2 = ddx * ddx + ddy * ddy;
-          if (d2 < 12100) { // 110px
-            var la = (1 - Math.sqrt(d2) / 110) * .1;
-            ctx.strokeStyle = 'rgba(148,197,253,' + la + ')';
-            ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(q.x, q.y); ctx.stroke();
-          }
-        }
-      }
-
-      // ⑥ 鼠标蛛网连线
-      if (mouse.x > -999) {
-        for (i = 0; i < parts.length; i++) {
-          p = parts[i];
-          var mx = p.x - mouse.x, my = p.y - mouse.y;
-          var mdd = mx * mx + my * my;
-          if (mdd < 25600) { // 160px
-            ctx.strokeStyle = 'rgba(125,211,252,' + ((1 - Math.sqrt(mdd) / 160) * .3) + ')';
-            ctx.lineWidth = .8;
-            ctx.beginPath(); ctx.moveTo(mouse.x, mouse.y); ctx.lineTo(p.x, p.y); ctx.stroke();
-          }
-        }
-      }
-
-      // ⑦ 点击爆发光子
-      for (i = bursts.length - 1; i >= 0; i--) {
-        var b = bursts[i];
-        b.x += b.vx; b.y += b.vy;
-        b.vx *= .955; b.vy *= .955;
-        b.life -= .018;
-        if (b.life <= 0) { bursts.splice(i, 1); continue; }
-        ctx.beginPath();
-        ctx.arc(b.x, b.y, b.r * 3.5, 0, 6.2832);
-        ctx.fillStyle = b.violet ? 'rgba(167,139,250,' + (b.life * .2) + ')' : 'rgba(125,211,252,' + (b.life * .22) + ')';
-        ctx.fill();
-        ctx.beginPath();
-        ctx.arc(b.x, b.y, b.r, 0, 6.2832);
-        ctx.fillStyle = 'rgba(240,250,255,' + b.life + ')';
-        ctx.fill();
-      }
-
-      ctx.globalCompositeOperation = 'source-over';
-      if (!reduced) requestAnimationFrame(step);
-    }
-
-    hero.addEventListener('mousemove', function (e) {
-      var rect = canvas.getBoundingClientRect();
-      mouse.x = e.clientX - rect.left; mouse.y = e.clientY - rect.top;
-      trail.push({ x: mouse.x, y: mouse.y });
-      if (trail.length > 26) trail.shift();
-    });
-    hero.addEventListener('mouseleave', function () {
-      mouse.x = -9999; mouse.y = -9999; trail.length = 0;
-    });
-    hero.addEventListener('click', function (e) {
-      if (reduced) return;
-      var rect = canvas.getBoundingClientRect();
-      var x = e.clientX - rect.left, y = e.clientY - rect.top;
-      for (var i = 0; i < 26; i++) {
-        var ang = Math.random() * 6.2832, sp = 1 + Math.random() * 3.4;
-        bursts.push({
-          x: x, y: y,
-          vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp,
-          life: 1, r: .8 + Math.random() * 1.8,
-          violet: Math.random() < .3
-        });
+  function decorateInto(root, html) {
+    root.innerHTML = html;
+    root.querySelectorAll('a[href]').forEach((a) => {
+      const href = a.getAttribute('href');
+      if (/\.md$/i.test(href)) {
+        const name = decodeURIComponent(href.split('/').pop().replace(/\.md$/i, ''));
+        a.setAttribute('href', '#doc=' + encodeURIComponent(name));
+      } else if (/^https?:/.test(href)) {
+        a.setAttribute('target', '_blank');
+        a.setAttribute('rel', 'noreferrer');
       }
     });
-    window.addEventListener('resize', resize);
-    resize();
-    requestAnimationFrame(step);
+    root.querySelectorAll('table').forEach((table) => {
+      const wrap = document.createElement('div');
+      wrap.className = 'table-wrap';
+      table.parentNode.insertBefore(wrap, table);
+      wrap.appendChild(table);
+    });
+  }
 
-    // ── 滚动高亮当前导航项 ──
-    var links = document.querySelectorAll('nav a.item');
-    var map = {};
-    links.forEach(function (l) { map[l.getAttribute('href').slice(1)] = l; });
-    var observer = new IntersectionObserver(function (entries) {
-      entries.forEach(function (en) {
-        if (en.isIntersecting) {
-          links.forEach(function (l) { l.classList.remove('active'); });
-          var link = map[en.target.id];
-          if (link) link.classList.add('active');
-        }
-      });
-    }, { rootMargin: '-20% 0px -70% 0px' });
-    document.querySelectorAll('section[id]').forEach(function (s) { observer.observe(s); });
-  })();
-</script>
-
-<script type="module">
-  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
-  mermaid.initialize({
-    startOnLoad: false,
-    theme: 'base',
-    themeVariables: {
-      darkMode: true,
-      background: '#0a101d',
-      primaryColor: '#0b1322',
-      primaryTextColor: '#e8edf6',
-      primaryBorderColor: '#33496e',
-      lineColor: '#64748b',
-      edgeLabelBackground: '#0a101d',
-      clusterBkg: '#0a101d',
-      clusterBorder: '#33496e',
-      fontFamily: '-apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif',
-      fontSize: '13px'
+  function showHome(hash) {
+    docviewEl.hidden = true;
+    homeEl.hidden = false;
+    document.title = 'ezloop · Go Agent 循环引擎';
+    if (hash && hash.length > 1 && hash !== '#top') {
+      const el = document.querySelector(hash);
+      if (el) {
+        requestAnimationFrame(() => el.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+        return;
+      }
     }
-  });
-  mermaid.run({ querySelector: '.mermaid' });
+    window.scrollTo({ top: 0 });
+  }
+
+  async function openDoc(name) {
+    const meta = DOCS[name];
+    if (!meta) return showHome('');
+    homeEl.hidden = true;
+    docviewEl.hidden = false;
+    docnumEl.textContent = meta.n;
+    doctitleEl.textContent = meta.title;
+    document.querySelectorAll('#docTabs a').forEach((a) => a.classList.toggle('on', a.dataset.doc === name));
+    document.title = meta.title + ' · ezloop 文档';
+    window.scrollTo({ top: 0 });
+    if (cache.has(name)) {
+      docbodyEl.innerHTML = cache.get(name);
+      return;
+    }
+    docbodyEl.innerHTML = '<p class="doc-loading">加载中…</p>';
+    try {
+      const res = await fetch('md/' + encodeURIComponent(name) + '.md', { cache: 'no-cache' });
+      if (!res.ok) throw new Error(String(res.status));
+      const html = marked.parse(await res.text());
+      decorateInto(docbodyEl, html);
+      cache.set(name, docbodyEl.innerHTML);
+    } catch (err) {
+      docbodyEl.innerHTML = '<p class="doc-loading">文档加载失败：' + name + '</p>';
+    }
+  }
+
+  function route() {
+    const h = decodeURIComponent(location.hash || '');
+    if (h.startsWith('#doc=')) return openDoc(h.slice(5));
+    showHome(h);
+  }
+  window.addEventListener('hashchange', route);
+  route();
 </script>
 </body>
 </html>

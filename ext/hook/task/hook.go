@@ -114,21 +114,20 @@ func New(opts ...Option) *Hook {
 
 func (h *Hook) Name() string { return "task" }
 
-/*
-OnStart 自动注册 task 工具并注入使用说明：仅当首条为 system 时追加
-（无 system 的裸装配不注入，避免挪动消息序）。仍导出 Tool() 以便显式装配。
-*/
+/* OnStart 自动注册 task 工具（使用说明走 Guide 声明；仍导出 Tool() 以便显式装配）。 */
 func (h *Hook) OnStart(_ context.Context, state *types.LoopState) error {
 	state.Tools.Register(Tool())
-	if len(state.Messages) > 0 && state.Messages[0].Role == types.RoleSystem {
-		state.Messages[0].Content += "\n\n<tool-guide>\ntask：可并行、相互独立、或会产生大量中间输出的子任务交给 task 分身隔离执行" +
-			"（工具集相同、过程互不干扰，最终结果直接回传），主上下文只留结论不留过程——" +
-			"检索类、批量生成类、多方案试探类子任务尤其适合；超长任务同样适合，分身可自行压缩上下文持续运行。" +
-			"任务描述必须自包含（分身看不到本轮对话之外的语境）：写清目标、输入、涉及的文件绝对路径与期望的返回格式；" +
-			"需要视觉能力（看图/截图）或适合小模型的批量活，可用 model 参数指定分身模型——可选模型名以 system 的 <models> 段清单为准（不要臆造）。" +
-			"同批无依赖的子任务一次并行发多个。\n</tool-guide>"
-	}
 	return nil
+}
+
+/* Guide 声明 task 的使用说明（引擎组装期统一追加）。 */
+func (h *Hook) Guide() string {
+	return "<tool-guide>\ntask：可并行、相互独立、或会产生大量中间输出的子任务交给 task 分身隔离执行" +
+		"（工具集相同、过程互不干扰，最终结果直接回传），主上下文只留结论不留过程——" +
+		"检索类、批量生成类、多方案试探类子任务尤其适合；超长任务同样适合，分身可自行压缩上下文持续运行。" +
+		"任务描述必须自包含（分身看不到本轮对话之外的语境）：写清目标、输入、涉及的文件绝对路径与期望的返回格式；" +
+		"需要视觉能力（看图/截图）或适合小模型的批量活，可用 model 参数指定分身模型——可选模型名以 system 的 <models> 段清单为准（不要臆造）。" +
+		"同批无依赖的子任务一次并行发多个。\n</tool-guide>"
 }
 
 /*
@@ -168,7 +167,7 @@ func (h *Hook) OnToolStart(ctx context.Context, state *types.LoopState, call *ty
 	if args.Model != "" && h.opts.ModelOf != nil {
 		mp = h.opts.ModelOf(args.Model)
 		if mp == nil {
-			return hook.Skip("task: unknown model "+args.Model), nil
+			return hook.Skip("task: unknown model " + args.Model), nil
 		}
 	}
 	var sub *types.LoopState

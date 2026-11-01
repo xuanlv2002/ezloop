@@ -39,6 +39,7 @@ type Agent struct {
 	streaming  bool
 
 	startHooks      []hook.StartHook
+	guideHooks      []hook.GuideHook
 	modelStartHooks []hook.ModelStartHook
 	modelEndHooks   []hook.ModelEndHook
 	toolStartHooks  []hook.ToolStartHook
@@ -69,6 +70,9 @@ func WithHooks(hooks ...hook.Hook) Option {
 			}
 			if v, ok := h.(hook.StartHook); ok {
 				a.startHooks = append(a.startHooks, v)
+			}
+			if v, ok := h.(hook.GuideHook); ok {
+				a.guideHooks = append(a.guideHooks, v)
 			}
 			if v, ok := h.(hook.ModelStartHook); ok {
 				a.modelStartHooks = append(a.modelStartHooks, v)

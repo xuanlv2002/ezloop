@@ -79,19 +79,20 @@ func NewHookWithRouter(r *Router, reload func(context.Context) ([]ServerConfig, 
 
 func (h *Hook) Name() string { return "mcp" }
 
-/* OnStart 注册 router 并注入使用说明：仅当首条为 system 时追加
-（无 system 的裸装配不注入，避免挪动消息序）。 */
+/* OnStart 注册 router（使用说明走 Guide 声明）。 */
 func (h *Hook) OnStart(_ context.Context, state *types.LoopState) error {
 	state.Tools.Register(h.router)
-	if len(state.Messages) > 0 && state.Messages[0].Role == types.RoleSystem {
-		state.Messages[0].Content += "\n\n<tool-guide>\nmcp_router：访问外部能力（已配置的 MCP server）的统一入口。" +
-			"用法两步：先 mcp_list 看服务清单、tool_list 拉取目标服务的工具清单（含各工具参数 schema），" +
-			"再 tool_call 调用——不要凭记忆猜工具名或参数。内置工具能做的事不必绕道 MCP。" +
-			"服务清单以 system 的 <mcp> 段为准，轮内变更看 <resource_change>，不要读配置文件发现服务。" +
-			"服务需要 OAuth 授权时会先请用户授权，等待是正常流程；**被用户取消/拒绝时**理由会作为工具结果返回——" +
-			"那是用户的决定，不要重试、不要改用别的工具变相完成，停手并向用户说明这次调用未执行。\n</tool-guide>"
-	}
 	return nil
+}
+
+/* Guide 声明 mcp_router 的使用说明（引擎组装期统一追加）。 */
+func (h *Hook) Guide() string {
+	return "<tool-guide>\nmcp_router：访问外部能力（已配置的 MCP server）的统一入口。" +
+		"用法两步：先 mcp_list 看服务清单、tool_list 拉取目标服务的工具清单（含各工具参数 schema），" +
+		"再 tool_call 调用——不要凭记忆猜工具名或参数。内置工具能做的事不必绕道 MCP。" +
+		"服务清单以 system 的 <mcp> 段为准，轮内变更看 <resource_change>，不要读配置文件发现服务。" +
+		"服务需要 OAuth 授权时会先请用户授权，等待是正常流程；**被用户取消/拒绝时**理由会作为工具结果返回——" +
+		"那是用户的决定，不要重试、不要改用别的工具变相完成，停手并向用户说明这次调用未执行。\n</tool-guide>"
 }
 
 /*

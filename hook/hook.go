@@ -28,6 +28,21 @@ type StartHook interface {
 	OnStart(ctx context.Context, state *types.LoopState) error
 }
 
+/*
+GuideHook 声明 system 的静态附录段（声明接口，非时机点）：固定不变的
+使用说明写成 Guide()，引擎在组装期（startHook 之后）按注册序统一追加到
+system 尾部；返回空串表示无附录。
+
+声明与调整分离：静态文本走 Guide，每轮变化的注入（身份、状态快照、
+compact 换 system）仍用 StartHook 改 Messages。顺序与幂等由引擎保证——
+hook 各自在 OnStart 手拼 system 时，拼装次序错位与重复追加两类事故
+无法从结构上排除，声明式收集可以。
+*/
+type GuideHook interface {
+	Hook
+	Guide() string
+}
+
 /* ModelStartHook 在每次调用模型前触发；置 state.Stop = true 可提前终止。 */
 type ModelStartHook interface {
 	Hook
@@ -65,9 +80,12 @@ var Proceed = Action{Kind: KindProceed}
 /* Abort 终止整个 loop（StopReason = aborted）。 */
 var Abort = Action{Kind: KindAbort}
 
-/* Skip 跳过本次调用：result 作为工具结果写入消息历史，循环继续；
+/*
+	Skip 跳过本次调用：result 作为工具结果写入消息历史，循环继续；
+
 后续 toolStart hook 不再评估（拒绝即短路，如 approve 拒绝后 task
-等在 OnToolStart 内执行工作的 hook 不得再跑）。 */
+等在 OnToolStart 内执行工作的 hook 不得再跑）。
+*/
 func Skip(result string) Action { return Action{Kind: KindSkip, Result: result} }
 
 /* ToolStartHook 在每个工具调用前触发，是权限拦截等能力的挂载点。 */

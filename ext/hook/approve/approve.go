@@ -64,17 +64,13 @@ func New(needs func(*types.ToolCall) bool) (*Hook, chan<- Decision) {
 
 func (h *Hook) Name() string { return "approve" }
 
-/* OnStart 注入审批机制说明：仅当首条为 system 时追加（无 system 的裸装配不注入，
-避免挪动消息序；宿主的 system hook 注册在首位即可承接）。 */
-func (h *Hook) OnStart(_ context.Context, state *types.LoopState) error {
-	if len(state.Messages) > 0 && state.Messages[0].Role == types.RoleSystem {
-		state.Messages[0].Content += "\n\n<tool-guide>\n" +
-			"审批：写操作等有副作用的工具调用会先请用户批准再执行，等待是正常流程，" +
-			"不要为躲避审批改用其他工具变相完成同一操作。被拒绝时理由会作为工具结果返回：" +
-			"不要原样重试——先读理由，是方案问题就调整方案，是信息不足就 ask_user 澄清，" +
-			"用户明确不要就停手并说明现状。\n</tool-guide>"
-	}
-	return nil
+/* Guide 声明审批机制说明（引擎组装期统一追加；本 hook 无组装期动态职责）。 */
+func (h *Hook) Guide() string {
+	return "<tool-guide>\n" +
+		"审批：写操作等有副作用的工具调用会先请用户批准再执行，等待是正常流程，" +
+		"不要为躲避审批改用其他工具变相完成同一操作。被拒绝时理由会作为工具结果返回：" +
+		"不要原样重试——先读理由，是方案问题就调整方案，是信息不足就 ask_user 澄清，" +
+		"用户明确不要就停手并说明现状。\n</tool-guide>"
 }
 
 func (h *Hook) OnToolStart(ctx context.Context, state *types.LoopState, call *types.ToolCall) (hook.Action, error) {
