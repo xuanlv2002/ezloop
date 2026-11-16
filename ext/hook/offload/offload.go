@@ -1,12 +1,6 @@
 /*
-Package offload 是 ToolEndHook：超大工具结果卸载到文件系统，
-上下文里只保留头部摘要与文件路径，防止大输出（日志、转储、目录遍历）
-撑爆上下文。写入失败时降级透传原文，绝不阻断工具执行。
-结果后处理不耦合工具节点本身，故为 hook 而非 warp。
-
-配置 ReplayTool（如 read_file）后，摘要尾部提示模型用该工具回放
-卸载文件全文，且该工具自身的结果免卸载——回放的意义就是把全文
-带回上下文，再卸载即死循环。
+Package offload 是 ToolEndHook：超大工具结果卸载到文件系统，上下文只留
+头尾摘要与路径；写入失败时降级透传原文，绝不阻断工具执行。
 */
 package offload
 
@@ -17,6 +11,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/xuanlv2002/ezloop/ext/fs"
 	"github.com/xuanlv2002/ezloop/types"
@@ -30,7 +25,7 @@ type Options struct {
 	Threshold int
 	// Dir 卸载目标目录（FS 内路径），默认 ".ezloop/offload"。
 	Dir string
-	// Head 保留在消息里的原文头部长度，默认 512。
+	// Head 保留在消息里的原文头、尾长度（各 Head 字节），默认 512。
 	Head int
 	// Skip 免卸载名单：这些工具的结果原样保留（如分身最终答案——
 	// 截断成摘要会伤主循环决策）。
@@ -103,19 +98,34 @@ func (h *Hook) OnToolEnd(ctx context.Context, _ *types.LoopState, result *types.
 		return nil
 	}
 
-	head := result.Content
-	if len(head) > h.opts.Head {
-		head = head[:h.opts.Head]
+	headEnd := min(h.opts.Head, len(result.Content))
+	tailStart := max(len(result.Content)-h.opts.Head, headEnd)
+	middle := ""
+	if tailStart > headEnd {
+		middle = "\n\n…（中间省略）…\n\n"
 	}
-	tail := "可用文件工具按需读取"
+	how := "可用文件工具按需读取"
 	if h.opts.ReplayTool != "" {
-		tail = "可使用 tool " + h.opts.ReplayTool + " 进行全量内容回放"
+		how = "可使用 tool " + h.opts.ReplayTool + " 进行全量内容回放"
 	}
 	hint := path
 	if h.opts.Abs != nil {
 		hint = h.opts.Abs(path)
 	}
-	result.Content = fmt.Sprintf("%s\n\n[输出共 %d 字节，超出 %d 字节阈值，已卸载到 %s，%s]",
-		head, len(result.Content), h.opts.Threshold, hint, tail)
+	result.Content = fmt.Sprintf("%s%s%s\n\n[输出共 %d 字节，超出 %d 字节阈值，已卸载到 %s，%s]",
+		trimUTF8(result.Content[:headEnd], true), middle, trimUTF8(result.Content[tailStart:], false),
+		len(result.Content), h.opts.Threshold, hint, how)
 	return nil
+}
+
+/* trimUTF8 切掉被截断的多字节字符：前缀从尾部回退，后缀从头部前进。 */
+func trimUTF8(s string, prefix bool) string {
+	for len(s) > 0 && !utf8.ValidString(s) {
+		if prefix {
+			s = s[:len(s)-1]
+		} else {
+			s = s[1:]
+		}
+	}
+	return s
 }
