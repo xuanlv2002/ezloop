@@ -1,7 +1,6 @@
 /*
-tools.go 定义 filetools 的四个工具，全部经 types.NewTool 构造：
-schema 从参数结构体的 tag 反射生成（json 定名，desc 描述，omitempty
-定非必填），不再手写 JSON schema。
+tools.go 定义 read_file / write_file / edit_file / terminal 四个工具；
+schema 从参数结构体 tag 反射生成（json 定名、desc 描述、omitempty 定非必填）。
 */
 package filetools
 
@@ -13,6 +12,8 @@ import (
 	"os/exec"
 	"regexp"
 	"runtime"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -42,10 +43,11 @@ const readMaxChars = 200_000      // 单次结果字符上限：分页限行不�
 const readMaxImageBytes = 8 << 20 // 图片字节上限：超出不进上下文（多模态请求体积防线）
 
 type readArgs struct {
-	Path   string `json:"path" desc:"文件路径"`
-	Offset int    `json:"offset,omitempty" desc:"起始行号，1 起，默认 1"`
-	Limit  int    `json:"limit,omitempty" desc:"读取行数，默认 2000"`
-	Note   string `json:"note,omitempty" desc:"读取图片时写明这次看图要确认什么；目的会随图片一起写入上下文。文本读取忽略"`
+	Path        string `json:"path" desc:"文件路径"`
+	Offset      int    `json:"offset,omitempty" desc:"起始行号，1 起，默认 1"`
+	Limit       int    `json:"limit,omitempty" desc:"读取行数，默认 2000"`
+	LineNumbers bool   `json:"line_numbers,omitempty" desc:"每行前缀「行号+Tab」，供引用行号或 #L 锚点；编辑时不要把前缀抄进 old_text"`
+	Note        string `json:"note,omitempty" desc:"读取图片时写明这次看图要确认什么；目的会随图片一起写入上下文。文本读取忽略"`
 }
 
 /*
@@ -60,7 +62,7 @@ user 图片消息（全协议经 user+Images 通道携带）；装配 WithImageH
 */
 func readTool(h *Hook) types.Tool {
 	fsys := h.fsys
-	return types.NewTool("read_file", "按行读取文件内容（默认第 1 行起 2000 行，可指定 offset/limit 翻页；单次最多返回 200000 字符，超出截断；图片文件作为图片消息进入上下文，不返回文本——用 note 写明这次看图要确认什么，目的会随图片一起写入上下文；二进制文件（pdf/ppt/压缩包/可执行等）暂不支持读取）",
+	return types.NewTool("read_file", "按行读取文件内容（默认第 1 行起 2000 行，可指定 offset/limit 翻页；单次最多返回 200000 字符，超出截断；需要引用行号或交付 file://...#L128 锚点时设 line_numbers=true，每行前缀「行号+Tab」；图片文件作为图片消息进入上下文，不返回文本——用 note 写明这次看图要确认什么，目的会随图片一起写入上下文；二进制文件（pdf/ppt/压缩包/可执行等）暂不支持读取）",
 		func(ctx context.Context, in *readArgs) (string, error) {
 			if in.Path == "" {
 				return "", errors.New("path is required")
@@ -99,7 +101,14 @@ func readTool(h *Hook) types.Tool {
 				return fmt.Sprintf("offset %d 超出文件总行数 %d", in.Offset, len(lines)), nil
 			}
 			end := min(in.Offset-1+in.Limit, len(lines))
-			out := strings.Join(lines[in.Offset-1:end], "\n")
+			window := lines[in.Offset-1 : end]
+			if in.LineNumbers {
+				window = slices.Clone(window)
+				for i := range window {
+					window[i] = fmt.Sprintf("%d\t%s", in.Offset+i, window[i])
+				}
+			}
+			out := strings.Join(window, "\n")
 			if runes := utf8.RuneCountInString(out); runes > readMaxChars {
 				return string([]rune(out)[:readMaxChars]) +
 					fmt.Sprintf("\n[本次内容共 %d 字符，超出单次 %d 字符上限已截断；如需其余部分请分批次使用读取]", runes, readMaxChars), nil
@@ -193,26 +202,97 @@ func writeTool(h *Hook) types.Tool {
 		})
 }
 
+type editOp struct {
+	OldText    string `json:"old_text" desc:"要替换的原文（可多行）；须与文件内容精确一致（含缩进、空行；CRLF/LF 自动归一）"`
+	NewText    string `json:"new_text" desc:"替换后的文本；空串表示删除这段文本"`
+	ReplaceAll bool   `json:"replace_all,omitempty" desc:"old_text 命中多处时全部替换；默认多处报错"`
+}
+
 type editArgs struct {
-	Path    string `json:"path"`
-	OldText string `json:"old_text"`
-	NewText string `json:"new_text"` // 允许空串：查找替换的删除语义
+	Path  string   `json:"path"`
+	Edits []editOp `json:"edits" desc:"按顺序应用的替换列表；整批原子，任一失败则不落盘"`
 }
 
 func editTool(h *Hook) types.Tool {
-	return types.NewTool("edit_file", "对现有文件做查找替换（全部命中，原子）：old_text 必须存在于文件中",
+	return types.NewTool("edit_file",
+		"对现有文件做一处或多处查找替换（整批原子）：edits 按顺序在内存中应用，任一失败则整批不落盘；返回每处的替换次数与行号。"+
+			"old_text 必须与原文精确一致（含缩进与空行；CRLF/LF 自动归一），不命中直接报错；默认要求唯一，多处命中报错，要全部替换设 replace_all。",
 		func(ctx context.Context, in *editArgs) (string, error) {
-			if in.Path == "" || in.OldText == "" {
-				return "", errors.New("path and old_text are required")
+			if in.Path == "" || len(in.Edits) == 0 {
+				return "", errors.New("path and edits are required")
+			}
+			for i := range in.Edits {
+				if in.Edits[i].OldText == "" {
+					return "", fmt.Errorf("edits[%d].old_text is required", i)
+				}
 			}
 			unlock := h.lockPath(in.Path)
 			defer unlock()
-			n, err := h.fsys.Edit(ctx, in.Path, in.OldText, in.NewText)
+			data, err := h.fsys.Read(ctx, in.Path)
 			if err != nil {
 				return "", err
 			}
-			return fmt.Sprintf("replaced %d occurrence(s) in %s", n, in.Path), nil
+			content := string(data)
+			crlf := strings.Contains(content, "\r\n")
+			if crlf {
+				content = strings.ReplaceAll(content, "\r\n", "\n")
+			}
+			notes := make([]string, 0, len(in.Edits))
+			for i, e := range in.Edits {
+				oldText := strings.ReplaceAll(e.OldText, "\r\n", "\n")
+				newText := strings.ReplaceAll(e.NewText, "\r\n", "\n")
+				n := strings.Count(content, oldText)
+				if n == 0 {
+					return "", fmt.Errorf("edits[%d]: old_text 未精确命中；请重新 read_file，并按原文（含缩进、空行与换行）复制", i+1)
+				}
+				if n > 1 && !e.ReplaceAll {
+					return "", fmt.Errorf("edits[%d]: old_text 命中 %d 处（%s），请补足上下文使其唯一，或设 replace_all=true",
+						i+1, n, formatLineLabel(content, oldText))
+				}
+				where := formatLineLabel(content, oldText)
+				content = strings.ReplaceAll(content, oldText, newText)
+				notes = append(notes, fmt.Sprintf("#%d %s：替换 %d 处", i+1, where, n))
+			}
+			if crlf {
+				content = strings.ReplaceAll(content, "\n", "\r\n")
+			}
+			if err := h.fsys.Write(ctx, in.Path, []byte(content)); err != nil {
+				return "", err
+			}
+			return fmt.Sprintf("已编辑 %s：%s", in.Path, strings.Join(notes, "；")), nil
 		})
+}
+
+/* formatLineLabel 返回 oldText 每次命中的行区间，压缩成「第 12-14、48 行」；超过 10 处截断。 */
+func formatLineLabel(content, oldText string) string {
+	span := lineSpan(oldText)
+	var parts []string
+	line, pos := 1, 0
+	for {
+		i := strings.Index(content[pos:], oldText)
+		if i < 0 {
+			break
+		}
+		abs := pos + i
+		line += strings.Count(content[pos:abs], "\n")
+		if len(parts) == 10 {
+			parts = append(parts, "…")
+			break
+		}
+		if span > 1 {
+			parts = append(parts, fmt.Sprintf("%d-%d", line, line+span-1))
+		} else {
+			parts = append(parts, strconv.Itoa(line))
+		}
+		pos = abs + len(oldText)
+		line += strings.Count(content[abs:pos], "\n")
+	}
+	return "第 " + strings.Join(parts, "、") + " 行"
+}
+
+/* lineSpan 返回文本覆盖的行数；末尾换行只是块结束符，不额外算一行。 */
+func lineSpan(s string) int {
+	return strings.Count(strings.TrimSuffix(s, "\n"), "\n") + 1
 }
 
 type terminalArgs struct {

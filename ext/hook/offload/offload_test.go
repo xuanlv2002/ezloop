@@ -59,6 +59,21 @@ func TestOffloadAndDegrade(t *testing.T) {
 	}
 }
 
+// 摘要同时保留头尾：构建/测试的报错在输出末尾，只留头部会先丢掉关键信息。
+func TestKeepsHeadAndTail(t *testing.T) {
+	hook := New(fs.NewLocal(t.TempDir()))
+	result := &types.ToolResult{Name: "dump", Content: strings.Repeat("a", 6000) + "TAILMARK"}
+	if err := hook.OnToolEnd(context.Background(), newTestLoopState(), result); err != nil {
+		t.Fatal(err)
+	}
+	headOK := strings.HasPrefix(result.Content, "aaa")
+	tailOK := strings.Contains(result.Content, "TAILMARK")
+	midOK := strings.Contains(result.Content, "中间省略")
+	if !headOK || !tailOK || !midOK {
+		t.Fatalf("head=%v tail=%v middle=%v", headOK, tailOK, midOK)
+	}
+}
+
 // 免卸载名单：名单内工具的大结果原样保留。
 func TestOffloadSkip(t *testing.T) {
 	state, err := core.NewAgent(

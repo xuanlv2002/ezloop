@@ -1,11 +1,6 @@
 /*
-Package filetools 提供四个原子工具：read_file / write_file / edit_file /
-terminal，通过 StartHook 注入，依赖 fs.FileSystem 最小接口。
-
-目录浏览与内容搜索不单独做工具——terminal 直接承担（dir/ls、
-grep/findstr），避免工具层重复实现。写类操作经 per-path 修改队列
-串行化，防止并发工具执行时对同一文件的写冲突。终端执行有真实
-副作用，生产组装建议配 approve 审批。
+Package filetools 提供文件读写、编辑、搜索与终端工具，经 StartHook 注入；
+依赖 fs.FileSystem 最小接口，写类操作按路径串行化，终端有真实副作用。
 */
 package filetools
 
@@ -64,11 +59,12 @@ func WithImageHandler(fn func(path, mime string) (text string, loadAsImage bool)
 
 func (h *Hook) Name() string { return "filetools" }
 
-/* OnStart 注册文件四件套工具（OS 提示走 Guide 声明）。 */
+/* OnStart 注册文件五件套工具（OS 提示走 Guide 声明）。 */
 func (h *Hook) OnStart(_ context.Context, state *types.LoopState) error {
 	state.Tools.Register(readTool(h))
 	state.Tools.Register(writeTool(h))
 	state.Tools.Register(editTool(h))
+	state.Tools.Register(grepTool(h))
 	state.Tools.Register(terminalTool(h.workDir))
 	return nil
 }
@@ -76,8 +72,8 @@ func (h *Hook) OnStart(_ context.Context, state *types.LoopState) error {
 /* Guide 声明系统环境提示：terminal 按当前 OS 的原生 shell 语法写命令（引擎组装期统一追加）。 */
 func (h *Hook) Guide() string {
 	return "# 系统环境\n当前操作系统：" + runtime.GOOS +
-		"（terminal 工具用系统原生 shell 执行，Windows 请写 cmd 语法 dir/type/findstr，" +
-		"类 Unix 请写 POSIX 语法 ls/cat/grep）"
+		"（terminal 工具用系统原生 shell 执行，Windows 请写 cmd 语法 dir/type，" +
+		"类 Unix 请写 POSIX 语法 ls/cat；文件内容搜索用内置 grep 工具，不要用 terminal 跑 findstr/grep）"
 }
 
 /*

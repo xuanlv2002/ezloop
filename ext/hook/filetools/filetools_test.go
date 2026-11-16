@@ -54,7 +54,7 @@ func TestFileToolsCore(t *testing.T) {
 		t.Fatalf("read: %q", out)
 	}
 	if out := runTool(t, hook, "edit_file",
-		`{"path":"app.go","old_text":"TODO","new_text":"DONE"}`); !strings.Contains(out, "replaced 1") {
+		`{"path":"app.go","edits":[{"old_text":"TODO","new_text":"DONE"}]}`); !strings.Contains(out, "#1 第 1 行：替换 1 处") {
 		t.Fatalf("edit: %q", out)
 	}
 	if out := runTool(t, hook, "read_file", `{"path":"app.go"}`); !strings.Contains(out, "DONE") {
@@ -85,6 +85,15 @@ func TestReadFilePaging(t *testing.T) {
 		t.Fatalf("window read leaked outside lines: %q", out)
 	}
 
+	// 行号按需开启：前缀「行号+Tab」，默认读取不带。
+	out = runTool(t, hook, "read_file", `{"path":"ten.txt","offset":3,"limit":2,"line_numbers":true}`)
+	if !strings.Contains(out, "3\tline3") || !strings.Contains(out, "4\tline4") || strings.Contains(out, "5\tline5") {
+		t.Fatalf("line numbers: %q", out)
+	}
+	if plain := runTool(t, hook, "read_file", `{"path":"ten.txt","offset":3,"limit":2}`); strings.Contains(plain, "\t") {
+		t.Fatalf("default read must not carry line numbers: %q", plain)
+	}
+
 	// 末页：窗口越过文件尾，读到结尾且无续读提示。
 	out = runTool(t, hook, "read_file", `{"path":"ten.txt","offset":8,"limit":100}`)
 	if !strings.Contains(out, "line10") || strings.Contains(out, "offset=") {
@@ -97,7 +106,7 @@ func TestReadFilePaging(t *testing.T) {
 	}
 }
 
-// 四件套恒注册：read_file / write_file / edit_file / terminal。
+// 五件套恒注册：read_file / write_file / edit_file / grep / terminal。
 func TestRegistersAllTools(t *testing.T) {
 	state, err := core.NewAgent(
 		testutil.Scripted(testutil.Text("x")),
@@ -106,10 +115,163 @@ func TestRegistersAllTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	for _, name := range []string{"read_file", "write_file", "edit_file", "terminal"} {
+	for _, name := range []string{"read_file", "write_file", "edit_file", "grep", "terminal"} {
 		if _, lerr := state.Tools.Lookup(name); lerr != nil {
 			t.Fatalf("%s must register: %v", name, lerr)
 		}
+	}
+	// schema 会直接进模型请求：非法 JSON 会让每次请求在本地 marshal 阶段失败。
+	for _, tool := range state.Tools.List() {
+		if s := tool.ArgsSchema(); len(s) > 0 && !json.Valid(s) {
+			t.Errorf("%s ArgsSchema 非法 JSON：%s", tool.Name(), s)
+		}
+	}
+}
+
+// edit_file：一次提交多处精确修改；整批原子；多处命中默认拒绝。
+func TestEditBatch(t *testing.T) {
+	hook := New(fs.NewLocal(t.TempDir()))
+	writeFile := func(path, content string) {
+		t.Helper()
+		args, _ := json.Marshal(map[string]string{"path": path, "content": content})
+		runTool(t, hook, "write_file", string(args))
+	}
+	readFile := func(path string) string {
+		t.Helper()
+		data, err := hook.fsys.Read(context.Background(), path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		return string(data)
+	}
+
+	writeFile("a.go", "func a() {\n\tvalue := 1\n\treturn value\n}\n")
+	out := runTool(t, hook, "edit_file", `{"path":"a.go","edits":[
+		{"old_text":"func a() {","new_text":"func b() {"},
+		{"old_text":"\tvalue := 1\n\treturn value","new_text":"\tvalue := 2\n\treturn value"}]}`)
+	if !strings.Contains(out, "#1 第 1 行：替换 1 处") || !strings.Contains(out, "#2 第 2-3 行：替换 1 处") {
+		t.Fatalf("batch edit: %q", out)
+	}
+	if got := readFile("a.go"); !strings.Contains(got, "func b()") ||
+		!strings.Contains(got, "\tvalue := 2") || !strings.Contains(got, "\treturn value") {
+		t.Fatalf("edited content: %q", got)
+	}
+
+	// 精确匹配的多行原文：返回起止行号。
+	if out := runTool(t, hook, "edit_file",
+		`{"path":"a.go","edits":[{"old_text":"func b() {\n\tvalue := 2","new_text":"func b() {\n\tvalue := 3"}]}`); !strings.Contains(out, "#1 第 1-2 行：替换 1 处") {
+		t.Fatalf("multi-line exact label: %q", out)
+	}
+
+	// 整批原子：第二处失败时第一处也不落盘。
+	before := readFile("a.go")
+	result, err := editTool(hook).Invoke(context.Background(), json.RawMessage(
+		`{"path":"a.go","edits":[{"old_text":"func b()","new_text":"func c()"},{"old_text":"missing","new_text":"x"}]}`))
+	if err == nil || !strings.Contains(err.Error(), "read_file") {
+		t.Fatalf("missing old_text must fail with re-read hint, got %q / %v", result, err)
+	}
+	if after := readFile("a.go"); after != before {
+		t.Fatalf("failed batch must not write: %q", after)
+	}
+
+	// 同一 old_text 多处命中：默认拒绝；显式 replace_all 才全部替换并返回行号。
+	writeFile("multi.txt", "x\nkeep\nx\n")
+	_, err = editTool(hook).Invoke(context.Background(), json.RawMessage(
+		`{"path":"multi.txt","edits":[{"old_text":"x","new_text":"y"}]}`))
+	if err == nil || !strings.Contains(err.Error(), "replace_all") {
+		t.Fatalf("multiple exact matches must fail: %v", err)
+	}
+	if out := runTool(t, hook, "edit_file",
+		`{"path":"multi.txt","edits":[{"old_text":"x","new_text":"y","replace_all":true}]}`); !strings.Contains(out, "#1 第 1、3 行：替换 2 处") {
+		t.Fatalf("multi occurrence label: %q", out)
+	}
+
+	// CRLF 文件：按 LF 写的 old_text 能命中，替换后整文件仍是 CRLF。
+	writeFile("crlf.txt", "a\r\n\tvalue := 1\r\nb\r\n")
+	if out := runTool(t, hook, "edit_file",
+		`{"path":"crlf.txt","edits":[{"old_text":"\tvalue := 1","new_text":"\tvalue := 2"}]}`); !strings.Contains(out, "#1 第 2 行：替换 1 处") {
+		t.Fatalf("crlf edit: %q", out)
+	}
+	if got := readFile("crlf.txt"); got != "a\r\n\tvalue := 2\r\nb\r\n" {
+		t.Fatalf("crlf not preserved: %q", got)
+	}
+
+	// 缩进/空白不一致不再模糊命中：报错让模型重新读原文。
+	writeFile("exact.txt", "\tif ok {\n\t\trun()\n\t}\n")
+	_, err = editTool(hook).Invoke(context.Background(), json.RawMessage(
+		`{"path":"exact.txt","edits":[{"old_text":"if ok {\n\trun()\n}","new_text":"if ok {\n\trun2()\n}"}]}`))
+	if err == nil || !strings.Contains(err.Error(), "read_file") {
+		t.Fatalf("whitespace mismatch must fail: %v", err)
+	}
+	if got := readFile("exact.txt"); got != "\tif ok {\n\t\trun()\n\t}\n" {
+		t.Fatalf("failed edit must not write: %q", got)
+	}
+}
+
+// edit schema：edits 与元素内 old_text/new_text 必填，replace_all 可选。
+func TestEditSchema(t *testing.T) {
+	schema := string(editTool(New(fs.NewLocal(t.TempDir()))).ArgsSchema())
+	if !strings.Contains(schema, `"edits":{"type":"array"`) ||
+		!strings.Contains(schema, `"required":["old_text","new_text"]`) ||
+		!strings.Contains(schema, `"required":["path","edits"]`) {
+		t.Fatalf("edit schema: %s", schema)
+	}
+}
+
+// grep：递归命中带行号；跳过依赖目录与二进制；include 过滤文件名。
+func TestGrepTool(t *testing.T) {
+	hook := New(fs.NewLocal(t.TempDir()))
+	writeFile := func(path, content string) {
+		t.Helper()
+		args, _ := json.Marshal(map[string]string{"path": path, "content": content})
+		runTool(t, hook, "write_file", string(args))
+	}
+	writeFile("src/app.ts", "const x = useDomainList()\n")
+	writeFile("src/deep/b.ts", "// useDomainList\n")
+	writeFile("src/c.md", "useDomainList\n")
+	writeFile("node_modules/pkg/index.js", "useDomainList\n")
+
+	out := runTool(t, hook, "grep", `{"pattern":"useDomainList"}`)
+	if !strings.Contains(out, "src/app.ts:1:") || !strings.Contains(out, "src/deep/b.ts:1:") ||
+		!strings.Contains(out, "命中 3 处 / 3 个文件") {
+		t.Fatalf("grep output: %q", out)
+	}
+	if strings.Contains(out, "node_modules") {
+		t.Fatalf("grep must skip node_modules: %q", out)
+	}
+
+	out = runTool(t, hook, "grep", `{"pattern":"useDomainList","include":"*.ts"}`)
+	if strings.Contains(out, "c.md") || !strings.Contains(out, "命中 2 处 / 2 个文件") {
+		t.Fatalf("include filter: %q", out)
+	}
+
+	out = runTool(t, hook, "grep", `{"pattern":"useDomainList","fixed_string":true,"max_results":1}`)
+	if !strings.Contains(out, "已达 1 条上限") {
+		t.Fatalf("max results: %q", out)
+	}
+
+	// 非 UTF-8 文件跳过并在摘要里报数：避免把「没搜到」当成「不存在」。
+	if err := hook.fsys.Write(context.Background(), "gbk.txt", []byte{0xC4, 0xE3, 0xBA, 0xC3}); err != nil {
+		t.Fatal(err)
+	}
+	out = runTool(t, hook, "grep", `{"pattern":"useDomainList"}`)
+	if !strings.Contains(out, "跳过 1 个非 UTF-8") {
+		t.Fatalf("skip summary: %q", out)
+	}
+
+	// CRLF 文件按去掉 \r 后的行匹配：$ 锚点仍有效。
+	writeFile("crlf.txt", "useDomainList\r\n")
+	out = runTool(t, hook, "grep", `{"pattern":"useDomainList$","path":"crlf.txt"}`)
+	if !strings.Contains(out, "crlf.txt:1:") {
+		t.Fatalf("crlf match: %q", out)
+	}
+
+	// 相邻命中共享上下文时，命中行仍标 ":"，不降级成上下文 "-"。
+	writeFile("adj.txt", "a\nhit\nhit\nb\n")
+	out = runTool(t, hook, "grep", `{"pattern":"hit","path":"adj.txt","context_lines":1}`)
+	if !strings.Contains(out, "adj.txt:2: hit") || !strings.Contains(out, "adj.txt:3: hit") ||
+		strings.Contains(out, "--") {
+		t.Fatalf("adjacent hits: %q", out)
 	}
 }
 
