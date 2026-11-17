@@ -50,11 +50,29 @@ type readArgs struct {
 	Note        string `json:"note,omitempty" desc:"读取图片时写明这次看图要确认什么；目的会随图片一起写入上下文。文本读取忽略"`
 }
 
+/* readMeta 是文本读取结果末尾的统一元信息（总行数/本次区间/续读 offset），warning 非空时带「!」提醒。 */
+func readMeta(total, from, to, next int, warning string) string {
+	read := ""
+	if from > 0 && to >= from {
+		read = fmt.Sprintf("%d-%d", from, to)
+	}
+	nextAttr := ""
+	if next > 0 {
+		nextAttr = fmt.Sprintf(` next_offset="%d"`, next)
+	}
+	warnAttr := ""
+	if warning != "" {
+		warnAttr = fmt.Sprintf(` warning="! %s"`, warning)
+	}
+	return fmt.Sprintf(`<read_file_meta total_lines="%d" read="%s"%s%s/>`, total, read, nextAttr, warnAttr)
+}
+
 /*
-readTool 按行分页读取：offset/limit 缺省时读前 2000 行；未读完时尾部
-标注剩余行数与续读 offset，模型据此翻页——大文件对模型不再是只有
-前半截的黑盒。行数之外另有整段字符上限（readMaxChars）：少数超长行
-文件（压缩 JS、单行大 JSON）行数不多但体量巨大，按字符截断兜底。
+readTool 按行分页读取：offset/limit 缺省时读前 2000 行；尾部固定附
+read_file_meta 元信息（总行数、本次行区间、续读 offset），模型据此
+翻页——大文件对模型不再是只有前半截的黑盒。行数之外另有整段字符
+上限（readMaxChars）：少数超长行文件（压缩 JS、单行大 JSON）行数不多
+但体量巨大，按字符截断兜底。
 图片文件走魔数判定的独立分支（文本分页对图片是乱码）：默认返回
 imageLoadedMark 标记，由本 hook 的 OnLoop 在回边转换为持久化的
 user 图片消息（全协议经 user+Images 通道携带）；装配 WithImageHandler
@@ -62,7 +80,7 @@ user 图片消息（全协议经 user+Images 通道携带）；装配 WithImageH
 */
 func readTool(h *Hook) types.Tool {
 	fsys := h.fsys
-	return types.NewTool("read_file", "按行读取文件内容（默认第 1 行起 2000 行，可指定 offset/limit 翻页；单次最多返回 200000 字符，超出截断；需要引用行号或交付 file://...#L128 锚点时设 line_numbers=true，每行前缀「行号+Tab」；图片文件作为图片消息进入上下文，不返回文本——用 note 写明这次看图要确认什么，目的会随图片一起写入上下文；二进制文件（pdf/ppt/压缩包/可执行等）暂不支持读取）",
+	return types.NewTool("read_file", "按行读取文件内容（默认第 1 行起 2000 行，可指定 offset/limit 翻页；单次最多返回 200000 字符，超出截断；需要引用行号或交付 file://...#L128 锚点时设 line_numbers=true，每行前缀「行号+Tab」；文本结果末尾固定附 <read_file_meta total_lines=\"总行数\" read=\"本次完整返回的起-止行\" next_offset=\"续读位置\" warning=\"!提醒\"/> 元信息（warning 为截断/越界等提醒），不是文件内容；图片文件作为图片消息进入上下文，不返回文本——用 note 写明这次看图要确认什么，目的会随图片一起写入上下文；二进制文件（pdf/ppt/压缩包/可执行等）暂不支持读取）",
 		func(ctx context.Context, in *readArgs) (string, error) {
 			if in.Path == "" {
 				return "", errors.New("path is required")
@@ -94,30 +112,33 @@ func readTool(h *Hook) types.Tool {
 				return fmt.Sprintf("read_file 当前暂不支持读取 %s 类型文件（%s）", kind, in.Path), nil
 			}
 			lines := splitLines(string(data))
-			if len(lines) == 0 {
-				return "", nil
+			total := len(lines)
+			if total == 0 {
+				return readMeta(0, 0, 0, 0, ""), nil
 			}
-			if in.Offset > len(lines) {
-				return fmt.Sprintf("offset %d 超出文件总行数 %d", in.Offset, len(lines)), nil
+			if in.Offset > total {
+				return readMeta(total, 0, 0, 0, fmt.Sprintf("offset %d 超出文件总行数 %d", in.Offset, total)), nil
 			}
-			end := min(in.Offset-1+in.Limit, len(lines))
-			window := lines[in.Offset-1 : end]
+			from, to := in.Offset, min(in.Offset-1+in.Limit, total)
+			window := lines[from-1 : to]
 			if in.LineNumbers {
 				window = slices.Clone(window)
 				for i := range window {
-					window[i] = fmt.Sprintf("%d\t%s", in.Offset+i, window[i])
+					window[i] = fmt.Sprintf("%d\t%s", from+i, window[i])
 				}
 			}
 			out := strings.Join(window, "\n")
+			warning := ""
 			if runes := utf8.RuneCountInString(out); runes > readMaxChars {
-				return string([]rune(out)[:readMaxChars]) +
-					fmt.Sprintf("\n[本次内容共 %d 字符，超出单次 %d 字符上限已截断；如需其余部分请分批次使用读取]", runes, readMaxChars), nil
+				out = string([]rune(out)[:readMaxChars])
+				to = from + strings.Count(out, "\n") - 1 // 只算完整行，截断行留给续读
+				warning = fmt.Sprintf("本次内容共 %d 字符，超出单次 %d 字符上限已截断；如需其余部分请分批次使用读取", runes, readMaxChars)
 			}
-			if end < len(lines) {
-				out += fmt.Sprintf("\n[已读第 %d-%d 行，共 %d 行；继续读取请设 offset=%d]",
-					in.Offset, end, len(lines), end+1)
+			next := 0
+			if to >= from && to < total {
+				next = to + 1
 			}
-			return out, nil
+			return out + "\n" + readMeta(total, from, to, next, warning), nil
 		})
 }
 
