@@ -74,9 +74,9 @@ func TestReadFilePaging(t *testing.T) {
 		t.Fatalf("write: %q", out)
 	}
 
-	// 窗口截取：第 3 行起 4 行。
+	// 窗口截取：第 3 行起 4 行；尾部统一给总行数、本次区间与续读 offset。
 	out := runTool(t, hook, "read_file", `{"path":"ten.txt","offset":3,"limit":4}`)
-	for _, want := range []string{"line3", "line6", "已读第 3-6 行，共 10 行", "offset=7"} {
+	for _, want := range []string{"line3", "line6", `total_lines="10"`, `read="3-6"`, `next_offset="7"`} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("window read missing %q: %q", want, out)
 		}
@@ -96,13 +96,38 @@ func TestReadFilePaging(t *testing.T) {
 
 	// 末页：窗口越过文件尾，读到结尾且无续读提示。
 	out = runTool(t, hook, "read_file", `{"path":"ten.txt","offset":8,"limit":100}`)
-	if !strings.Contains(out, "line10") || strings.Contains(out, "offset=") {
+	if !strings.Contains(out, "line10") || !strings.Contains(out, `read="8-10"`) || strings.Contains(out, "next_offset") {
 		t.Fatalf("last page: %q", out)
 	}
 
-	// offset 越界：明确告知总行数而非报错。
-	if out = runTool(t, hook, "read_file", `{"path":"ten.txt","offset":99}`); !strings.Contains(out, "总行数 10") {
+	// 整文件读完同样带元信息：区间覆盖全文件，无续读 offset、无 warning。
+	out = runTool(t, hook, "read_file", `{"path":"ten.txt"}`)
+	if !strings.Contains(out, `total_lines="10"`) || !strings.Contains(out, `read="1-10"`) ||
+		strings.Contains(out, "next_offset") || strings.Contains(out, "warning=") {
+		t.Fatalf("whole read: %q", out)
+	}
+
+	// offset 越界：警告也收进元信息标签，带「!」。
+	if out = runTool(t, hook, "read_file", `{"path":"ten.txt","offset":99}`); !strings.Contains(out, `warning="! offset 99 超出文件总行数 10"`) || !strings.Contains(out, `read=""`) {
 		t.Fatalf("out of range: %q", out)
+	}
+
+	// 空文件：只回元信息，total_lines=0。
+	if err := hook.fsys.Write(context.Background(), "empty.txt", nil); err != nil {
+		t.Fatal(err)
+	}
+	if out = runTool(t, hook, "read_file", `{"path":"empty.txt"}`); out != `<read_file_meta total_lines="0" read=""/>` {
+		t.Fatalf("empty file: %q", out)
+	}
+
+	// 超长单行：按字符截断；没有一行完整返回，区间留空。
+	long := []byte(strings.Repeat("x", readMaxChars+10))
+	if err := hook.fsys.Write(context.Background(), "long.txt", long); err != nil {
+		t.Fatal(err)
+	}
+	if out = runTool(t, hook, "read_file", `{"path":"long.txt"}`); !strings.Contains(out, `total_lines="1"`) ||
+		!strings.Contains(out, `read=""`) || !strings.Contains(out, `warning="! 本次内容共`) {
+		t.Fatalf("char truncation: %q", out[max(0, len(out)-200):])
 	}
 }
 
